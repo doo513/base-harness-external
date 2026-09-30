@@ -1,0 +1,11 @@
+{
+  "schema_version": "repository-validation-v1",
+  "scope": "Standalone external Develop Harness extracted from base_harness",
+  "environment": {"os": "WSL Linux", "python": "3.12", "bun": "1.4.0"},
+  "python": {"passed": 50, "skipped_opt_in": 1},
+  "live_namespace_sandbox": {"passed": 1, "checks": ["file contents", "unittest exit code", "environment sanitization", "workspace unchanged"]},
+  "sandbox_unit": {"passed": 3, "skipped_windows_only": 3},
+  "assurance": "local-advisory",
+  "ready": false,
+  "not_verified": ["Windows native execution", "commercial model task quality", "protected Ready certification", "standalone packaged command adapter"]
+}

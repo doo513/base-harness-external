@@ -1,0 +1,10 @@
+{
+  "inputs": ["main.py", "tests/test_main.py"],
+  "artifacts": ["main.py"],
+  "expectations": [
+    {"path": "main.py", "operator": "contains", "expected": "return a + b"}
+  ],
+  "test_commands": [
+    {"argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "timeout_seconds": 30}
+  ]
+}

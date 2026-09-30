@@ -1,0 +1,20 @@
+Base Harness External
+
+This repository is extracted from the external-Harness implementation in
+https://github.com/doo513/base_harness and its subsequent local working changes.
+The source checkout baseline was 4886682b0e11cdd54ceee349657929f61428a6e6;
+the external CLI was developed after that commit and is not claimed to exist
+in that commit unchanged.
+
+Reused components include the Python v5 measurement engine, canonical
+serialization/atomic-record/redaction helpers, the Develop domain manifest,
+and the strict Sandbox implementation. Original applicable copyright and
+license notices are preserved in LICENSE and individual files.
+
+The shared helpers were extracted into harness.common; the legacy verifier
+engine and Ready issuer are not included. The former agent Host, UI, provider
+gateway, account data and session databases are also not included.
+
+The reference Develop manifest describes its original runtime domain. This
+external adapter reuses its criteria metadata; it does not grant the original
+runtime's mutation or delegation permissions.
