@@ -1,0 +1,157 @@
+{
+  "schema_version": "closeout-evaluation-report-v1",
+  "suite_version": "closeout-evaluation-suite-v1",
+  "scope": "Common semantic conformance with a scripted caller and actual measurement engine",
+  "generated_at": "2026-09-30T13:24:33.926860+00:00",
+  "model_quality_evaluated": false,
+  "source_digest": "fb05667b977856cab216adaca4edd7b69cbf6919bb5e27b2c07b9227d15be11e",
+  "base_commit": "f4befffbf10d2911d6196f4844061451c6978a13",
+  "elapsed_seconds": 17.985721051998553,
+  "pytest_exit_code": 0,
+  "counts": {
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "missing": 0
+  },
+  "scenarios": [
+    {
+      "id": "measurement-assessment-gates",
+      "test": "test_advisory_failure_preserves_facts_and_does_not_become_gate",
+      "property": "A failed probe remains a fact while explicit gates and caller assessment stay independent",
+      "status": "passed",
+      "elapsed_seconds": 0.568
+    },
+    {
+      "id": "required-gate",
+      "test": "test_required_gate_cannot_be_overridden_by_model_assessment",
+      "property": "Caller satisfaction cannot override a failed required check",
+      "status": "passed",
+      "elapsed_seconds": 0.45
+    },
+    {
+      "id": "waiting-input",
+      "test": "test_unknown_parameters_have_durable_waiting_input_and_resume",
+      "property": "Incomplete domain preparation retains the Run and can be resumed",
+      "status": "passed",
+      "elapsed_seconds": 0.426
+    },
+    {
+      "id": "interpretation-history",
+      "test": "test_two_revisions_preserve_intent_policy_budget_and_history",
+      "property": "Two interpretation revisions preserve original intent and cumulative budget",
+      "status": "passed",
+      "elapsed_seconds": 0.202
+    },
+    {
+      "id": "immutable-gate",
+      "test": "test_pinned_gate_cannot_be_weakened_by_revision",
+      "property": "A revised interpretation cannot weaken a pinned gate",
+      "status": "passed",
+      "elapsed_seconds": 0.181
+    },
+    {
+      "id": "snapshot-binding",
+      "test": "test_new_snapshot_retains_old_measurements_without_reusing_gate_pass",
+      "property": "Old facts persist without passing gates for a new submitted subject",
+      "status": "passed",
+      "elapsed_seconds": 0.43
+    },
+    {
+      "id": "caller-provenance",
+      "test": "test_model_note_cannot_claim_measurement_provenance",
+      "property": "Caller notes and source labels cannot create verifier facts",
+      "status": "passed",
+      "elapsed_seconds": 0.19
+    },
+    {
+      "id": "host-reset",
+      "test": "test_structured_activity_and_logical_task_refs_survive_host_reset",
+      "property": "Activity, assumptions and task relationships survive a fresh caller instance",
+      "status": "passed",
+      "elapsed_seconds": 0.548
+    },
+    {
+      "id": "check-revision",
+      "test": "test_check_revision_keeps_old_facts_but_requires_new_measurement",
+      "property": "A new check revision cannot inherit the old revision's pass",
+      "status": "passed",
+      "elapsed_seconds": 0.662
+    },
+    {
+      "id": "partial-observation",
+      "test": "test_partial_measurements_survive_later_verifier_exception",
+      "property": "Earlier measurements survive a later adapter error",
+      "status": "passed",
+      "elapsed_seconds": 0.419
+    },
+    {
+      "id": "worker-kill",
+      "test": "test_real_worker_kill_retains_completed_measurement",
+      "property": "A real killed worker retains completed checkpoints without publishing final success",
+      "status": "passed",
+      "elapsed_seconds": 0.949
+    },
+    {
+      "id": "domain-port",
+      "test": "test_other_domain_module_can_be_injected_without_core_changes",
+      "property": "A trusted test module can replace Domain behavior without Core edits",
+      "status": "passed",
+      "elapsed_seconds": 0.404
+    },
+    {
+      "id": "strict-compatibility",
+      "test": "test_strict_policy_still_gates_registered_probes",
+      "property": "Explicit strict policy continues to require every registered check",
+      "status": "passed",
+      "elapsed_seconds": 0.444
+    },
+    {
+      "id": "budget-handoff",
+      "test": "test_budget_handoff_can_preserve_final_uncertainty",
+      "property": "A budget handoff can close with a final untrusted assessment and no invented evidence",
+      "status": "passed",
+      "elapsed_seconds": 0.204
+    },
+    {
+      "id": "v1-history",
+      "test": "test_v1_request_keys_and_records_remain_readable",
+      "property": "Old strict request fingerprints and stored records remain readable without automatic execution",
+      "status": "passed",
+      "elapsed_seconds": 0.191
+    },
+    {
+      "id": "run-reference-isolation",
+      "test": "test_foreign_measurement_cannot_be_cited_by_another_run",
+      "property": "One Run cannot cite another Run's verifier observations",
+      "status": "passed",
+      "elapsed_seconds": 0.512
+    },
+    {
+      "id": "cli-tool-roundtrip",
+      "test": "test_cli_tool_roundtrip_restores_exploration_and_closeout",
+      "property": "The existing agent-tool CLI can prepare, revise, measure, assess and close with separate meanings",
+      "status": "passed",
+      "elapsed_seconds": 5.69
+    },
+    {
+      "id": "activity-relationship",
+      "test": "test_hypothesis_decision_revision_and_reported_task_state_are_linked",
+      "property": "Hypotheses, observations, decisions, interpretation revisions and reported task states retain explicit relationships",
+      "status": "passed",
+      "elapsed_seconds": 0.493
+    },
+    {
+      "id": "measure-before-criteria",
+      "test": "test_exploratory_measurement_can_precede_final_criteria",
+      "property": "A known input scope can be measured while final criteria are unknown, then refined within the same Run",
+      "status": "passed",
+      "elapsed_seconds": 0.51
+    }
+  ],
+  "limitations": [
+    "Scripted caller conformance is not model task quality or comparative performance.",
+    "Worker-kill uses a controlled blocking adapter for the second stage.",
+    "The real namespace command test is a separate opt-in test."
+  ]
+}

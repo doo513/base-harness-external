@@ -8,8 +8,9 @@ import re
 import sqlite3
 
 from harness.measurement_v5 import decode
-from harness.common import canonical_bytes
-from .domain import HarnessError, require, validate_contract
+from harness.common import canonical_bytes, canonical_hash
+from .errors import HarnessError, require, validate_contract
+from . import semantics
 from .snapshots import no_links
 
 
@@ -53,6 +54,9 @@ class Store:
                 CREATE INDEX IF NOT EXISTS jobs_run ON jobs(run_id);
                 CREATE TABLE IF NOT EXISTS requests(scope TEXT NOT NULL, request_id TEXT NOT NULL,
                     fingerprint TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope, request_id));
+                CREATE TABLE IF NOT EXISTS measurements(observation_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL, job_id TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS measurements_run ON measurements(run_id);
             """)
         db.chmod(0o600)
         self._initialized = True
@@ -89,6 +93,9 @@ class Store:
         value = decode(row[0])
         require(value.get("run_id") == run_id, "STATE_CORRUPT", "Run identity mismatch")
         validate_contract(value["contract"])
+        # Additive projection of historical strict Runs; no processes are resumed.
+        semantics.ensure(value, projected=True)
+        semantics.validate_run(value)
         return value
 
     @staticmethod
@@ -121,3 +128,40 @@ class Store:
     @staticmethod
     def remember(connection, scope: str, request_id: str, fingerprint: str, response: dict):
         connection.execute("INSERT INTO requests VALUES(?,?,?,?)", (scope, request_id, fingerprint, canonical_bytes(response).decode()))
+
+    @staticmethod
+    def measurements(connection, run_id: str, job_id: str | None = None):
+        query = "SELECT data FROM measurements WHERE run_id=?"
+        args = [run_id]
+        if job_id:
+            query += " AND job_id=?"
+            args.append(job_id)
+        rows = connection.execute(query + " ORDER BY rowid", args)
+        result = []
+        for row in rows:
+            item = decode(row[0])
+            require(item.get("record_hash") == canonical_hash({k: v for k, v in item.items() if k != "record_hash"}),
+                    "OBSERVATION_CORRUPT", "Stored measurement digest mismatch")
+            observation = item["report"]["observation"]
+            require(item["run_id"] == run_id and observation["runId"] == run_id and observation["taskId"] == item["job_id"]
+                    and observation["observationId"] == item["observation_id"] and observation["subject"] == item["subject"]
+                    and observation["checkRef"] == item["check_ref"], "OBSERVATION_BINDING", "Stored measurement identity mismatch")
+            result.append(item)
+        return result
+
+    def checkpoint(self, connection, job_id, owner, item):
+        import time
+        job = self.job(connection, job_id)
+        run = self.run(connection, job["run_id"])
+        require(job["status"] == "running" and job.get("owner") == owner and run["status"] == "active"
+                and run["active_job"] == job_id and run["generation"] == job["generation"] and time.time() < job["deadline_at"],
+                "STALE_CHECKPOINT", "Worker no longer owns this measurement")
+        require(item["run_id"] == run["run_id"] and item["job_id"] == job_id and item["subject"] == job["candidate"]["subject"]
+                and any(check["ref"] == item["check_ref"] for check in job["checks"]), "CHECKPOINT_BINDING", "Measurement/check/subject binding mismatch")
+        observation = item["report"]["observation"]
+        require(observation["runId"] == run["run_id"] and observation["taskId"] == job_id and observation["subject"] == item["subject"]
+                and observation["checkRef"] == item["check_ref"] and observation["observationId"] == item["observation_id"],
+                "CHECKPOINT_BINDING", "Verifier response identity mismatch")
+        connection.execute("INSERT INTO measurements VALUES(?,?,?,?)", (item["observation_id"], item["run_id"], job_id, canonical_bytes(item).decode()))
+        job["completed_checks"] = job.get("completed_checks", 0) + 1
+        self.save_job(connection, job)

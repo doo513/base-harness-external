@@ -9,7 +9,7 @@ import sqlite3
 from harness.measurement_v5 import MeasurementProtocolError, decode
 from harness.common import canonical_bytes
 from . import API_VERSION, ASSURANCE
-from .domain import HarnessError
+from .errors import HarnessError
 from .service import Harness
 
 
@@ -29,19 +29,23 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
     start.add_argument("--workspace", required=True)
-    start.add_argument("--parameters", required=True, help="JSON file: inputs/artifacts/expectations/test_commands/profile")
+    start.add_argument("--parameters", help="JSON file: inputs/artifacts/expectations/test_commands/profile")
+    start.add_argument("--mode", choices=("strict", "exploratory"), default="strict")
+    start.add_argument("--required-check", action="append", default=[], help="initial explicit gate check ID; exploratory mode only")
+    start.add_argument("--constraints", help="optional JSON string array of original constraints")
     start.add_argument("--budget", help="optional JSON file with max_actions/max_verifications/timeout_seconds")
-    for name in ("observe", "submit", "verify", "status", "finish"):
+    for name in ("observe", "revise", "check", "assess", "submit", "verify", "status", "finish"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--run-id", required=True)
-        if name == "observe":
-            cmd.add_argument("--data", required=True, help="JSON file with an untrusted note and optional references")
+        if name in {"observe", "revise", "check", "assess"}:
+            cmd.add_argument("--data", required=True, help="JSON record/proposal for this operation")
         if name == "status":
             cmd.add_argument("--job-id")
             cmd.add_argument("--check-workspace", action="store_true")
         elif name == "finish":
             cmd.add_argument("--outcome", choices=("completed", "partial", "abandoned"), required=True)
             cmd.add_argument("--summary", default="")
+            cmd.add_argument("--assessment", help="optional final caller assessment JSON, including uncertainty and observation references")
         if name != "status":
             cmd.add_argument("--request-id", required=True, help="stable idempotency key; do not reuse for a different action")
     start.add_argument("--request-id", required=True)
@@ -50,9 +54,17 @@ def main(argv: list[str] | None = None) -> int:
         api = Harness(args.state_dir)
         if args.command == "start":
             result = api.start(domain_id=args.domain, goal=args.goal, workspace=args.workspace,
-                               parameters=load_json(args.parameters), budget=load_json(args.budget) if args.budget else None, request_id=args.request_id)
+                               parameters=load_json(args.parameters) if args.parameters else {}, budget=load_json(args.budget) if args.budget else None,
+                               request_id=args.request_id, mode=args.mode, required_checks=args.required_check,
+                               constraints=load_json(args.constraints) if args.constraints else None)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
+        elif args.command == "revise":
+            result = api.revise(args.run_id, load_json(args.data), args.request_id)
+        elif args.command == "check":
+            result = api.register_check(args.run_id, load_json(args.data), args.request_id)
+        elif args.command == "assess":
+            result = api.assess(args.run_id, load_json(args.data), args.request_id)
         elif args.command == "submit":
             result = api.submit(args.run_id, args.request_id)
         elif args.command == "verify":
@@ -60,7 +72,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             result = api.status(args.run_id, args.job_id, check_workspace=args.check_workspace)
         else:
-            result = api.finish(args.run_id, args.request_id, outcome=args.outcome, summary=args.summary)
+            result = api.finish(args.run_id, args.request_id, outcome=args.outcome, summary=args.summary,
+                                assessment=load_json(args.assessment) if args.assessment else None)
         print(canonical_bytes({"ok": True, **result}).decode())
         return 0
     except (HarnessError, MeasurementProtocolError, OSError, ValueError, sqlite3.Error) as error:

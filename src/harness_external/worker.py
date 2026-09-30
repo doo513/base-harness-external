@@ -14,9 +14,10 @@ import uuid
 
 from harness.measurement_v5 import MeasurementEngine, decode
 from harness.common import canonical_bytes, canonical_hash, redact
-from .domain import HarnessError, require
+from .errors import HarnessError, require
 from .snapshots import validate_candidate
 from .store import Store, identifier
+from . import semantics
 
 
 def clean_environment() -> dict:
@@ -135,10 +136,12 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
     monitor.start()
     result = None
     failure = None
+    reports = []
+    environment = {}
     try:
         require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
         require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
-        candidate = run["candidate"]
+        candidate = job["candidate"]
         payload = store.directory(run["run_id"]) / identifier(candidate["candidate_id"], "candidate") / "payload"
         validate_candidate(candidate, payload)
         environment = {"python": platform.python_version(), "platform": platform.platform(),
@@ -147,14 +150,16 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         def envelope(kind, request_id, body):
             return {"version": 5, "id": request_id, "runId": run["run_id"], "scopeId": job_id, "type": kind, "payload": body}
         engine.handle(envelope("run.open", "open-" + job_id, {"snapshotRoot": str(payload)}))
-        reports = []
-        for index, check in enumerate(run["contract"]["checks"]):
+        for index, check_record in enumerate(job["checks"]):
+            spec = dict(check_record["spec"])
+            check = dict(spec["parameters"])
             require(not abort.is_set() and time.time() < job["deadline_at"], "VERIFICATION_CANCELLED", "Worker no longer owns the verification")
             validate_candidate(candidate, payload)
             measurement = {"subject": candidate["subject"], "manifestJson": canonical_bytes(candidate["manifest"]).decode(),
                            "environmentHash": canonical_hash(environment)}
             provenance = None
             if check["kind"] == "command":
+                check["timeout_seconds"] = max(1, spec["timeoutMs"] // 1000)
                 capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())
                 parameters = {"kind": "command", "argv": check["argv"], "cwd": check["cwd"], "expectedExitCode": 0}
                 if capture["status"] in {"completed", "error"} and capture.get("capture"):
@@ -167,12 +172,20 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                 capabilities, timeout = ["execute"], check["timeout_seconds"] * 1000
             else:
                 parameters, capabilities, timeout = check, ["read"], 1000
-            spec = {"schemaVersion": "check-spec-v1", "author": "model", "executorId": "python-measurement",
-                    "supportedSubjects": ["candidate"], "parameters": parameters, "requiredCapabilities": capabilities, "timeoutMs": timeout}
-            spec["ref"] = {"id": "check:" + str(index), "revision": 1, "sha256": canonical_hash(spec)}
+            spec = {**spec, "parameters": parameters, "ref": check_record["ref"]}
             measurement["check"] = spec
             report = engine.handle(envelope("measure", job_id + ":" + str(index), measurement))
-            reports.append({"check_index": index, "observation": redact(report), "sandbox": provenance})
+            item = {"check_index": index, "observation": redact(report), "sandbox": provenance}
+            checkpoint = {"observation_id": report["observationId"], "run_id": run["run_id"], "job_id": job_id,
+                          "attempt": run["verification_attempts"], "check_id": check_record["check_id"], "check_ref": check_record["ref"],
+                          "subject": candidate["subject"], "candidate_hash": candidate["candidate_hash"], "contract_hash": job["contract_hash"],
+                          "interpretation_ref": job["interpretation_ref"], "policy_ref": job["policy_ref"],
+                          "comparison_status": semantics.comparison_status(report), "origin": "verifier", "trust": "locally_measured",
+                          "report": item}
+            checkpoint["record_hash"] = canonical_hash(checkpoint)
+            with store.transaction() as connection:
+                store.checkpoint(connection, job_id, owner, checkpoint)
+            reports.append(item)
         validate_candidate(candidate, payload)
         def passed(report):
             observation = report["observation"]["result"]
@@ -186,6 +199,10 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         result["result_hash"] = canonical_hash(result)
     except Exception as error:
         failure = {"code": getattr(error, "code", "VERIFICATION_ERROR"), "message": str(redact(str(error)))[:2000]}
+        if reports:
+            result = {"status": "incomplete", "candidate_hash": job["candidate_hash"], "contract_hash": job["contract_hash"],
+                      "environment": environment, "observations": reports, "finished_at": time.time()}
+            result["result_hash"] = canonical_hash(result)
     finally:
         done.set()
         monitor.join(timeout=2)

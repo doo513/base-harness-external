@@ -10,7 +10,7 @@ import uuid
 
 from harness.measurement_v5 import MAX_BYTES, _snapshot_bytes
 from harness.common import atomic_json, canonical_bytes, canonical_hash
-from .domain import HarnessError, relative_path, require
+from .errors import HarnessError, relative_path, require
 
 
 def no_links(path: Path) -> None:

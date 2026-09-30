@@ -2,6 +2,11 @@
 
 - This repository is an external verification tool, not an agent runtime.
 - Preserve the start/observe/submit/verify/status/finish JSON interface.
+- Optional revise/check/assess operations preserve interpretation/check history and caller assessment. Original intent, constraints and initial completion policy stay pinned within a Run.
+- Keep Measurement, Assessment, Gate results and Completion independent. Strict mode is an explicit compatibility policy; exploratory checks do not automatically become completion gates.
+- Core owns references, provenance and lifecycle. Domain modules own preparation and check normalization; do not add Develop success criteria to Core.
+- Persist each completed measurement before the next check. Partial checkpoints survive worker failure without becoming final success for another subject/revision.
+- Policy provenance is initial configuration, not authenticated human identity. Logical task roles/states and assessments remain caller claims.
 - Model notes and test expectations are untrusted inputs. Do not present them as independent evidence.
 - All results are local-advisory, unsigned, and ready=false. Do not add Ready claims without a protected verifier and independent consumer.
 - Keep Run state outside and independent of the caller's workspace/session.

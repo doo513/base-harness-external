@@ -1,0 +1,171 @@
+"""Revisioned data, provenance and gate binding. No model or domain decisions."""
+from __future__ import annotations
+
+import copy
+import re
+import time
+
+from harness.common import canonical_hash
+from .errors import fields, integer, require
+
+
+SEMANTIC_VERSION = "closeout-semantics-v1"
+
+
+def named(value: str) -> str:
+    require(isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", value)), "INVALID_REFERENCE", "Invalid logical record ID")
+    return value
+
+
+def record(record_id: str, revision: int, body: dict) -> dict:
+    return {**copy.deepcopy(body), "ref": {"id": record_id, "revision": revision, "sha256": canonical_hash(body)}}
+
+
+def validate(record: dict) -> None:
+    require(isinstance(record, dict) and isinstance(record.get("ref"), dict), "SEMANTIC_RECORD_CORRUPT", "Record has no revision reference")
+    ref = record["ref"]
+    require(set(ref) == {"id", "revision", "sha256"} and isinstance(ref["id"], str)
+            and type(ref["revision"]) is int and ref["revision"] > 0
+            and ref["sha256"] == canonical_hash({k: v for k, v in record.items() if k != "ref"}),
+            "SEMANTIC_RECORD_CORRUPT", "Record digest mismatch")
+
+
+def check_record(run_id: str, check_id: str, revision: int, parameters: dict, interpretation_ref: dict, *, origin="caller_proposal") -> dict:
+    named(check_id)
+    parameters = copy.deepcopy(parameters)
+    spec = {"schemaVersion": "check-spec-v1", "author": "model", "executorId": "python-measurement",
+            "supportedSubjects": ["candidate"], "parameters": copy.deepcopy(parameters),
+            "requiredCapabilities": ["execute"] if parameters["kind"] == "command" else ["read"],
+            "timeoutMs": parameters.pop("timeout_seconds", 30) * 1000 if parameters["kind"] == "command" else 1000}
+    # timeout_seconds is operational metadata, not a v5 command parameter.
+    spec["parameters"].pop("timeout_seconds", None)
+    return record("check:" + run_id + ":" + check_id, revision,
+                  {"check_id": check_id, "active": True, "origin": origin, "trust": "untrusted", "interpretation_ref": interpretation_ref, "spec": spec})
+
+
+def check_equivalent(existing: dict, parameters: dict) -> bool:
+    normalized = copy.deepcopy(parameters)
+    timeout = normalized.pop("timeout_seconds", 30) * 1000 if normalized["kind"] == "command" else 1000
+    return existing["spec"]["parameters"] == normalized and existing["spec"]["timeoutMs"] == timeout
+
+
+def ensure(run: dict, *, mode="strict", required_checks=None, parameters=None, questions=None, domain_revision=None, projected=False, initial_intent=None) -> None:
+    if run.get("semantic_schema_version"):
+        return
+    run_id, contract = run["run_id"], run["contract"]
+    params = parameters if parameters is not None else {
+        "inputs": contract["inputs"], "artifacts": contract["artifacts"], "profile": contract["profile"],
+        "expectations": [{k: v for k, v in c.items() if k != "kind"} for c in contract["checks"] if c["kind"] == "file"],
+        "test_commands": [{k: v for k, v in c.items() if k not in {"kind", "expectedExitCode"}} for c in contract["checks"] if c["kind"] == "command"],
+    }
+    intent = initial_intent or record("intent:" + run_id, 1, {"original_goal": run["goal"], "domain_id": contract["domain_id"], "constraints": []})
+    interpretation = record("interpretation:" + run_id, 1, {"goal_summary": run["goal"], "parameters": params,
+                           "assumptions": [], "open_questions": questions or [], "origin": "caller", "trust": "untrusted"})
+    checks, ids = [], {"file": 0, "command": 0}
+    for item in contract["checks"]:
+        key = item["kind"] + "-" + str(ids[item["kind"]])
+        ids[item["kind"]] += 1
+        checks.append(check_record(run_id, key, 1, copy.deepcopy(item), interpretation["ref"]))
+    gate_ids = [item["check_id"] for item in checks] if mode == "strict" else list(required_checks or [])
+    for key in gate_ids:
+        named(key)
+    gate_ids = list(dict.fromkeys(gate_ids))
+    policy = record("policy:" + run_id, 1, {"mode": mode, "required_check_ids": gate_ids,
+                    "origin": "initial_configuration", "domain_revision": domain_revision or contract["domain_revision"],
+                    "action": "finish_completed", "ready_attestation": False,
+                    "rule": "all_registered_checks" if mode == "strict" else "explicit_gates"})
+    run.update(semantic_schema_version=SEMANTIC_VERSION, intent=intent, policy=policy,
+               semantic_projection_origin="legacy_strict_projection" if projected else "native",
+               domain_module={"id": contract["domain_id"], "revision": domain_revision or contract["domain_revision"]},
+               interpretations=[interpretation], check_records=checks, assessments=[], activity=[], logical_tasks=[],
+               gate_bindings={item["check_id"]: item["ref"] for item in checks if item["check_id"] in gate_ids},
+               domain_questions=questions or [])
+    run["domain_preparation"] = {"status": "needs_input" if questions else "proceed",
+                                 "available_operations": [] if questions else ["submit", "verify", "finish_completed"]}
+
+
+def validate_run(run):
+    validate(run["intent"])
+    validate(run["policy"])
+    require(run["intent"]["original_goal"] == run["goal"], "INTENT_CHANGED", "Original goal is immutable")
+    require(run["contract"]["original_goal"] == run["goal"] and run["contract"]["domain_id"] == run["intent"]["domain_id"],
+            "INTENT_CHANGED", "Compiled contract changed the original intent identity")
+    for collection in ("interpretations", "check_records", "assessments", "activity"):
+        for item in run[collection]:
+            validate(item)
+    require([item["ref"]["revision"] for item in run["interpretations"]] == list(range(1, len(run["interpretations"]) + 1)),
+            "INTERPRETATION_CORRUPT", "Interpretation revision history is not consecutive")
+    for key, ref in run["gate_bindings"].items():
+        require(any(item["check_id"] == key and item["ref"] == ref for item in run["check_records"]), "GATE_BINDING_CORRUPT", "Gate references unknown check revision")
+
+
+def current_checks(run):
+    latest = {}
+    for item in run["check_records"]:
+        latest[item["check_id"]] = item
+    return [item for item in latest.values() if item.get("active", True)]
+
+
+def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
+    existing = {item["check_id"]: item for item in current_checks(run)}
+    numbers = {"file": 0, "command": 0}
+    seen = set()
+    for item in compiled_checks:
+        key = item["kind"] + "-" + str(numbers[item["kind"]])
+        numbers[item["kind"]] += 1
+        seen.add(key)
+        old = existing.get(key)
+        if old and check_equivalent(old, item):
+            continue
+        require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate check cannot be weakened or changed by interpretation revision")
+        require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
+        created = check_record(run["run_id"], key, old["ref"]["revision"] + 1 if old else 1, copy.deepcopy(item), interpretation_ref)
+        run["check_records"].append(created)
+        if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks":
+            run["gate_bindings"][key] = created["ref"]
+    require(set(run["gate_bindings"]) <= seen | {key for key in existing if not key.startswith(("file-", "command-"))},
+            "GATE_POLICY_CHANGED", "Revision removed a required gate check")
+    for key, previous in existing.items():
+        if key.startswith(("file-", "command-")) and key not in seen:
+            require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
+            retired = {k: copy.deepcopy(v) for k, v in previous.items() if k != "ref"}
+            retired["active"] = False
+            run["check_records"].append(record(previous["ref"]["id"], previous["ref"]["revision"] + 1, retired))
+
+
+def gates(run, measurements):
+    candidate = run.get("candidate")
+    checks = {item["check_id"]: item for item in current_checks(run)}
+    keys = set(run["policy"]["required_check_ids"]) | set(run["gate_bindings"])
+    results = []
+    for key in sorted(keys):
+        ref = run["gate_bindings"].get(key)
+        state, observed_id = "not_defined" if ref is None else "not_measured", None
+        if ref and key in checks and checks[key]["ref"] != ref:
+            state = "binding_mismatch"
+        elif ref and candidate:
+            matching = [item for item in measurements if item["check_ref"] == ref and item["subject"] == candidate["subject"]]
+            if matching:
+                latest = matching[-1]
+                state, observed_id = latest["comparison_status"], latest["observation_id"]
+        results.append({"check_id": key, "check_ref": ref, "status": state, "observation_id": observed_id,
+                        "action": run["policy"].get("action", "finish_completed"),
+                        "origin": run["policy"]["origin"], "policy_ref": run["policy"]["ref"]})
+    return {"status": "not_required" if not results else "passed" if all(r["status"] == "passed" for r in results) else "unsatisfied", "results": results}
+
+
+def comparison_status(report):
+    result = report["result"]
+    if result["execution"] != "completed":
+        return "incomplete"
+    findings = [item for item in result.get("findings", []) if item.get("kind") == "comparison"]
+    return "passed" if findings and all(item.get("result") == "pass" for item in findings) else "failed"
+
+
+def assessment_view(run):
+    interpretation = run["interpretations"][-1]["ref"]
+    subject = run["candidate"]["subject"] if run.get("candidate") else None
+    for item in reversed(run["assessments"]):
+        if item["interpretation_ref"] == interpretation and item["subject"] == subject:
+            return item
+    return {"status": "not_assessed", "origin": "caller", "trust": "untrusted", "summary": "", "uncertainties": [], "cited_observation_ids": []}

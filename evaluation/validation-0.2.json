@@ -1,0 +1,47 @@
+{
+  "schema_version": "closeout-common-track-validation-v1",
+  "version": "0.2.0",
+  "review_basis": "Closeout_설계의미_보존_재검토.md",
+  "base_commit": "f4befffbf10d2911d6196f4844061451c6978a13",
+  "source_digest": "fb05667b977856cab216adaca4edd7b69cbf6919bb5e27b2c07b9227d15be11e",
+  "source_state": "local working changes",
+  "common_scope": [
+    "Domain port",
+    "Intent and initial policy pinning",
+    "Interpretation/check revision history",
+    "Structured caller activity and assessment",
+    "Explicit completion gates",
+    "Per-check durable measurement checkpoints",
+    "Separated completion and termination records",
+    "v1 request/history compatibility"
+  ],
+  "checks": {
+    "python_suite": {
+      "passed": 69,
+      "skipped_opt_in": 1
+    },
+    "semantic_scenarios": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "missing": 0
+    },
+    "real_namespace_sandbox": {
+      "passed": 1
+    },
+    "editable_cli_version": "0.2.0",
+    "whitespace": "passed"
+  },
+  "evaluation_report": "evaluation/latest.json",
+  "assurance": "local-advisory",
+  "ready": false,
+  "model_quality_evaluated": false,
+  "limitations": [
+    "No commercial model quality or comparative speed benchmark.",
+    "Worker interruption conformance uses a controlled second-stage adapter.",
+    "No protected Ready/signature mode.",
+    "Windows-native execution is not verified.",
+    "No new Develop success criteria or agent scheduling/runtime was added."
+  ],
+  "caller_transport": "Existing CLI tools; MCP client/adapter remains the calling agent's integration responsibility."
+}
