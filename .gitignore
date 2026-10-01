@@ -22,4 +22,5 @@ node_modules/
 *.key
 runs/
 sandbox-state/
+harness-client.local.json
 .DS_Store

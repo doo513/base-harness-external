@@ -67,3 +67,19 @@ def test_source_digest_covers_tests_but_excludes_generated_reports(evaluator, tm
     assert evaluator.source_digest(tmp_path) == before
     test.write_text("assert False\n")
     assert evaluator.source_digest(tmp_path) != before
+
+
+def test_source_digest_covers_distributed_skill_and_installer(evaluator, tmp_path):
+    (tmp_path / "evaluation").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\n")
+    (tmp_path / "evaluation/closeout-scenarios.json").write_text("{}")
+    (tmp_path / "skills/harness-workflow/scripts").mkdir(parents=True)
+    (tmp_path / "scripts").mkdir()
+    for relative in ("skills/harness-workflow/SKILL.md", "skills/harness-workflow/scripts/harness_client.py",
+                     "scripts/install-skill.py", "INSTALL.md"):
+        before = evaluator.source_digest(tmp_path)
+        (tmp_path / relative).write_text("initial")
+        assert evaluator.source_digest(tmp_path) != before
+        before = evaluator.source_digest(tmp_path)
+        (tmp_path / relative).write_text("changed")
+        assert evaluator.source_digest(tmp_path) != before

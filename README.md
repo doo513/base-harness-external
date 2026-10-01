@@ -4,6 +4,12 @@ A model-free Develop Harness called by an existing agent through a JSON CLI.
 It owns independent Run state, pinned contracts, snapshots and verification jobs.
 It does not include a model gateway, agent Host, UI or MCP server.
 
+The repository also ships a portable [harness-workflow Skill](skills/harness-workflow/SKILL.md)
+and a small caller helper. Follow [Skill + Harness installation](INSTALL.md) to
+configure durable state and install the Skill into an existing Host. The Skill
+guides the caller; Domain/Core remain the source of contract and lifecycle rules.
+There is no second agent loop or Run database in the helper.
+
 For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.

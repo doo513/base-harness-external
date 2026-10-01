@@ -1,0 +1,212 @@
+{
+  "schema_version": "skill-forward-validation-v1",
+  "scope": "Independent Host-agent execution of an isolated integer formatter task using the bundled Skill and caller helper",
+  "model_task_execution": true,
+  "model_comparison": false,
+  "automatic_host_skill_discovery_tested": false,
+  "run_id": "run_a6bfbb8419a44385b03f872fc3b72bd5",
+  "phases": [
+    {
+      "phase": "baseline",
+      "job_id": "job_f7954b77cdc2496490e9ce49f464de73",
+      "candidate_hash": "554370181bf20cabdd17e29eb107bbfd22dd11e88ec1243b224efeab0dfc9e99",
+      "check_set_hash": "828f374e5f67ee0962bc4eaf15a5b7776962e39117215b53e989a0118c0a0b3e",
+      "check_id": "domain.behavior",
+      "observation_id": "observation:job_f7954b77cdc2496490e9ce49f464de73:3",
+      "record_hash": "25741d8b3ad8be39573920646d43ba6247ecb976147587429d2444680ec5c4a3",
+      "comparison_status": "failed",
+      "origin": "verifier",
+      "sandbox": {
+        "backend": "namespace",
+        "containment": "user_mount_pid_net_namespace",
+        "inputBytes": 3919,
+        "kernel": "6.18.33.2-microsoft-standard-WSL2",
+        "maxOutputBytes": 262144,
+        "maxProcesses": 64,
+        "memoryMiB": 1024,
+        "network": "loopback_only",
+        "state": "completed",
+        "timeoutMs": 30000
+      },
+      "result": {
+        "execution": "completed",
+        "findings": [
+          {
+            "kind": "value",
+            "name": "argv",
+            "observed": [
+              "python3",
+              "-B",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "tests",
+              "-v"
+            ]
+          },
+          {
+            "kind": "value",
+            "name": "cwd",
+            "observed": "."
+          },
+          {
+            "kind": "value",
+            "name": "startedAt",
+            "observed": "2026-10-01T08:44:59.261Z"
+          },
+          {
+            "kind": "value",
+            "name": "finishedAt",
+            "observed": "2026-10-01T08:44:59.519Z"
+          },
+          {
+            "kind": "value",
+            "name": "stdout",
+            "observed": ""
+          },
+          {
+            "kind": "value",
+            "name": "stderr",
+            "observed": "test_does_not_implicitly_coerce_objects (test_amount.FormatAmountTests.test_does_not_implicitly_coerce_objects) ... FAIL\ntest_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) ... \n  test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1000) ... FAIL\n  test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1001) ... FAIL\n  test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=999999) ... FAIL\n  test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1000000) ... FAIL\ntest_integer_subclass (test_amount.FormatAmountTests.test_integer_subclass) ... FAIL\ntest_integers_beyond_machine_word_size (test_amount.FormatAmountTests.test_integers_beyond_machine_word_size) ... FAIL\ntest_multiple_groups (test_amount.FormatAmountTests.test_multiple_groups) ... FAIL\ntest_negative_integers (test_amount.FormatAmountTests.test_negative_integers) ... \n  test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1000) ... FAIL\n  test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1001) ... FAIL\n  test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1234567890) ... FAIL\ntest_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) ... \n  test_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) (value=False) ... FAIL\n  test_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) (value=True) ... FAIL\ntest_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) ... \n  test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=0.0) ... FAIL\n  test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=1000.0) ... FAIL\n  test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=-1.5) ... FAIL\n  test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=inf) ... FAIL\n  test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=nan) ... FAIL\ntest_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) ... \n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='1000') ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='-1,000') ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='') ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=b'1000') ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=None) ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=[]) ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value={}) ... FAIL\n  test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=<object object at 0x7af4ab320990>) ... FAIL\ntest_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) ... \n  test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=Decimal('1000')) ... FAIL\n  test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=Fraction(1000, 1)) ... FAIL\n  test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=(1000+0j)) ... FAIL\ntest_small_positive_integers (test_amount.FormatAmountTests.test_small_positive_integers) ... ok\ntest_zero (test_amount.FormatAmountTests.test_zero) ... ok\n\n======================================================================\nFAIL: test_does_not_implicitly_coerce_objects (test_amount.FormatAmountTests.test_does_not_implicitly_coerce_objects)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 95, in test_does_not_implicitly_coerce_objects\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1000)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 28, in test_group_boundaries\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '1000' != '1,000'\n- 1000\n+ 1,000\n?  +\n\n\n======================================================================\nFAIL: test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1001)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 28, in test_group_boundaries\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '1001' != '1,001'\n- 1001\n+ 1,001\n?  +\n\n\n======================================================================\nFAIL: test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=999999)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 28, in test_group_boundaries\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '999999' != '999,999'\n- 999999\n+ 999,999\n?    +\n\n\n======================================================================\nFAIL: test_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) (value=1000000)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 28, in test_group_boundaries\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '1000000' != '1,000,000'\n- 1000000\n+ 1,000,000\n?  +   +\n\n\n======================================================================\nFAIL: test_integer_subclass (test_amount.FormatAmountTests.test_integer_subclass)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 61, in test_integer_subclass\n    self.assertEqual(format_amount(Amount(1234)), \"1,234\")\nAssertionError: '1234' != '1,234'\n- 1234\n+ 1,234\n?  +\n\n\n======================================================================\nFAIL: test_integers_beyond_machine_word_size (test_amount.FormatAmountTests.test_integers_beyond_machine_word_size)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 48, in test_integers_beyond_machine_word_size\n    self.assertEqual(\nAssertionError: '123456789012345678901234567890' != '123,456,789,012,345,678,901,234,567,890'\n- 123456789012345678901234567890\n+ 123,456,789,012,345,678,901,234,567,890\n?    +   +   +   +   +   +   +   +   +\n\n\n======================================================================\nFAIL: test_multiple_groups (test_amount.FormatAmountTests.test_multiple_groups)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 33, in test_multiple_groups\n    self.assertEqual(result, \"1,234,567,890\")\nAssertionError: '1234567890' != '1,234,567,890'\n- 1234567890\n+ 1,234,567,890\n?  +   +   +\n\n\n======================================================================\nFAIL: test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1000)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 45, in test_negative_integers\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '-1000' != '-1,000'\n- -1000\n+ -1,000\n?   +\n\n\n======================================================================\nFAIL: test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1001)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 45, in test_negative_integers\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '-1001' != '-1,001'\n- -1001\n+ -1,001\n?   +\n\n\n======================================================================\nFAIL: test_negative_integers (test_amount.FormatAmountTests.test_negative_integers) (value=-1234567890)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 45, in test_negative_integers\n    self.assertEqual(format_amount(value), expected)\nAssertionError: '-1234567890' != '-1,234,567,890'\n- -1234567890\n+ -1,234,567,890\n?   +   +   +\n\n\n======================================================================\nFAIL: test_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) (value=False)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 66, in test_rejects_bool\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) (value=True)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 66, in test_rejects_bool\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=0.0)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 72, in test_rejects_floats_even_when_integral\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=1000.0)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 72, in test_rejects_floats_even_when_integral\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=-1.5)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 72, in test_rejects_floats_even_when_integral\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=inf)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 72, in test_rejects_floats_even_when_integral\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) (value=nan)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 72, in test_rejects_floats_even_when_integral\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='1000')\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='-1,000')\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value='')\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=b'1000')\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=None)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=[])\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value={})\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) (value=<object object at 0x7af4ab320990>)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 84, in test_rejects_non_numeric_values\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=Decimal('1000'))\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 78, in test_rejects_other_numeric_types\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=Fraction(1000, 1))\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 78, in test_rejects_other_numeric_types\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n======================================================================\nFAIL: test_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) (value=(1000+0j))\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_amount.py\", line 78, in test_rejects_other_numeric_types\n    with self.assertRaises(TypeError):\nAssertionError: TypeError not raised\n\n----------------------------------------------------------------------\nRan 12 tests in 0.012s\n\nFAILED (failures=29)\n"
+          },
+          {
+            "expected": 0,
+            "kind": "comparison",
+            "name": "exit_code",
+            "observed": 1,
+            "operator": "equals",
+            "result": "fail"
+          }
+        ]
+      },
+      "limitations": [
+        "Measurements do not establish that the user's overall goal is satisfied.",
+        "Check author: model; execution does not establish test validity or independence.",
+        "Environment identity and dependency manifests are supplied by the authenticated Host.",
+        "Process exit and streams were captured by the runtime execution adapter; Python did not independently execute the command.",
+        "The subject manifest alone does not attest the command's complete input or environment closure."
+      ]
+    },
+    {
+      "phase": "final",
+      "job_id": "job_11b56ec5cc0c428190a6294264159cfb",
+      "candidate_hash": "febfcbcdc322ab0dd61b06be783d488f641555c9e2e001012b3784c09fc4b728",
+      "check_set_hash": "828f374e5f67ee0962bc4eaf15a5b7776962e39117215b53e989a0118c0a0b3e",
+      "check_id": "domain.behavior",
+      "observation_id": "observation:job_11b56ec5cc0c428190a6294264159cfb:3",
+      "record_hash": "1bc3603f4ee4238b4e5c9bcd7f4b8e770650bdb42d2a6f22a4408310e1142874",
+      "comparison_status": "passed",
+      "origin": "verifier",
+      "sandbox": {
+        "backend": "namespace",
+        "containment": "user_mount_pid_net_namespace",
+        "inputBytes": 4169,
+        "kernel": "6.18.33.2-microsoft-standard-WSL2",
+        "maxOutputBytes": 262144,
+        "maxProcesses": 64,
+        "memoryMiB": 1024,
+        "network": "loopback_only",
+        "state": "completed",
+        "timeoutMs": 30000
+      },
+      "result": {
+        "execution": "completed",
+        "findings": [
+          {
+            "kind": "value",
+            "name": "argv",
+            "observed": [
+              "python3",
+              "-B",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "tests",
+              "-v"
+            ]
+          },
+          {
+            "kind": "value",
+            "name": "cwd",
+            "observed": "."
+          },
+          {
+            "kind": "value",
+            "name": "startedAt",
+            "observed": "2026-10-01T08:45:56.851Z"
+          },
+          {
+            "kind": "value",
+            "name": "finishedAt",
+            "observed": "2026-10-01T08:45:57.056Z"
+          },
+          {
+            "kind": "value",
+            "name": "stdout",
+            "observed": ""
+          },
+          {
+            "kind": "value",
+            "name": "stderr",
+            "observed": "test_does_not_implicitly_coerce_objects (test_amount.FormatAmountTests.test_does_not_implicitly_coerce_objects) ... ok\ntest_group_boundaries (test_amount.FormatAmountTests.test_group_boundaries) ... ok\ntest_integer_subclass (test_amount.FormatAmountTests.test_integer_subclass) ... ok\ntest_integers_beyond_machine_word_size (test_amount.FormatAmountTests.test_integers_beyond_machine_word_size) ... ok\ntest_multiple_groups (test_amount.FormatAmountTests.test_multiple_groups) ... ok\ntest_negative_integers (test_amount.FormatAmountTests.test_negative_integers) ... ok\ntest_rejects_bool (test_amount.FormatAmountTests.test_rejects_bool) ... ok\ntest_rejects_floats_even_when_integral (test_amount.FormatAmountTests.test_rejects_floats_even_when_integral) ... ok\ntest_rejects_non_numeric_values (test_amount.FormatAmountTests.test_rejects_non_numeric_values) ... ok\ntest_rejects_other_numeric_types (test_amount.FormatAmountTests.test_rejects_other_numeric_types) ... ok\ntest_small_positive_integers (test_amount.FormatAmountTests.test_small_positive_integers) ... ok\ntest_zero (test_amount.FormatAmountTests.test_zero) ... ok\n\n----------------------------------------------------------------------\nRan 12 tests in 0.001s\n\nOK\n"
+          },
+          {
+            "expected": 0,
+            "kind": "comparison",
+            "name": "exit_code",
+            "observed": 0,
+            "operator": "equals",
+            "result": "pass"
+          }
+        ]
+      },
+      "limitations": [
+        "Measurements do not establish that the user's overall goal is satisfied.",
+        "Check author: model; execution does not establish test validity or independence.",
+        "Environment identity and dependency manifests are supplied by the authenticated Host.",
+        "Process exit and streams were captured by the runtime execution adapter; Python did not independently execute the command.",
+        "The subject manifest alone does not attest the command's complete input or environment closure."
+      ]
+    }
+  ],
+  "completion": {
+    "resolution": {
+      "assessment_status": "satisfied",
+      "certification": "not_issued",
+      "display_status": "closed_checks_passed",
+      "gate_status": "passed",
+      "lifecycle": "closed",
+      "measurement_status": "passed",
+      "policy_approval": {
+        "authenticated_by": null,
+        "claimed_reference": null,
+        "status": "not_provided"
+      },
+      "requested_outcome": "completed"
+    },
+    "candidate_hash": "febfcbcdc322ab0dd61b06be783d488f641555c9e2e001012b3784c09fc4b728",
+    "contract_hash": "66e0d2faebdab10abb616fcc9b3b703b35f6ce56c056b98d7138f9de74c1fa75",
+    "check_set_hash": "828f374e5f67ee0962bc4eaf15a5b7776962e39117215b53e989a0118c0a0b3e",
+    "record_hash": "bfc2c7253baf51520f45d711f704613b5e59d62823a3513258e990bedd9c115a",
+    "finished_at": 1790844427.4543042,
+    "ready": false,
+    "signature": null,
+    "assurance": "local-advisory",
+    "unresolved_work": []
+  },
+  "observed_usability_friction": [
+    "Strict policy rejects explicit required_check or deferred_check arrays.",
+    "Develop requires nonempty file expectations.",
+    "Each declared artifact needs a file expectation and must be in inputs."
+  ],
+  "followup": "Clarified these existing Domain/API requirements in the distributed protocol reference after the independent pass; no Core changes.",
+  "limitations": [
+    "Explicit Skill invocation was evaluated; automatic discovery in every Host was not.",
+    "This is one model-agent task, not commercial-model or performance benchmarking.",
+    "Initial forward execution preceded the final reference clarifications; deterministic caller tests cover the final helper.",
+    "Paths/configuration and the disposable task workspace are intentionally not published.",
+    "Facts are local advisory and unsigned, not protected certification."
+  ]
+}

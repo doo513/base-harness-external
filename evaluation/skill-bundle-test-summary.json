@@ -1,0 +1,32 @@
+{
+  "regression": {
+    "tests": 144,
+    "failed": 0,
+    "skipped": 2,
+    "passed": 142
+  },
+  "live": {
+    "tests": 3,
+    "failed": 0,
+    "skipped": 0,
+    "passed": 3
+  },
+  "common_scenarios": {
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0,
+    "missing": 0
+  },
+  "tested_tree_digest": "86895d31bf329f4ab7b8ff55d30afac9f648023aeb42dcde0cbcea1e2e0a4b22",
+  "skill_format_validation": "passed (system Python and skill-creator quick_validate.py)",
+  "sandbox_adapter_tests": {
+    "passed": 3,
+    "skipped": 3,
+    "failed": 0
+  },
+  "limitations": [
+    "Default regression skips two opt-in Sandbox cases; the opt-in selection was run separately.",
+    "Bun suite skips three platform-specific cases in this Linux invocation.",
+    "Independent Skill execution is documented separately, not treated as model performance benchmarking."
+  ]
+}

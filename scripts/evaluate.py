@@ -14,11 +14,12 @@ import xml.etree.ElementTree as ET
 
 
 def source_digest(repository):
-    sources = sorted(path for folder in ("src", "runtime", "tests", "scripts")
+    sources = sorted(path for folder in ("src", "runtime", "tests", "scripts", "skills")
                      for path in (repository / folder).rglob("*")
-                     if path.is_file() and (path.suffix in {".py", ".json", ".ts"} or path.name == "harness-tool"))
+                     if path.is_file() and (path.suffix in {".py", ".json", ".ts", ".md"} or path.name == "harness-tool"))
     sources += sorted((repository / ".github/workflows").glob("*.yml"))
     sources += [repository / "evaluation" / "closeout-scenarios.json", repository / "pyproject.toml"]
+    sources += [repository / name for name in ("README.md", "INSTALL.md", "CALLER_USAGE.md") if (repository / name).is_file()]
     return hashlib.sha256(json.dumps({str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest()
                                      for path in sources}, sort_keys=True).encode()).hexdigest()
 
@@ -52,7 +53,7 @@ def main():
         results = Path(temporary) / "results.xml"
         execution = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/test_closeout_semantics.py",
                                     "tests/test_core_regressions.py", "tests/test_agent_workflow.py", "tests/test_protocol_v2.py",
-                                    "tests/test_dogfood_regressions.py", "--junitxml", str(results)],
+                                    "tests/test_dogfood_regressions.py", "tests/test_skill_workflow.py", "--junitxml", str(results)],
                                    cwd=repository, capture_output=True, text=True)
         require_results = results.is_file()
         cases = {item.get("name"): item for item in ET.parse(results).iter("testcase")} if require_results else {}
@@ -67,7 +68,7 @@ def main():
                   "generated_at": datetime.now(timezone.utc).isoformat(), "model_quality_evaluated": False,
                   "source_digest": tested_digest, "base_commit": source_state["head_commit"],
                   **source_state, "tested_tree_digest": tested_digest, "source_digest_after": final_digest,
-                  "digest_scope": "src/runtime/tests/scripts sources including harness-tool, CI workflows, scenario manifest and pyproject.toml; excludes generated reports",
+                  "digest_scope": "src/runtime/tests/scripts/skills sources and skill docs, top-level usage/install docs, harness-tool, CI workflows, scenario manifest and pyproject.toml; excludes generated reports",
                   "source_unchanged": tested_digest == final_digest, "passed": passed,
                   "elapsed_seconds": time.monotonic() - started, "pytest_exit_code": execution.returncode,
                   "counts": {key: sum(row["status"] == key for row in outcomes) for key in ("passed", "failed", "skipped", "missing")},

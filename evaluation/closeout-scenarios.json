@@ -61,6 +61,12 @@
     {"id": "summary-reference-integrity", "test": "test_default_job_summary_validates_observation_references", "property": "The default agent-facing Job summary validates every referenced measurement"},
     {"id": "closed-reference-integrity", "test": "test_closed_resume_validates_referenced_measurements", "property": "A closed Run cannot summarize a passing result after canonical measurements are missing"},
     {"id": "assessment-citation-binding", "test": "test_assessment_classifies_contextual_observation_bindings", "property": "Assessment citations disclose whether they bind the current subject, interpretation and check set"},
-    {"id": "terminal-request-idempotency", "test": "test_persisted_budget_transition_replays_the_same_error", "property": "A persisted budget transition replays the same error after caller restart"}
+    {"id": "terminal-request-idempotency", "test": "test_persisted_budget_transition_replays_the_same_error", "property": "A persisted budget transition replays the same error after caller restart"},
+    {"id": "skill-copy-restart", "test": "test_installed_copy_and_fresh_process_resume_the_same_state", "property": "The copied Skill helper works outside the checkout and restores the same Core Run in a new process"},
+    {"id": "skill-state-loss", "test": "test_missing_state_is_not_reinitialized_for_resume_or_discovery", "property": "Missing caller state is reported instead of silently creating an empty replacement store"},
+    {"id": "skill-run-selection", "test": "test_discovery_never_selects_the_newest_run", "property": "Discovery retains multiple matching Runs without picking a task"},
+    {"id": "skill-context-binding", "test": "test_context_mismatch_never_applies_mutation", "property": "The caller helper checks workspace and Domain before forwarding a Run mutation"},
+    {"id": "skill-unknown-outcome", "test": "test_timeout_does_not_automatically_retry_or_claim_verification_failed", "property": "A lost CLI response is an unknown outcome rather than an automatic new attempt or failed measurement"},
+    {"id": "skill-repair-history", "test": "test_failure_repair_resubmission_and_closeout_are_preserved", "property": "The real caller CLI preserves failed measurement, repaired Candidate, remeasurement and explicit closeout in one Run"}
   ]
 }
