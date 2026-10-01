@@ -1,0 +1,831 @@
+{
+  "schema_version": "harness-usability-evaluation-v2",
+  "date": "2026-10-01",
+  "package_version": "0.3.0",
+  "head_commit": "acdfae04419d64b780e64d1a1ebe4691bfbca33f",
+  "dirty": true,
+  "tested_tree_digest": "493be1e8b7003075ad3c336ea0777148e3f6ffef00897879791df24f1176a945",
+  "architecture": "An external agent calls Harness tools; Harness does not invoke a model.",
+  "caller": "This Codex session, using separate JSON CLI invocations and inspecting actual measurement results before editing the task workspace.",
+  "scenario": "Controlled small string-label normalization project, with a seeded incomplete implementation.",
+  "checks": {
+    "python_suite": {
+      "passed": 116,
+      "skipped_opt_in": 1
+    },
+    "semantic_scenarios": {
+      "passed": 55,
+      "failed": 0,
+      "skipped": 0,
+      "missing": 0
+    },
+    "sandbox_unit": {
+      "passed": 3,
+      "skipped_windows_only": 3
+    },
+    "opt_in_real_namespace_test": {
+      "passed": 1,
+      "run_id": "run_4feb49ccb8794cbd937c05a7df0733a8",
+      "job_id": "job_216ce3471747480392a9aa36f7c8d3b4"
+    }
+  },
+  "task_run": "run_7e8d6b7875ab418989efc920cb71cfb7",
+  "original_policy": {
+    "action": "finish_completed",
+    "deferred_check_ids": [
+      "domain.behavior"
+    ],
+    "domain_revision": "develop-external-2",
+    "mode": "exploratory",
+    "origin": "initial_configuration",
+    "provenance": {
+      "approval": {
+        "authenticated_by": null,
+        "claimed_reference": null,
+        "status": "not_provided"
+      },
+      "author_trust": "caller_claim",
+      "declared_author": "model"
+    },
+    "ready_attestation": false,
+    "ref": {
+      "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+      "revision": 1,
+      "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+    },
+    "required_check_ids": [
+      "domain.behavior"
+    ],
+    "rule": "explicit_gates"
+  },
+  "baseline": {
+    "job_id": "job_49c52c47510841d9943ebbf2bfe1fa68",
+    "candidate": {
+      "candidate_hash": "38fd7a77e96467fa722f0fd05c9f7afd937f951567cb29920e178d7a9cade6b7",
+      "candidate_id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+      "executable": {
+        "labels.py": false,
+        "tests/test_labels.py": false
+      },
+      "manifest": {
+        "dependencies": [],
+        "files": [
+          {
+            "path": "labels.py",
+            "sha256": "318769a8900d607ebc80cf2a127ad68036e5de2aaea81f26873c63d72eb84ffb",
+            "size": 123
+          },
+          {
+            "path": "tests/test_labels.py",
+            "sha256": "2b299d15b6cf9a1f0f0260305eaea4f888409fe79d0220b3b9e22139b58629c9",
+            "size": 489
+          }
+        ],
+        "kind": "candidate"
+      },
+      "subject": {
+        "id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+        "kind": "candidate",
+        "revision": 1,
+        "sha256": "7f2cbca81fcf8cd9a3f09d211e1414ad532111a7011a74b67157ca31c6a5ed49"
+      }
+    },
+    "unit_tests": {
+      "passed": 1,
+      "failed": 2
+    },
+    "measurements": [
+      {
+        "attempt": 1,
+        "candidate_hash": "38fd7a77e96467fa722f0fd05c9f7afd937f951567cb29920e178d7a9cade6b7",
+        "check_id": "domain.entrypoint",
+        "check_ref": {
+          "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.entrypoint",
+          "revision": 1,
+          "sha256": "cc6718aaa17f585d3266227d0ea2bfb7edeb57ad14d24b967334bcf5904709c7"
+        },
+        "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+        "comparison_status": "passed",
+        "contract_hash": "92891ff9539ee1f7383cf21f14fee66df89078ee7802be8eff549940d306387d",
+        "domain_identity": {
+          "configuration_hash": "fab573820610703bee53d1346a0cb18bc36b4d7e6a75c50e1a8bf6a5ea0eb8e9",
+          "id": "develop",
+          "identity_hash": "e9b90a3d1aa8af622954183d5e6b74425172d956626518ff4dc5c2038b8716ab",
+          "implementation_hash": "317f38dcdc97ec99252972873debcaa77e86b65aaface64ef57d206b82a76b12",
+          "revision": "develop-external-2"
+        },
+        "interpretation_ref": {
+          "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 2,
+          "sha256": "44e28de3afc22f710d624d76e3cdaf3029d9dbdbc421a702c4c67de51083c539"
+        },
+        "job_id": "job_49c52c47510841d9943ebbf2bfe1fa68",
+        "observation_id": "observation:job_49c52c47510841d9943ebbf2bfe1fa68:0",
+        "origin": "verifier",
+        "policy_ref": {
+          "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 1,
+          "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+        },
+        "record_hash": "c23f98556fc1ae1d94f13efcc237d38327b760958860d3eaf383ca8532aa0b20",
+        "report": {
+          "check_index": 0,
+          "observation": {
+            "artifacts": [],
+            "checkRef": {
+              "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.entrypoint",
+              "revision": 1,
+              "sha256": "cc6718aaa17f585d3266227d0ea2bfb7edeb57ad14d24b967334bcf5904709c7"
+            },
+            "environmentHash": "6de6b23de2b41ce8d0b7cfbf45d4f59acc69f221c15d5f18b3b4bac3a2866c67",
+            "finishedAt": "2026-10-01T04:06:51.041Z",
+            "limitations": [
+              "Measurements do not establish that the user's overall goal is satisfied.",
+              "Check author: model; execution does not establish test validity or independence.",
+              "Environment identity and dependency manifests are supplied by the authenticated Host."
+            ],
+            "observationId": "observation:job_49c52c47510841d9943ebbf2bfe1fa68:0",
+            "producer": {
+              "id": "python-measurement",
+              "kind": "verifier",
+              "revision": "5"
+            },
+            "requestId": "job_49c52c47510841d9943ebbf2bfe1fa68:0",
+            "result": {
+              "execution": "completed",
+              "findings": [
+                {
+                  "kind": "value",
+                  "name": "sha256",
+                  "observed": "318769a8900d607ebc80cf2a127ad68036e5de2aaea81f26873c63d72eb84ffb"
+                },
+                {
+                  "kind": "value",
+                  "name": "size",
+                  "observed": 123
+                },
+                {
+                  "expected": "def normalize_labels",
+                  "kind": "comparison",
+                  "name": "file_content",
+                  "observed": "def normalize_labels(values):\n    \"\"\"Normalize labels for a small local evaluation task.\"\"\"\n    return sorted(set(values))\n",
+                  "operator": "contains",
+                  "result": "pass"
+                }
+              ]
+            },
+            "runId": "run_7e8d6b7875ab418989efc920cb71cfb7",
+            "schemaVersion": "observation-v1",
+            "startedAt": "2026-10-01T04:06:51.041Z",
+            "subject": {
+              "id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "7f2cbca81fcf8cd9a3f09d211e1414ad532111a7011a74b67157ca31c6a5ed49"
+            },
+            "taskId": "job_49c52c47510841d9943ebbf2bfe1fa68"
+          },
+          "sandbox": null
+        },
+        "run_id": "run_7e8d6b7875ab418989efc920cb71cfb7",
+        "subject": {
+          "id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+          "kind": "candidate",
+          "revision": 1,
+          "sha256": "7f2cbca81fcf8cd9a3f09d211e1414ad532111a7011a74b67157ca31c6a5ed49"
+        },
+        "trust": "locally_measured"
+      },
+      {
+        "attempt": 1,
+        "candidate_hash": "38fd7a77e96467fa722f0fd05c9f7afd937f951567cb29920e178d7a9cade6b7",
+        "check_id": "domain.behavior",
+        "check_ref": {
+          "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.behavior",
+          "revision": 1,
+          "sha256": "ef906e1ebfdb29fbc8b7af23160dd12fcdb43db58e6173ec85a8faec4c5c0bd7"
+        },
+        "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+        "comparison_status": "failed",
+        "contract_hash": "92891ff9539ee1f7383cf21f14fee66df89078ee7802be8eff549940d306387d",
+        "domain_identity": {
+          "configuration_hash": "fab573820610703bee53d1346a0cb18bc36b4d7e6a75c50e1a8bf6a5ea0eb8e9",
+          "id": "develop",
+          "identity_hash": "e9b90a3d1aa8af622954183d5e6b74425172d956626518ff4dc5c2038b8716ab",
+          "implementation_hash": "317f38dcdc97ec99252972873debcaa77e86b65aaface64ef57d206b82a76b12",
+          "revision": "develop-external-2"
+        },
+        "interpretation_ref": {
+          "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 2,
+          "sha256": "44e28de3afc22f710d624d76e3cdaf3029d9dbdbc421a702c4c67de51083c539"
+        },
+        "job_id": "job_49c52c47510841d9943ebbf2bfe1fa68",
+        "observation_id": "observation:job_49c52c47510841d9943ebbf2bfe1fa68:1",
+        "origin": "verifier",
+        "policy_ref": {
+          "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 1,
+          "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+        },
+        "record_hash": "26605ae74a4484f4da335d1ef24c7a565a9e9c57e79db315f009c9ded9c773e6",
+        "report": {
+          "check_index": 1,
+          "observation": {
+            "artifacts": [],
+            "checkRef": {
+              "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.behavior",
+              "revision": 1,
+              "sha256": "ef906e1ebfdb29fbc8b7af23160dd12fcdb43db58e6173ec85a8faec4c5c0bd7"
+            },
+            "environmentHash": "6de6b23de2b41ce8d0b7cfbf45d4f59acc69f221c15d5f18b3b4bac3a2866c67",
+            "finishedAt": "2026-10-01T04:06:51.401Z",
+            "limitations": [
+              "Measurements do not establish that the user's overall goal is satisfied.",
+              "Check author: model; execution does not establish test validity or independence.",
+              "Environment identity and dependency manifests are supplied by the authenticated Host.",
+              "Process exit and streams were captured by the runtime execution adapter; Python did not independently execute the command.",
+              "The subject manifest alone does not attest the command's complete input or environment closure."
+            ],
+            "observationId": "observation:job_49c52c47510841d9943ebbf2bfe1fa68:1",
+            "producer": {
+              "id": "python-measurement",
+              "kind": "verifier",
+              "revision": "5"
+            },
+            "requestId": "job_49c52c47510841d9943ebbf2bfe1fa68:1",
+            "result": {
+              "execution": "completed",
+              "findings": [
+                {
+                  "kind": "value",
+                  "name": "argv",
+                  "observed": [
+                    "python3",
+                    "-m",
+                    "unittest",
+                    "discover",
+                    "-s",
+                    "tests",
+                    "-v"
+                  ]
+                },
+                {
+                  "kind": "value",
+                  "name": "cwd",
+                  "observed": "."
+                },
+                {
+                  "kind": "value",
+                  "name": "startedAt",
+                  "observed": "2026-10-01T04:06:51.137Z"
+                },
+                {
+                  "kind": "value",
+                  "name": "finishedAt",
+                  "observed": "2026-10-01T04:06:51.394Z"
+                },
+                {
+                  "kind": "value",
+                  "name": "stdout",
+                  "observed": ""
+                },
+                {
+                  "kind": "value",
+                  "name": "stderr",
+                  "observed": "test_empty (test_labels.LabelTests.test_empty) ... ok\ntest_trim_casefold_deduplicate_sort (test_labels.LabelTests.test_trim_casefold_deduplicate_sort) ... FAIL\ntest_unicode_casefold (test_labels.LabelTests.test_unicode_casefold) ... FAIL\n\n======================================================================\nFAIL: test_trim_casefold_deduplicate_sort (test_labels.LabelTests.test_trim_casefold_deduplicate_sort)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_labels.py\", line 7, in test_trim_casefold_deduplicate_sort\n    self.assertEqual(normalize_labels([\" Beta \", \"alpha\", \"ALPHA\", \"\", \"  \"]), [\"alpha\", \"beta\"])\nAssertionError: Lists differ: ['', '  ', ' Beta ', 'ALPHA', 'alpha'] != ['alpha', 'beta']\n\nFirst differing element 0:\n''\n'alpha'\n\nFirst list contains 3 additional elements.\nFirst extra element 2:\n' Beta '\n\n- ['', '  ', ' Beta ', 'ALPHA', 'alpha']\n+ ['alpha', 'beta']\n\n======================================================================\nFAIL: test_unicode_casefold (test_labels.LabelTests.test_unicode_casefold)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_labels.py\", line 10, in test_unicode_casefold\n    self.assertEqual(normalize_labels([\"Straße\", \"STRASSE\"]), [\"strasse\"])\nAssertionError: Lists differ: ['STRASSE', 'Straße'] != ['strasse']\n\nFirst differing element 0:\n'STRASSE'\n'strasse'\n\nFirst list contains 1 additional elements.\nFirst extra element 1:\n'Straße'\n\n- ['STRASSE', 'Straße']\n+ ['strasse']\n\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nFAILED (failures=2)\n"
+                },
+                {
+                  "expected": 0,
+                  "kind": "comparison",
+                  "name": "exit_code",
+                  "observed": 1,
+                  "operator": "equals",
+                  "result": "fail"
+                }
+              ]
+            },
+            "runId": "run_7e8d6b7875ab418989efc920cb71cfb7",
+            "schemaVersion": "observation-v1",
+            "startedAt": "2026-10-01T04:06:51.400Z",
+            "subject": {
+              "id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "7f2cbca81fcf8cd9a3f09d211e1414ad532111a7011a74b67157ca31c6a5ed49"
+            },
+            "taskId": "job_49c52c47510841d9943ebbf2bfe1fa68"
+          },
+          "sandbox": {
+            "backend": "namespace",
+            "containment": "user_mount_pid_net_namespace",
+            "inputBytes": 612,
+            "kernel": "6.18.33.2-microsoft-standard-WSL2",
+            "maxOutputBytes": 262144,
+            "maxProcesses": 64,
+            "memoryMiB": 1024,
+            "network": "loopback_only",
+            "state": "completed",
+            "timeoutMs": 30000
+          }
+        },
+        "run_id": "run_7e8d6b7875ab418989efc920cb71cfb7",
+        "subject": {
+          "id": "candidate_9d0ddf38f9eb42c3a3dab410505d2e35",
+          "kind": "candidate",
+          "revision": 1,
+          "sha256": "7f2cbca81fcf8cd9a3f09d211e1414ad532111a7011a74b67157ca31c6a5ed49"
+        },
+        "trust": "locally_measured"
+      }
+    ],
+    "completion_attempt": {
+      "api_version": "external-harness-v2",
+      "assurance": "local-advisory",
+      "error": {
+        "code": "VERIFICATION_REQUIRED",
+        "message": "Pinned completion gates have not been satisfied"
+      },
+      "ok": false,
+      "ready": false
+    }
+  },
+  "corrected": {
+    "job_id": "job_f6c0c691f526435a8916a328dcfb7ac2",
+    "candidate": {
+      "candidate_hash": "c969351af18e3c6397d2813d64e0701f932dd3ad2fbc26c89a284f4f1e476341",
+      "candidate_id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+      "executable": {
+        "labels.py": false,
+        "tests/test_labels.py": false
+      },
+      "manifest": {
+        "dependencies": [],
+        "files": [
+          {
+            "path": "labels.py",
+            "sha256": "b9e53720e5a2bcac64c6e222eb92327e95ce075515d71a30dbc186e2fa70f2de",
+            "size": 216
+          },
+          {
+            "path": "tests/test_labels.py",
+            "sha256": "2b299d15b6cf9a1f0f0260305eaea4f888409fe79d0220b3b9e22139b58629c9",
+            "size": 489
+          }
+        ],
+        "kind": "candidate"
+      },
+      "subject": {
+        "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+        "kind": "candidate",
+        "revision": 1,
+        "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+      }
+    },
+    "unit_tests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "measurements": [
+      {
+        "attempt": 2,
+        "candidate_hash": "c969351af18e3c6397d2813d64e0701f932dd3ad2fbc26c89a284f4f1e476341",
+        "check_id": "domain.entrypoint",
+        "check_ref": {
+          "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.entrypoint",
+          "revision": 1,
+          "sha256": "cc6718aaa17f585d3266227d0ea2bfb7edeb57ad14d24b967334bcf5904709c7"
+        },
+        "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+        "comparison_status": "passed",
+        "contract_hash": "92891ff9539ee1f7383cf21f14fee66df89078ee7802be8eff549940d306387d",
+        "domain_identity": {
+          "configuration_hash": "fab573820610703bee53d1346a0cb18bc36b4d7e6a75c50e1a8bf6a5ea0eb8e9",
+          "id": "develop",
+          "identity_hash": "e9b90a3d1aa8af622954183d5e6b74425172d956626518ff4dc5c2038b8716ab",
+          "implementation_hash": "317f38dcdc97ec99252972873debcaa77e86b65aaface64ef57d206b82a76b12",
+          "revision": "develop-external-2"
+        },
+        "interpretation_ref": {
+          "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 3,
+          "sha256": "a6b78c2e92bdd3c518b4ede1d50ca543b290bf23b54cd6c24a62ed2d4b0c26b3"
+        },
+        "job_id": "job_f6c0c691f526435a8916a328dcfb7ac2",
+        "observation_id": "observation:job_f6c0c691f526435a8916a328dcfb7ac2:0",
+        "origin": "verifier",
+        "policy_ref": {
+          "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 1,
+          "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+        },
+        "record_hash": "34df10442b5923b1ae5e6e1febdaf9696043fc21521fdc54ac80d581f21f16f0",
+        "report": {
+          "check_index": 0,
+          "observation": {
+            "artifacts": [],
+            "checkRef": {
+              "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.entrypoint",
+              "revision": 1,
+              "sha256": "cc6718aaa17f585d3266227d0ea2bfb7edeb57ad14d24b967334bcf5904709c7"
+            },
+            "environmentHash": "6de6b23de2b41ce8d0b7cfbf45d4f59acc69f221c15d5f18b3b4bac3a2866c67",
+            "finishedAt": "2026-10-01T04:08:12.898Z",
+            "limitations": [
+              "Measurements do not establish that the user's overall goal is satisfied.",
+              "Check author: model; execution does not establish test validity or independence.",
+              "Environment identity and dependency manifests are supplied by the authenticated Host."
+            ],
+            "observationId": "observation:job_f6c0c691f526435a8916a328dcfb7ac2:0",
+            "producer": {
+              "id": "python-measurement",
+              "kind": "verifier",
+              "revision": "5"
+            },
+            "requestId": "job_f6c0c691f526435a8916a328dcfb7ac2:0",
+            "result": {
+              "execution": "completed",
+              "findings": [
+                {
+                  "kind": "value",
+                  "name": "sha256",
+                  "observed": "b9e53720e5a2bcac64c6e222eb92327e95ce075515d71a30dbc186e2fa70f2de"
+                },
+                {
+                  "kind": "value",
+                  "name": "size",
+                  "observed": 216
+                },
+                {
+                  "expected": "def normalize_labels",
+                  "kind": "comparison",
+                  "name": "file_content",
+                  "observed": "def normalize_labels(values):\n    \"\"\"Normalize labels for a small local evaluation task.\"\"\"\n    normalized = (value.strip().casefold() for value in values)\n    return sorted({value for value in normalized if value})\n",
+                  "operator": "contains",
+                  "result": "pass"
+                }
+              ]
+            },
+            "runId": "run_7e8d6b7875ab418989efc920cb71cfb7",
+            "schemaVersion": "observation-v1",
+            "startedAt": "2026-10-01T04:08:12.898Z",
+            "subject": {
+              "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+            },
+            "taskId": "job_f6c0c691f526435a8916a328dcfb7ac2"
+          },
+          "sandbox": null
+        },
+        "run_id": "run_7e8d6b7875ab418989efc920cb71cfb7",
+        "subject": {
+          "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+          "kind": "candidate",
+          "revision": 1,
+          "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+        },
+        "trust": "locally_measured"
+      },
+      {
+        "attempt": 2,
+        "candidate_hash": "c969351af18e3c6397d2813d64e0701f932dd3ad2fbc26c89a284f4f1e476341",
+        "check_id": "domain.behavior",
+        "check_ref": {
+          "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.behavior",
+          "revision": 1,
+          "sha256": "ef906e1ebfdb29fbc8b7af23160dd12fcdb43db58e6173ec85a8faec4c5c0bd7"
+        },
+        "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+        "comparison_status": "passed",
+        "contract_hash": "92891ff9539ee1f7383cf21f14fee66df89078ee7802be8eff549940d306387d",
+        "domain_identity": {
+          "configuration_hash": "fab573820610703bee53d1346a0cb18bc36b4d7e6a75c50e1a8bf6a5ea0eb8e9",
+          "id": "develop",
+          "identity_hash": "e9b90a3d1aa8af622954183d5e6b74425172d956626518ff4dc5c2038b8716ab",
+          "implementation_hash": "317f38dcdc97ec99252972873debcaa77e86b65aaface64ef57d206b82a76b12",
+          "revision": "develop-external-2"
+        },
+        "interpretation_ref": {
+          "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 3,
+          "sha256": "a6b78c2e92bdd3c518b4ede1d50ca543b290bf23b54cd6c24a62ed2d4b0c26b3"
+        },
+        "job_id": "job_f6c0c691f526435a8916a328dcfb7ac2",
+        "observation_id": "observation:job_f6c0c691f526435a8916a328dcfb7ac2:1",
+        "origin": "verifier",
+        "policy_ref": {
+          "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+          "revision": 1,
+          "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+        },
+        "record_hash": "271d163bb16626d10b526969fe46eeda67f94faa269d4175ff34e497cb8c9fb1",
+        "report": {
+          "check_index": 1,
+          "observation": {
+            "artifacts": [],
+            "checkRef": {
+              "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.behavior",
+              "revision": 1,
+              "sha256": "ef906e1ebfdb29fbc8b7af23160dd12fcdb43db58e6173ec85a8faec4c5c0bd7"
+            },
+            "environmentHash": "6de6b23de2b41ce8d0b7cfbf45d4f59acc69f221c15d5f18b3b4bac3a2866c67",
+            "finishedAt": "2026-10-01T04:08:13.197Z",
+            "limitations": [
+              "Measurements do not establish that the user's overall goal is satisfied.",
+              "Check author: model; execution does not establish test validity or independence.",
+              "Environment identity and dependency manifests are supplied by the authenticated Host.",
+              "Process exit and streams were captured by the runtime execution adapter; Python did not independently execute the command.",
+              "The subject manifest alone does not attest the command's complete input or environment closure."
+            ],
+            "observationId": "observation:job_f6c0c691f526435a8916a328dcfb7ac2:1",
+            "producer": {
+              "id": "python-measurement",
+              "kind": "verifier",
+              "revision": "5"
+            },
+            "requestId": "job_f6c0c691f526435a8916a328dcfb7ac2:1",
+            "result": {
+              "execution": "completed",
+              "findings": [
+                {
+                  "kind": "value",
+                  "name": "argv",
+                  "observed": [
+                    "python3",
+                    "-m",
+                    "unittest",
+                    "discover",
+                    "-s",
+                    "tests",
+                    "-v"
+                  ]
+                },
+                {
+                  "kind": "value",
+                  "name": "cwd",
+                  "observed": "."
+                },
+                {
+                  "kind": "value",
+                  "name": "startedAt",
+                  "observed": "2026-10-01T04:08:12.988Z"
+                },
+                {
+                  "kind": "value",
+                  "name": "finishedAt",
+                  "observed": "2026-10-01T04:08:13.191Z"
+                },
+                {
+                  "kind": "value",
+                  "name": "stdout",
+                  "observed": ""
+                },
+                {
+                  "kind": "value",
+                  "name": "stderr",
+                  "observed": "test_empty (test_labels.LabelTests.test_empty) ... ok\ntest_trim_casefold_deduplicate_sort (test_labels.LabelTests.test_trim_casefold_deduplicate_sort) ... ok\ntest_unicode_casefold (test_labels.LabelTests.test_unicode_casefold) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nOK\n"
+                },
+                {
+                  "expected": 0,
+                  "kind": "comparison",
+                  "name": "exit_code",
+                  "observed": 0,
+                  "operator": "equals",
+                  "result": "pass"
+                }
+              ]
+            },
+            "runId": "run_7e8d6b7875ab418989efc920cb71cfb7",
+            "schemaVersion": "observation-v1",
+            "startedAt": "2026-10-01T04:08:13.196Z",
+            "subject": {
+              "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+            },
+            "taskId": "job_f6c0c691f526435a8916a328dcfb7ac2"
+          },
+          "sandbox": {
+            "backend": "namespace",
+            "containment": "user_mount_pid_net_namespace",
+            "inputBytes": 705,
+            "kernel": "6.18.33.2-microsoft-standard-WSL2",
+            "maxOutputBytes": 262144,
+            "maxProcesses": 64,
+            "memoryMiB": 1024,
+            "network": "loopback_only",
+            "state": "completed",
+            "timeoutMs": 30000
+          }
+        },
+        "run_id": "run_7e8d6b7875ab418989efc920cb71cfb7",
+        "subject": {
+          "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+          "kind": "candidate",
+          "revision": 1,
+          "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+        },
+        "trust": "locally_measured"
+      }
+    ]
+  },
+  "test_fixture": {
+    "path": "tests/test_labels.py",
+    "sha256": "2b299d15b6cf9a1f0f0260305eaea4f888409fe79d0220b3b9e22139b58629c9",
+    "unchanged_between_submissions": true,
+    "content": "import unittest\nfrom labels import normalize_labels\n\n\nclass LabelTests(unittest.TestCase):\n    def test_trim_casefold_deduplicate_sort(self):\n        self.assertEqual(normalize_labels([\" Beta \", \"alpha\", \"ALPHA\", \"\", \"  \"]), [\"alpha\", \"beta\"])\n\n    def test_unicode_casefold(self):\n        self.assertEqual(normalize_labels([\"Straße\", \"STRASSE\"]), [\"strasse\"])\n\n    def test_empty(self):\n        self.assertEqual(normalize_labels([]), [])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  },
+  "final_record": {
+    "assessment": {
+      "cited_observation_ids": [
+        "observation:job_f6c0c691f526435a8916a328dcfb7ac2:1"
+      ],
+      "interpretation_ref": {
+        "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+        "revision": 3,
+        "sha256": "a6b78c2e92bdd3c518b4ede1d50ca543b290bf23b54cd6c24a62ed2d4b0c26b3"
+      },
+      "interpretation_revision": 3,
+      "origin": "caller",
+      "ref": {
+        "id": "assessment:run_7e8d6b7875ab418989efc920cb71cfb7:bb8759aa35dc4040abb85e61e46d8320",
+        "revision": 1,
+        "sha256": "433a4503949ac8879769413b9b608c448d677b12029c1105eedda923d0484a06"
+      },
+      "status": "satisfied",
+      "subject": {
+        "id": "candidate_37e3bfe8bdbd4476a13b61a6cbe4bec0",
+        "kind": "candidate",
+        "revision": 1,
+        "sha256": "68d9b29813989550c230003929ea557601b53083400ee181b72f290322638bb3"
+      },
+      "summary": "After implementing strip and Unicode casefold before filtering and deduplication, all three submitted behavior tests pass on the second candidate.",
+      "trust": "untrusted",
+      "uncertainties": [
+        "Tests were supplied by the caller and are not independent certification.",
+        "Non-string inputs and large-scale performance were not evaluated."
+      ]
+    },
+    "assurance": "local-advisory",
+    "candidate_hash": "c969351af18e3c6397d2813d64e0701f932dd3ad2fbc26c89a284f4f1e476341",
+    "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+    "contract_hash": "92891ff9539ee1f7383cf21f14fee66df89078ee7802be8eff549940d306387d",
+    "domain_identity": {
+      "configuration_hash": "fab573820610703bee53d1346a0cb18bc36b4d7e6a75c50e1a8bf6a5ea0eb8e9",
+      "id": "develop",
+      "identity_hash": "e9b90a3d1aa8af622954183d5e6b74425172d956626518ff4dc5c2038b8716ab",
+      "implementation_hash": "317f38dcdc97ec99252972873debcaa77e86b65aaface64ef57d206b82a76b12",
+      "revision": "develop-external-2"
+    },
+    "finished_at": 1790827755.0006227,
+    "gates": {
+      "results": [
+        {
+          "action": "finish_completed",
+          "check_id": "domain.behavior",
+          "check_ref": {
+            "id": "check:run_7e8d6b7875ab418989efc920cb71cfb7:domain.behavior",
+            "revision": 1,
+            "sha256": "ef906e1ebfdb29fbc8b7af23160dd12fcdb43db58e6173ec85a8faec4c5c0bd7"
+          },
+          "definition_status": "defined",
+          "observation_id": "observation:job_f6c0c691f526435a8916a328dcfb7ac2:1",
+          "origin": "initial_configuration",
+          "policy_ref": {
+            "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+            "revision": 1,
+            "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+          },
+          "status": "passed"
+        }
+      ],
+      "status": "passed"
+    },
+    "intent_ref": {
+      "id": "intent:run_7e8d6b7875ab418989efc920cb71cfb7",
+      "revision": 1,
+      "sha256": "01d81fa04444ae75b10f60edbce15963b6e7672cb34aef7778da5c40479dbc50"
+    },
+    "interpretation_ref": {
+      "id": "interpretation:run_7e8d6b7875ab418989efc920cb71cfb7",
+      "revision": 3,
+      "sha256": "a6b78c2e92bdd3c518b4ede1d50ca543b290bf23b54cd6c24a62ed2d4b0c26b3"
+    },
+    "lifecycle": "closed",
+    "limitations": [
+      "Caller-supplied expectations are pinned, not independently proven to cover the original goal.",
+      "Only the explicitly listed input files are snapshotted; this is not whole-project certification.",
+      "Structural profile does not establish runtime behavior.",
+      "Local state and verifier run as the same user; reports are unsigned and not tamper-proof.",
+      "This record concerns the submitted snapshot, not later workspace edits."
+    ],
+    "measurement": {
+      "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+      "job_id": "job_f6c0c691f526435a8916a328dcfb7ac2",
+      "result_hash": "1505c9ca5065638c2ef59b3f1b568d69b0e6651154d6244b90c3c6c58e69a73e",
+      "status": "passed"
+    },
+    "model_summary": "Caller completed the small normalization task based on the recorded observations; this is not a Ready certificate.",
+    "outcome": "completed",
+    "outcome_meaning": "caller_requested_disposition_not_verification_success",
+    "policy_ref": {
+      "id": "policy:run_7e8d6b7875ab418989efc920cb71cfb7",
+      "revision": 1,
+      "sha256": "f76ff80d407a3d0a0e7fc94059675216ed29bd61916a5af3c3bbb3e12f0bc2fa"
+    },
+    "ready": false,
+    "record_hash": "02ac4451ec45362c0b640358d7e926d058c43476626da4fdfa174fbf80d88df0",
+    "resolution": {
+      "assessment_status": "satisfied",
+      "certification": "not_issued",
+      "display_status": "closed_checks_passed",
+      "gate_status": "passed",
+      "lifecycle": "closed",
+      "measurement_status": "passed",
+      "policy_approval": {
+        "authenticated_by": null,
+        "claimed_reference": null,
+        "status": "not_provided"
+      },
+      "requested_outcome": "completed"
+    },
+    "run_id": "run_7e8d6b7875ab418989efc920cb71cfb7",
+    "schema_version": "local-verification-record-v1",
+    "semantic_schema_version": "closeout-semantics-v1",
+    "signature": null,
+    "termination_reason": "requested",
+    "unresolved_verification_jobs": [],
+    "unresolved_work": [],
+    "verification": {
+      "check_set_hash": "693ec26087f3d51bf0ae80c236a1db44ebc2dfab4ffb077ac5a57a666f70d263",
+      "job_id": "job_f6c0c691f526435a8916a328dcfb7ac2",
+      "result_hash": "1505c9ca5065638c2ef59b3f1b568d69b0e6651154d6244b90c3c6c58e69a73e",
+      "status": "passed"
+    },
+    "verifier": {
+      "id": "external-develop-measurement",
+      "implementation_hash": "ff54b3cba9e33908e98271df9866cb1d6e6d496bf6e7acabf9d007f9431f2e4e",
+      "measurement_protocol": 5,
+      "revision": "1",
+      "sources": {
+        "common.py": "643967f80a554f6b4cce55a86f2c4dbd1f00dc33b8ab87126fa08f83150afe91",
+        "develop_manifest.json": "86f56bf1ddd8624d8b583c880824a5f8ca8e6f3b3bfe0030363543f1c9aca04d",
+        "domain.py": "2db7047614143e3e04554b94782b883b615737966ab8acaf8cac28418dccd82b",
+        "errors.py": "912cf0d42121eb748a18b5ff0371aaa0a26b64e5c5752e1b831bc495bf850a0d",
+        "maintenance.py": "a207fb600978e598a1475045fe0e3719e26c50be98832ceb9edc173f2190ed2f",
+        "measurement_v5.py": "bd376e4f9e2d50eb07e839d1e45019155bcecec781e00d6f7822860716b760e9",
+        "queries.py": "0b1cf557dccc1e0cf85a990a62beeeb9d0d39a06f51a969fc2257482d0f493d4",
+        "registry.py": "13c250ee11015a823861b657d3731e55100ffd7db0176017b294c4addf0cd18e",
+        "sandbox": "f5db0f2cbc7701303bdd434ae08d59786b86aec396e1a37fdf8937867e04a637",
+        "sandbox_bridge": "b722325846a0c3876287e11a9ee682fd69280bf20a587228975cb07826c386a0",
+        "semantics.py": "65d90f71120d569ad2c342c5753b12cf5611a76297a489fbc98024705e3a7ad7",
+        "service.py": "83271b065cc3ee89f224317a858039d69eccb73489869119e52977dbe7a5281b",
+        "snapshots.py": "79d720e54addaa8c07b7da4f4ca49d68d4fa20e84172ed618d82bb821997ed0b",
+        "store.py": "c0f39952706402e9ad61bacb2aafe0a0c359ff59a0111990b06a2c722813033d",
+        "worker.py": "6423e18bd538679daf81a123c06bf4f56544494538b8e4d3dc82827348807732"
+      }
+    }
+  },
+  "final_state": {
+    "history_counts": {
+      "activity": 0,
+      "assessments": 1,
+      "checks": 2,
+      "interpretations": 3,
+      "jobs": 2,
+      "measurements": 4,
+      "notes": 0,
+      "tasks": 0
+    },
+    "usage": {
+      "actions": 7,
+      "verification_attempts": 2
+    },
+    "workspace_matches_submitted_files": true,
+    "resolution": {
+      "assessment_status": "satisfied",
+      "certification": "not_issued",
+      "display_status": "closed_checks_passed",
+      "gate_status": "passed",
+      "lifecycle": "closed",
+      "measurement_status": "passed",
+      "policy_approval": {
+        "authenticated_by": null,
+        "claimed_reference": null,
+        "status": "not_provided"
+      },
+      "requested_outcome": "completed"
+    }
+  },
+  "conclusion": "Usable for bounded external-agent tasks on the evaluated WSL/Linux source-checkout environment.",
+  "limitations": [
+    "This was a controlled task, not a broad project-quality or performance benchmark.",
+    "No AGY commercial model session was invoked.",
+    "Tests were caller-authored and remain untrusted criteria, even though their hashes were unchanged between submitted candidates.",
+    "User approval claims remain unverified; no protected Ready certificate is issued.",
+    "Windows-native Harness execution and remote CI for this working tree were not evaluated."
+  ]
+}

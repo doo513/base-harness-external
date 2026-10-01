@@ -48,7 +48,7 @@ def test_full_flow_uses_real_measurement_without_host_or_ready(case):
     candidate = api.submit(run_id, "submit")["candidate"]
     result = verify(api, run_id)
     assert result["result"]["status"] == "passed"
-    report = result["result"]["observations"][0]["observation"]
+    report = api.records(run_id, "measurements")["items"][0]["report"]["observation"]
     assert report["producer"] == {"kind": "verifier", "id": "python-measurement", "revision": "5"}
     assert report["subject"]["sha256"] == canonical_hash(candidate["manifest"])
     assert api.status(run_id)["run"]["observations"][0]["trust"] == "untrusted"
@@ -268,7 +268,7 @@ def test_unavailable_sandbox_is_not_run_and_has_no_fallback(case, monkeypatch):
     api.submit(run_id, "submit")
     result = verify(api, run_id)["result"]
     assert result["status"] == "incomplete"
-    assert result["observations"][-1]["observation"]["result"]["execution"] == "not_run"
+    assert api.records(run_id, "measurements")["items"][-1]["report"]["observation"]["result"]["execution"] == "not_run"
     with pytest.raises(HarnessError):
         api.finish(run_id, "finish", outcome="completed")
 
@@ -379,7 +379,7 @@ def test_real_cli_async_worker_and_restart(tmp_path):
     assert state["result"]["status"] == "passed"
     finished = cli("finish", "--run-id", run_id, "--request-id", "finish", "--outcome", "completed")
     assert not finished["ready"] and finished["record"]["signature"] is None
-    assert cli("status", "--run-id", run_id)["run"]["record"] == finished["record"]
+    assert cli("status", "--run-id", run_id, "--view", "full")["run"]["record"] == finished["record"]
     assert (workspace / "result.txt").read_text() == "actual result\n"
 
 
@@ -411,7 +411,7 @@ def test_live_sandboxed_python_tests_without_host(tmp_path):
         time.sleep(0.2)
     assert job["status"] == "completed", job
     assert job["result"]["status"] == "passed", job
-    command = job["result"]["observations"][-1]
+    command = api.records(run_id, "measurements")["items"][-1]["report"]
     assert command["sandbox"]["containment"] == "user_mount_pid_net_namespace"
     assert command["sandbox"]["network"] == "loopback_only"
     record = api.finish(run_id, "finish", outcome="completed")["record"]

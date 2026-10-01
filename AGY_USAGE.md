@@ -6,22 +6,25 @@ Run·원문·개정 이력·제출 스냅샷·검증 결과를 보관합니다. 
 
 현재 확인한 실행 환경은 WSL/Linux의 Python 3.11+와 Bun입니다. AGY가 Windows에서
 동작해도 Harness 도구 호출만 WSL로 보낼 수 있습니다. 모델의 설치 위치와 Harness
-프로세스의 실행 위치는 독립적입니다. 아래 경로는 이 저장소의 현재 위치이며,
-다른 위치로 옮기면 수정하세요.
+프로세스의 실행 위치는 독립적입니다. 아래 저장소 경로는 자신의 체크아웃 위치로 설정하세요.
 
 ## 1. 먼저 환경 확인
 
 WSL에서:
 
 ```sh
-bash /mnt/c/users/doo33/downloads/base-harness-external/scripts/harness-tool doctor
-bash /mnt/c/users/doo33/downloads/base-harness-external/scripts/harness-tool doctor --sandbox
+cd /path/to/base-harness-external
+HARNESS_REPO="$(pwd)"
+bash "$HARNESS_REPO/scripts/harness-tool" doctor
+bash "$HARNESS_REPO/scripts/harness-tool" doctor --sandbox
 ```
 
 Windows PowerShell 또는 Windows에서 실행되는 AGY의 셸 도구에서는:
 
 ```powershell
-wsl.exe --exec bash /mnt/c/users/doo33/downloads/base-harness-external/scripts/harness-tool doctor --sandbox
+$HarnessRepo = "/path/in/wsl/base-harness-external"
+$Distro = "Ubuntu-24.04"
+wsl.exe -d $Distro --exec bash "$HarnessRepo/scripts/harness-tool" doctor --sandbox
 ```
 
 이후 명령도 같은 접두사 뒤에 붙이면 됩니다. 여러 WSL 배포판을 사용하면
@@ -45,10 +48,14 @@ Bun이 없을 때 기본 설치 위치인 `~/.bun/bin/bun`도 확인합니다. `
 > 도구 명령은 위에서 확인한 harness-tool 경로를 사용하세요.
 > 시작 시 develop 도메인과 원래 요청을 전달하고, 기준이 불명확하면 exploratory로
 > 시작하세요. 요구에 명시된 필수 검사는 시작 정책에 required-check로 고정하세요.
+> 아직 정의하지 않은 필수 검사는 deferred-check로 명시하세요. 기대값과 명령에
+> id를 지정하면 domain.ID로 안정적으로 참조할 수 있습니다.
 > working directory의 파일은 기존 편집 도구로 수정하고, submit으로 복사본을 제출하세요.
 > verify가 반환한 job_id를 status 또는 resume으로 조회하세요. 오류나 실패는 실제
 > 관측으로 기록하고, 이를 근거로 다음 행동을 판단하세요. 해결 여부와 불확실성은
 > assess에 별도로 남기세요. completed, 측정 통과, 모델의 satisfied를 구분하세요.
+> 종결 판단은 resolution의 display_status, measurement_status, assessment_status,
+> gate_status를 함께 읽으세요. 정책 승인 주장은 unverified이며 사용자 인증이 아닙니다.
 > 상태·검증기·스냅샷 파일을 직접 수정하지 마세요. 최종 보고에는 run_id,
 > candidate_hash, 측정 결과, 게이트 결과, 모델 평가, 남은 불확실성을 적어 주세요.
 
@@ -74,7 +81,15 @@ bash scripts/harness-tool assess --run-id RUN_ID --data /absolute/assessment.jso
 bash scripts/harness-tool finish --run-id RUN_ID --outcome completed --request-id finish-001
 ```
 
-JSON 형식은 README의 revision/assessment 설명을 사용하세요. 입력 목록에는 실제
+JSON 형식은 README의 revision/assessment 설명을 사용하세요. JSON 옵션은 파일 경로,
+stdin을 뜻하는 `-`, 또는 `json:{...}` 접두사의 인라인 JSON을 받습니다. 한 호출에서
+stdin은 한 옵션만 사용할 수 있습니다. 예를 들어 WSL 셸에서 다음처럼 호출합니다.
+
+```sh
+bash "$HARNESS_REPO/scripts/harness-tool" observe --run-id RUN_ID --data 'json:{"note":"측정 결과를 검토 중"}' --request-id note-001
+```
+
+입력 목록에는 실제
 실행에 필요한 코드·테스트·fixture를 명시해야 합니다. 외부 의존성을 자동으로
 설치하거나 전체 프로젝트를 자동 수집하지 않습니다. 명령 Sandbox는 네트워크가
 격리되어 있으므로 최초 사용은 표준 라이브러리만 필요한 작은 프로젝트가 적합합니다.
@@ -93,8 +108,9 @@ bash scripts/harness-tool records --run-id RUN_ID --kind checks --limit 5
 ```
 
 응답의 `next_offset`을 다음 호출의 `--offset`으로 사용합니다. resume은 복원용
-요약을 반환하며 작업이나 worker를 자동으로 재실행하지 않습니다. 원래 status의
-전체 응답도 유지하지만 큰 이력은 records로 나누어 읽으세요.
+요약을 반환하며 작업이나 worker를 자동으로 재실행하지 않습니다. API v2에서는 status도
+기본 요약이며 상세 상태는 `status --view full`로 요청합니다. 측정 본문은 records의
+measurements에 있고 Job 결과는 observation_refs만 담습니다. 큰 이력은 나누어 읽으세요.
 
 입력 범위나 profile을 개정할 때 기존 보조 검사가 맞지 않으면
 `CHECK_SCOPE_CONFLICT`를 반환하고 기존 Run을 그대로 유지합니다. 보조 검사의

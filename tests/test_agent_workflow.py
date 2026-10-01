@@ -114,7 +114,7 @@ def test_retired_probe_reactivation_keeps_measurement_history(case):
 
 def test_required_probe_cannot_be_retired_or_removed_by_scope(case):
     api, start, _ = case
-    run = start(required_checks=["probe"])
+    run = start(deferred_checks=["probe"])
     check(api, run)
     with pytest.raises(HarnessError) as error:
         retire(api, run)

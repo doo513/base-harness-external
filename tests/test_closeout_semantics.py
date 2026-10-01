@@ -252,7 +252,8 @@ def test_other_domain_module_can_be_injected_without_core_changes(setup):
             return DevelopModule().normalize_check(parameters, contract)
     injected = Harness(api.store.root, domains=DomainRegistry([ReviewModule()]))
     run = injected.start(domain_id="review", goal="Review a result", workspace=str(workspace), parameters=params, request_id="custom")["run_id"]
-    assert injected.status(run)["run"]["domain_module"] == {"id": "review", "revision": "review-port-test-1"}
+    binding = injected.status(run)["run"]["domain_module"]
+    assert binding["id"] == "review" and binding["revision"] == "review-port-test-1" and binding["implementation_hash"]
     assert measure(injected, run)["job"]["result"]["status"] == "passed"
 
 
@@ -325,7 +326,7 @@ def test_cli_tool_roundtrip_restores_exploration_and_closeout(setup, tmp_path):
                                capture_output=True, text=True, env=environment, timeout=20)
         assert child.returncode == 0, child.stderr + child.stdout
         return json.loads(child.stdout)
-    run = cli("start", "--domain", "develop", "--mode", "exploratory", "--required-check", "file-0",
+    run = cli("start", "--domain", "develop", "--mode", "exploratory", "--deferred-check", "file-0",
               "--workspace", str(workspace), "--goal", "Investigate output", "--request-id", "start")["run_id"]
     assert cli("status", "--run-id", run)["run"]["phase"] == "waiting_input"
     proposal = tmp_path / "revision.json"
@@ -338,7 +339,7 @@ def test_cli_tool_roundtrip_restores_exploration_and_closeout(setup, tmp_path):
     job = cli("verify", "--run-id", run, "--request-id", "verify")["job_id"]
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        status = cli("status", "--run-id", run, "--job-id", job)
+        status = cli("status", "--run-id", run, "--job-id", job, "--view", "full")
         if status["job"]["status"] not in {"queued", "running"}:
             break
         time.sleep(0.05)

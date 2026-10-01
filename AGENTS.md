@@ -1,7 +1,7 @@
 # Base Harness External
 
 - This repository is an external verification tool, not an agent runtime.
-- Preserve the start/observe/submit/verify/status/finish JSON interface.
+- Preserve the start/observe/submit/verify/status/finish operations. API v2 defaults CLI status to summary; explicit full views and historical v1 records remain available.
 - Optional revise/check/assess operations preserve interpretation/check history and caller assessment. Original intent, constraints and initial completion policy stay pinned within a Run.
 - Keep Measurement, Assessment, Gate results and Completion independent. Strict mode is an explicit compatibility policy; exploratory checks do not automatically become completion gates.
 - Core owns references, provenance and lifecycle. Domain modules own preparation and check normalization; do not add Develop success criteria to Core.
@@ -15,7 +15,9 @@
 - Preserve request idempotency, deadlines, budgets, ownership and late-result rejection.
 - Revalidate active checks through the Domain port when interpretation scope changes. Retired checks retain history; reactivation must advance their revision.
 - Required gates cannot be retired. Late worker startup failures cannot rewrite terminal Runs or replace a newer Job owner.
-- Prefer resume and paginated records for agent-facing reads. Preserve the original status response for compatibility.
+- Prefer resume and paginated records for agent-facing reads. Job results store observation references; new measurements have one canonical body.
+- Domain check keys are identity, not list positions. Keep approval claims unverified without an authenticated approval mechanism.
+- Pin Domain implementation/configuration identity and the executed check-set hash. Pure queries use read-only transactions.
 - Capture recovery must acquire an OS lock and retain data in quarantine; never remove workspaces or published Candidates.
 - The Python package has no runtime dependencies. Bun is currently required only for sandboxed command checks from the source checkout.
 - Do not restore the old Host, UI, provider gateway or legacy Ready engine.

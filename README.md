@@ -106,8 +106,9 @@ The storage `revision` field is a write counter, not an interpretation revision.
 
 `start --mode exploratory` selects explicit-gate completion. Use repeated
 `--required-check file-0` arguments to name required check IDs at initialization;
-IDs for Domain-generated checks are `file-0`, `file-1`, `command-0`, etc. If a
-named check is initially unknown, its first definition is pinned when prepared.
+IDs for implicitly named Domain-generated checks are `file-0`, `file-1`, `command-0`, etc.
+An initially unknown required check must be declared with `--deferred-check`;
+its first definition is pinned when prepared.
 Other proposed checks remain advisory. `--constraints constraints.json` records
 the original constraint string array and passes it to the Domain preparation port.
 The Core stores constraints without guessing semantic tests from their wording.
@@ -118,6 +119,62 @@ The default `strict` mode is an explicit all-checks policy. Newly registered che
 are also gated under that policy. Policy origin is `initial_configuration`; it
 does not authenticate a human or turn caller-authored criteria into independent
 evidence. Both modes remain `local-advisory`, unsigned, `ready=false`.
+
+### API v2 / 0.3 changes
+
+New responses use `external-harness-v2`. New Job results use
+`verification-result-v2`, with `observation_refs` instead of embedded observation
+bodies. Retrieve bodies with `records --kind measurements`; their record hashes
+are bound to the result. Historical aggregate Job results and request replays
+remain readable in their original form. No bulk rewrite of old Run state occurs.
+
+The CLI `status` default is now `--view summary`. `--view full` explicitly returns
+the full Run/history. The Python `Harness.status()` default remains full for
+embedded-call compatibility; pass `view="summary"` for bounded agent responses.
+Use `resolution.display_status`, `measurement_status`, `assessment_status`, and
+`gate_status` together. A requested completed disposition without measurement is
+reported as `closed_unverified`; it is not a passing verification or certification.
+
+Expectations and test_commands may include an explicit `id` (for example
+`{"id":"behavior","argv":["python3","-m","unittest"]}`), producing check ID
+`domain.behavior`. Without it, Develop defines identity by file path/operator or
+command argv/cwd. IDs such as file-0 are assigned once, then retained by that
+identity across reorder, insertion and reactivation. Multiple criteria with the
+same implicit identity require explicit IDs. An ambiguous change is rejected
+rather than guessed from a list position. Domain extensions can provide stable
+`check_key` and optional `check_id` metadata, distinct from measurement parameters.
+
+Unknown `--required-check` IDs are rejected. Use `--deferred-check domain.behavior`
+when a required definition is intentionally supplied later. This pins the future
+requirement without treating it as passed. The policy records the declaration,
+and gate summaries distinguish a deferred definition from an old unspecified one.
+
+`start --provenance` accepts declared_author (`user`, `model`, `application`, or
+`unknown`) and an optional approval_reference. These remain caller claims:
+approval is `not_provided` or `unverified`, with no authenticated approver. Neither
+a role label nor an approval reference grants authority. Check proposals accept
+provenance as well. Check records distinguish authored_by, generated_by and origin;
+Domain preparation and caller proposals no longer both claim to be model-authored.
+
+Every new Run pins Domain implementation and configuration identity. Method code,
+source files, and JSON instance/class configuration are hashed. Modules with
+non-JSON state must expose JSON `identity_config`; declare additional implementation
+dependencies in `identity_files`. This is change detection, not isolation against
+same-user tampering. Modules are responsible for declaring all relevant configuration
+and dependencies. Historical Runs without this binding can be read and closed as
+partial/abandoned; use a new Run for continued mutation/verification.
+
+`check_set_hash` identifies the exact ordered frozen checks independently of
+`contract_hash`. It is attached to Job, measurements, result and completion. The
+per-check Measurement row is the canonical body; a Job result stores only bound
+references. Read-only history queries use SQLite read transactions, and expiry
+reconciliation takes a write transaction only when a transition is needed. The
+store uses WAL to let readers proceed alongside writers.
+
+All JSON options accept a file path, `-` for bounded UTF-8 stdin, or an explicit
+`json:` inline prefix. Bare inline JSON gets an input-source error rather than a
+file-open traceback. Only one option per call may consume stdin. Per-input bounds,
+unique JSON keys and downstream schema checks remain enforced.
 
 Start an exploratory Run with just the original goal and workspace:
 
@@ -223,8 +280,8 @@ budgets, candidate identity, assessment, gates and recent Job summaries. It does
 not resume execution. Use `records --run-id ID --kind measurements --limit 5` for
 history pages; `next_offset` identifies the next page. Other kinds are checks,
 interpretations, activity, assessments, tasks, notes and jobs. Measurement pages
-can be filtered by `--job-id`. Limits are 1..100. Original full `status` remains
-compatible. Recovery gate summaries load and validate the latest relevant
+can be filtered by `--job-id`. Limits are 1..100. Use `status --view full` for
+the full response. Recovery gate summaries load and validate the latest relevant
 measurements without returning duplicate process output.
 
 `retire-check --run-id ID --data proposal.json --request-id KEY` accepts

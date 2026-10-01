@@ -230,7 +230,7 @@ class MeasurementEngine:
             _ref(dependency, True)
         check = _object(payload["check"], {"schemaVersion", "ref", "author", "executorId", "supportedSubjects", "parameters", "requiredCapabilities", "timeoutMs"})
         _ref(check["ref"])
-        if check["schemaVersion"] != "check-spec-v1" or check["author"] not in {"application", "user", "model"}:
+        if check["schemaVersion"] != "check-spec-v1" or check["author"] not in {"application", "user", "model", "unknown"}:
             raise MeasurementProtocolError("invalid check source")
         if _text(check["executorId"]) != "python-measurement":
             raise MeasurementProtocolError("measurement executor binding mismatch")

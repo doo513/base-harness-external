@@ -47,7 +47,14 @@ class Store:
         require(self.root.is_dir(), "STATE_DIRECTORY", "State root must be a directory")
         db = self.database
         no_links(db)
+        if db.is_file():
+            with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as existing:
+                names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master")}
+                if {"runs", "jobs", "requests", "measurements", "measurements_job"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                    self._initialized = True
+                    return
         with sqlite3.connect(db) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS jobs(job_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, data TEXT NOT NULL);
@@ -57,18 +64,22 @@ class Store:
                 CREATE TABLE IF NOT EXISTS measurements(observation_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL, job_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS measurements_run ON measurements(run_id);
+                CREATE INDEX IF NOT EXISTS measurements_job ON measurements(run_id,job_id);
             """)
         db.chmod(0o600)
         self._initialized = True
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, write=True):
         self._initialize()
         no_links(self.database)
-        connection = sqlite3.connect(self.database, timeout=10, isolation_level=None)
+        connection = sqlite3.connect(self.database if write else self.database.as_uri() + "?mode=ro",
+                                     uri=not write, timeout=10, isolation_level=None)
         try:
             connection.execute("PRAGMA busy_timeout=10000")
-            connection.execute("BEGIN IMMEDIATE")
+            if not write:
+                connection.execute("PRAGMA query_only=ON")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield connection
             connection.commit()
         except StopRun:
@@ -105,6 +116,10 @@ class Store:
         require(row is not None, "JOB_NOT_FOUND", "Verification job does not exist")
         value = decode(row[0])
         require(value.get("job_id") == job_id, "STATE_CORRUPT", "Job identity mismatch")
+        if value.get("result"):
+            result = value["result"]
+            require(result.get("result_hash") == canonical_hash({k: v for k, v in result.items() if k != "result_hash"}),
+                    "RESULT_CORRUPT", "Stored Job result digest mismatch")
         return value
 
     @staticmethod
@@ -158,6 +173,24 @@ class Store:
         return result
 
     @staticmethod
+    def validate_result(connection, job):
+        value = job.get("result")
+        if not value:
+            return
+        require(value.get("result_hash") == canonical_hash({k: v for k, v in value.items() if k != "result_hash"}),
+                "RESULT_CORRUPT", "Verification result digest mismatch")
+        if value.get("schema_version") != "verification-result-v2":
+            return  # Historical aggregate bodies remain readable, never rewritten.
+        require(value["check_set_hash"] == job["check_set_hash"] == semantics.check_set_hash(job["checks"]),
+                "RESULT_BINDING", "Verification check set mismatch")
+        for ref in value["observation_refs"]:
+            rows = connection.execute("SELECT data FROM measurements WHERE observation_id=? AND run_id=? AND job_id=?",
+                                      (ref["observation_id"], job["run_id"], job["job_id"]))
+            items = Store._measurement_rows(rows, job["run_id"])
+            require(len(items) == 1 and items[0]["record_hash"] == ref["record_hash"]
+                    and items[0].get("check_set_hash") == job["check_set_hash"], "RESULT_BINDING", "Referenced measurement changed or is missing")
+
+    @staticmethod
     def _measurement_rows(rows, run_id):
         result = []
         for row in rows:
@@ -180,6 +213,7 @@ class Store:
                 "STALE_CHECKPOINT", "Worker no longer owns this measurement")
         require(item["run_id"] == run["run_id"] and item["job_id"] == job_id and item["subject"] == job["candidate"]["subject"]
                 and any(check["ref"] == item["check_ref"] for check in job["checks"]), "CHECKPOINT_BINDING", "Measurement/check/subject binding mismatch")
+        require(item.get("check_set_hash") == job.get("check_set_hash"), "CHECKPOINT_BINDING", "Measurement check set mismatch")
         observation = item["report"]["observation"]
         require(observation["runId"] == run["run_id"] and observation["taskId"] == job_id and observation["subject"] == item["subject"]
                 and observation["checkRef"] == item["check_ref"] and observation["observationId"] == item["observation_id"],

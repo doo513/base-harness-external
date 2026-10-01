@@ -87,6 +87,19 @@ class Harness:
             run.update(status="blocked", phase="handoff", termination_reason="DEADLINE_EXCEEDED")
             self.store.save_run(connection, run)
 
+    def _refresh_for_read(self, run_id):
+        with self.store.transaction(write=False) as connection:
+            run = self.store.run(connection, run_id)
+            now = time.time()
+            expired = run["status"] == "active" and now >= run["deadline_at"]
+            if run.get("active_job"):
+                job = self.store.job(connection, run["active_job"])
+                expired = expired or (job["status"] in {"queued", "running"} and
+                                      (now > job["deadline_at"] or now - job["heartbeat_at"] > LEASE_SECONDS))
+        if expired:
+            with self.store.transaction() as connection:
+                self._refresh(connection, self.store.run(connection, run_id))
+
     def _validate_checks(self, run, contract):
         module = self._module(run)
         for item in semantics.current_checks(run):
@@ -101,10 +114,14 @@ class Harness:
                                    " is incompatible with this interpretation; revise or retire the advisory check first (" + error.code + ")") from error
 
     def start(self, *, domain_id: str, goal: str, workspace: str, parameters: dict, request_id: str, budget: dict | None = None,
-              mode: str = "strict", required_checks: list[str] | None = None, constraints: list[str] | None = None):
+              mode: str = "strict", required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
+              constraints: list[str] | None = None, provenance: dict | None = None):
         require(isinstance(mode, str) and mode in {"strict", "exploratory"}, "MODE_UNSUPPORTED", "Mode is strict or exploratory")
         require(required_checks is None or isinstance(required_checks, list), "INVALID_PARAMETERS", "required_checks must be a list")
-        require(mode != "strict" or not required_checks, "INVALID_PARAMETERS", "Strict mode already gates all checks")
+        require(deferred_checks is None or isinstance(deferred_checks, list), "INVALID_PARAMETERS", "deferred_checks must be a list")
+        require(len(required_checks or []) + len(deferred_checks or []) <= 256, "INVALID_PARAMETERS", "Too many gate IDs")
+        require(mode != "strict" or not (required_checks or deferred_checks), "INVALID_PARAMETERS", "Strict mode already gates all checks")
+        semantics.provenance(provenance)
         require(constraints is None or isinstance(constraints, list) and len(constraints) <= 100
                 and all(isinstance(c, str) and len(c) <= 2000 for c in constraints), "INVALID_PARAMETERS", "Invalid original constraint list")
         module = self.domains.resolve(domain_id)
@@ -120,6 +137,10 @@ class Harness:
             request.update(mode=mode, required_checks=required_checks or [])
         if constraints:
             request["constraints"] = constraints
+        if deferred_checks:
+            request["deferred_checks"] = deferred_checks
+        if provenance is not None:
+            request["provenance"] = provenance
         fingerprint = canonical_hash(request)
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, "start", request_id, fingerprint)
@@ -141,6 +162,7 @@ class Harness:
                    "actions": 0, "verification_attempts": 0, "generation": 0, "candidate": None,
                    "observations": [], "verification": {"status": "not_run"}, "active_job": None, "record": None}
             semantics.ensure(run, mode=mode, required_checks=required_checks, parameters=parameters,
+                             deferred_checks=deferred_checks, domain_identity=self.domains.identity(domain_id), policy_provenance=provenance,
                              questions=preparation["questions"], domain_revision=module.revision, initial_intent=original_intent)
             run["domain_preparation"] = {"status": preparation["status"], "available_operations": preparation["available_operations"]}
             if preparation["status"] == "needs_input":
@@ -224,6 +246,8 @@ class Harness:
     def _module(self, run):
         module = self.domains.resolve(run["domain_module"]["id"])
         require(module.revision == run["domain_module"]["revision"], "DOMAIN_MODULE_CHANGED", "Pinned Domain module revision changed")
+        require("identity_hash" in run["domain_module"], "DOMAIN_IDENTITY_REQUIRED", "Historical Run has no Domain implementation identity; start a new Run to mutate or verify")
+        require(self.domains.identity(module.domain_id) == run["domain_module"], "DOMAIN_MODULE_CHANGED", "Domain implementation or configuration changed")
         return module
 
     def _activities_exist(self, run, ids):
@@ -292,7 +316,7 @@ class Harness:
             return result
 
     def register_check(self, run_id: str, proposal: dict, request_id: str):
-        fields(proposal, {"check_id", "parameters", "expected_revision", "interpretation_revision"}, {"check_id", "parameters", "interpretation_revision"})
+        fields(proposal, {"check_id", "parameters", "expected_revision", "interpretation_revision", "provenance"}, {"check_id", "parameters", "interpretation_revision"})
         fingerprint = canonical_hash({"operation": "check", "proposal": proposal})
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
@@ -304,13 +328,15 @@ class Harness:
             latest = run["interpretations"][-1]["ref"]
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Check proposal refers to an older interpretation")
             key = semantics.named(proposal["check_id"])
-            require(not key.startswith(("file-", "command-")), "CHECK_ID_RESERVED", "Domain-generated check IDs are reserved")
+            require(not key.startswith(("file-", "command-", "domain.")), "CHECK_ID_RESERVED", "Domain-generated check IDs are reserved")
             old = semantics.latest_checks(run).get(key)
             require(type(proposal.get("expected_revision", 0)) is int and proposal.get("expected_revision", 0) == (old["ref"]["revision"] if old else 0), "STALE_CHECK", "Check revision changed")
             require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate checks cannot be revised")
             require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
             parameters = self._module(run).normalize_check(copy.deepcopy(proposal["parameters"]), run["contract"])
-            created = semantics.check_record(run_id, key, semantics.next_check_revision(run, key), parameters, latest)
+            author = semantics.provenance(proposal.get("provenance"))["declared_author"]
+            created = semantics.check_record(run_id, key, semantics.next_check_revision(run, key), parameters, latest,
+                                             author=author, generator={"kind": "domain_normalization", "module": run["domain_module"]})
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]
@@ -335,7 +361,7 @@ class Harness:
             latest = run["interpretations"][-1]["ref"]
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Interpretation changed")
             key = semantics.named(proposal["check_id"])
-            require(not key.startswith(("file-", "command-")), "CHECK_ID_RESERVED", "Revise Domain parameters to remove a Domain-generated check")
+            require(not key.startswith(("file-", "command-", "domain.")), "CHECK_ID_RESERVED", "Revise Domain parameters to remove a Domain-generated check")
             previous = semantics.latest_checks(run).get(key)
             require(previous is not None and previous["active"], "CHECK_NOT_ACTIVE", "Check is not active")
             require(type(proposal["expected_revision"]) is int and proposal["expected_revision"] == previous["ref"]["revision"], "STALE_CHECK", "Check revision changed")
@@ -441,12 +467,13 @@ class Harness:
             job.update(checks=checks, candidate=copy.deepcopy(run["candidate"]),
                        interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
                        completed_checks=0, total_checks=len(checks))
+            job.update(check_set_hash=semantics.check_set_hash(checks), domain_identity=copy.deepcopy(run["domain_module"]))
             require(job["total_checks"] > 0, "CHECKS_REQUIRED", "Register a measurement before verification")
             run.update(active_job=job_id, phase="verifying", verification={"status": "queued", "job_id": job_id},
                        verification_attempts=run["verification_attempts"] + 1)
             self.store.save_job(connection, job)
             self.store.save_run(connection, run)
-            result = response(run_id=run_id, job_id=job_id, status="queued")
+            result = response(run_id=run_id, job_id=job_id, status="queued", check_set_hash=job["check_set_hash"])
             self.store.remember(connection, run_id, request_id, fingerprint, result)
         # Durable queue entry exists before spawning. Replayed requests never spawn twice.
         from .worker import spawn_worker
@@ -498,35 +525,48 @@ class Harness:
     def cleanup(self, run_id, *, apply=False, min_age_seconds=3600):
         return response(**maintenance.cleanup(self.store, run_id, apply=apply, min_age_seconds=min_age_seconds))
 
-    def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False):
-        with self.store.transaction() as connection:
+    def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False, view="full"):
+        require(view in {"summary", "full"}, "INVALID_VIEW", "Status view is summary or full")
+        self._refresh_for_read(run_id)
+        if view == "summary":
+            result = self.resume(run_id) if not job_id else response(**queries.job_summary(self, run_id, job_id))
+            if check_workspace:
+                expected = (result.get("candidate") or result.get("job") or {}).get("candidate_hash")
+                result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, expected)
+            return result
+        with self.store.transaction(write=False) as connection:
             run = self.store.run(connection, run_id)
-            self._refresh(connection, run)
             jobs = [decode_job[0] for decode_job in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))]
             if job_id:
                 job = self.store.job(connection, job_id)
                 require(job["run_id"] == run_id, "JOB_RUN_MISMATCH", "Job belongs to another Run")
-                return response(run_id=run_id, job=job, measurements=self.store.measurements(connection, run_id, job_id))
+                self.store.validate_result(connection, job)
+                return response(run_id=run_id, view="full", job=job, measurements=self.store.measurements(connection, run_id, job_id))
             if run["record"]:
                 require(run["record"].get("record_hash") == canonical_hash({k: v for k, v in run["record"].items() if k != "record_hash"}),
                         "RECORD_CORRUPT", "Local completion record digest mismatch")
             measured = self.store.measurements(connection, run_id)
             result = response(run=run, jobs=[self.store.job(connection, item) for item in jobs], measurements=measured,
+                              view="full", resolution=semantics.resolution(run, semantics.gates(run, measured)),
                               closeout={"measurement": run["verification"], "assessment": semantics.assessment_view(run),
                                         "gates": semantics.gates(run, measured), "lifecycle": semantics.lifecycle(run),
                                         "termination_reason": run.get("termination_reason")})
         if check_workspace:
-            matches = False
-            if run["candidate"]:
-                try:
-                    def same(entry):
-                        data, mode = read_file(Path(run["workspace"]), entry["path"])
-                        return hashlib.sha256(data).hexdigest() == entry["sha256"] and mode == run["candidate"]["executable"][entry["path"]]
-                    matches = all(same(entry) for entry in run["candidate"]["manifest"]["files"])
-                except (OSError, HarnessError):
-                    matches = False
-            result["current_workspace_matches_submitted_files"] = matches
+            result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, (run["candidate"] or {}).get("candidate_hash"))
         return result
+
+    def _workspace_matches(self, run_id, expected_candidate_hash):
+        with self.store.transaction(write=False) as connection:
+            run = self.store.run(connection, run_id)
+        if not run["candidate"] or run["candidate"]["candidate_hash"] != expected_candidate_hash:
+            return False
+        try:
+            def same(entry):
+                data, mode = read_file(Path(run["workspace"]), entry["path"])
+                return hashlib.sha256(data).hexdigest() == entry["sha256"] and mode == run["candidate"]["executable"][entry["path"]]
+            return all(same(entry) for entry in run["candidate"]["manifest"]["files"])
+        except (OSError, HarnessError):
+            return False
 
     def finish(self, run_id: str, request_id: str, *, outcome: str, summary: str = "", assessment: dict | None = None):
         require(outcome in {"completed", "partial", "abandoned"} and isinstance(summary, str) and len(summary) <= 16000,
@@ -544,7 +584,7 @@ class Harness:
             require(run["status"] != "finished", "RUN_CLOSED", "Run is already finished")
             if assessment is not None:
                 self._assessment_record(connection, run, assessment)
-            measured = self.store.measurements(connection, run_id)
+            measured = self.store.gate_measurements(connection, run)
             gate_results = semantics.gates(run, measured)
             if outcome == "completed":
                 require(run["status"] == "active" and time.time() < run["deadline_at"], "RUN_CLOSED", "Expired/blocked Runs can only finish as partial or abandoned")
@@ -559,14 +599,18 @@ class Harness:
                 if run["policy"]["mode"] == "strict":
                     require(job is not None and job["status"] == "completed", "VERIFICATION_REQUIRED", "Strict policy requires a completed verifier job")
                 if observed:
+                    self.store.validate_result(connection, job)
                     require(
                         observed.get("result_hash") == canonical_hash({k: v for k, v in observed.items() if k != "result_hash"}) and
                         observed.get("result_hash") == run["verification"].get("result_hash"), "RESULT_CORRUPT", "Verification result digest/status mismatch")
                     require(job["candidate_hash"] == run["candidate"]["candidate_hash"] and job["contract_hash"] == run["contract"]["contract_hash"],
                         "RESULT_BINDING", "Verification does not cover the current candidate/contract")
+                    require(job.get("check_set_hash") == semantics.check_set_hash(semantics.current_checks(run)),
+                            "RESULT_BINDING", "Verification does not cover the current check set")
                 if run["candidate"]:
                     validate_candidate(run["candidate"], self.store.directory(run_id) / identifier(run["candidate"]["candidate_id"], "candidate") / "payload")
                 require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
+                self._module(run)
             if run["active_job"]:
                 job = self.store.job(connection, run["active_job"])
                 job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
@@ -583,11 +627,14 @@ class Harness:
                           intent_ref=run["intent"]["ref"], interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
                           measurement=copy.deepcopy(run["verification"]), assessment=semantics.assessment_view(run), gates=gate_results,
                           unresolved_work=[task["task_id"] for task in run["logical_tasks"] if task["state"] != "settled"])
+            record.update(check_set_hash=semantics.check_set_hash(semantics.current_checks(run)), domain_identity=run["domain_module"],
+                          outcome_meaning="caller_requested_disposition_not_verification_success")
             record["unresolved_verification_jobs"] = [row[0] for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))
                                                       if self.store.job(connection, row[0]).get("cleanup") not in {"complete", "not_started"}]
-            record["record_hash"] = canonical_hash(record)
             run.update(status="finished", phase="finished", record=record, termination_reason=reason)
+            record["resolution"] = semantics.resolution(run, gate_results)
+            record["record_hash"] = canonical_hash(record)
             self.store.save_run(connection, run)
-            result = response(run_id=run_id, record=record)
+            result = response(run_id=run_id, record=record, resolution=record["resolution"])
             self.store.remember(connection, run_id, request_id, fingerprint, result)
             return result

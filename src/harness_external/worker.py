@@ -137,10 +137,12 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
     result = None
     failure = None
     reports = []
+    comparisons = []
     environment = {}
     try:
         require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
         require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
+        require(job.get("check_set_hash") == semantics.check_set_hash(job["checks"]), "CHECK_SET_CHANGED", "Pinned check set changed")
         candidate = job["candidate"]
         payload = store.directory(run["run_id"]) / identifier(candidate["candidate_id"], "candidate") / "payload"
         validate_candidate(candidate, payload)
@@ -180,28 +182,28 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                           "attempt": run["verification_attempts"], "check_id": check_record["check_id"], "check_ref": check_record["ref"],
                           "subject": candidate["subject"], "candidate_hash": candidate["candidate_hash"], "contract_hash": job["contract_hash"],
                           "interpretation_ref": job["interpretation_ref"], "policy_ref": job["policy_ref"],
+                          "check_set_hash": job["check_set_hash"], "domain_identity": job["domain_identity"],
                           "comparison_status": semantics.comparison_status(report), "origin": "verifier", "trust": "locally_measured",
                           "report": item}
             checkpoint["record_hash"] = canonical_hash(checkpoint)
             with store.transaction() as connection:
                 store.checkpoint(connection, job_id, owner, checkpoint)
-            reports.append(item)
+            reports.append({"observation_id": checkpoint["observation_id"], "record_hash": checkpoint["record_hash"]})
+            comparisons.append(checkpoint["comparison_status"])
         validate_candidate(candidate, payload)
-        def passed(report):
-            observation = report["observation"]["result"]
-            comparisons = [item for item in observation.get("findings", []) if item.get("kind") == "comparison"]
-            return observation["execution"] == "completed" and bool(comparisons) and all(item["result"] == "pass" for item in comparisons)
-        status = "passed" if all(passed(report) for report in reports) else "failed"
-        if any(report["observation"]["result"]["execution"] in {"not_run", "error"} for report in reports):
+        status = "passed" if all(s == "passed" for s in comparisons) else "failed"
+        if "incomplete" in comparisons:
             status = "incomplete"
         result = {"status": status, "candidate_hash": job["candidate_hash"], "contract_hash": job["contract_hash"],
-                  "environment": environment, "observations": reports, "finished_at": time.time()}
+                  "schema_version": "verification-result-v2", "check_set_hash": job["check_set_hash"],
+                  "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports, "finished_at": time.time()}
         result["result_hash"] = canonical_hash(result)
     except Exception as error:
         failure = {"code": getattr(error, "code", "VERIFICATION_ERROR"), "message": str(redact(str(error)))[:2000]}
         if reports:
             result = {"status": "incomplete", "candidate_hash": job["candidate_hash"], "contract_hash": job["contract_hash"],
-                      "environment": environment, "observations": reports, "finished_at": time.time()}
+                      "schema_version": "verification-result-v2", "check_set_hash": job["check_set_hash"],
+                      "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports, "finished_at": time.time()}
             result["result_hash"] = canonical_hash(result)
     finally:
         done.set()
@@ -218,7 +220,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         if valid:
             current.update(status="error" if failure else "completed", result=result, error=failure)
             active.update(active_job=None, phase="review", verification={"status": "error" if failure else result["status"],
-                          "job_id": job_id, "result_hash": result["result_hash"] if result else None})
+                          "job_id": job_id, "result_hash": result["result_hash"] if result else None, "check_set_hash": job["check_set_hash"]})
             store.save_run(connection, active)
         elif current["status"] == "running":
             current.update(status="interrupted", error={"code": "LATE_RESULT_DISCARDED", "message": "Result arrived after ownership or deadline changed"})

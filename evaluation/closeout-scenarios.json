@@ -45,6 +45,18 @@
     {"id": "capture-recovery", "test": "test_cleanup_quarantines_only_unlocked_abandoned_staging", "property": "Recovery retains abandoned captures without moving live captures or published Candidates"},
     {"id": "doctor-assurance", "test": "test_doctor_does_not_claim_sandbox_without_probe", "property": "Environment discovery alone does not claim Sandbox execution readiness"},
     {"id": "cli-recovery", "test": "test_cli_recovery_tools_roundtrip", "property": "The actual CLI supports discovery, recovery, history and closure"},
-    {"id": "checkout-launcher", "test": "test_checkout_launcher_works_from_other_directory", "property": "The checkout launcher works from a foreign directory with Unicode and spaces in the state path"}
+    {"id": "checkout-launcher", "test": "test_checkout_launcher_works_from_other_directory", "property": "The checkout launcher works from a foreign directory with Unicode and spaces in the state path"},
+    {"id": "stable-domain-checks", "test": "test_reordering_and_insertion_preserve_check_identity_and_gate", "property": "Reordering and insertion preserve existing check references and gate identity"},
+    {"id": "named-checks", "test": "test_explicit_check_names_and_ambiguous_defaults", "property": "Named checks resolve ambiguous criteria without weakening a gate"},
+    {"id": "explicit-deferred-gates", "test": "test_deferred_gate_is_explicit_and_typos_are_rejected", "property": "Unknown gates are rejected unless their delayed definition is declared"},
+    {"id": "provenance-and-approval", "test": "test_policy_approval_claim_and_check_generator_stay_distinct", "property": "Authorship, Domain generation and unverified approval claims stay separate"},
+    {"id": "unverified-resolution", "test": "test_unverified_closure_has_unambiguous_resolution", "property": "Unverified closure is not presented as measurement success"},
+    {"id": "bound-check-set", "test": "test_dynamic_check_set_and_single_copy_measurements", "property": "Dynamic checks change the execution set hash while reports are stored only once"},
+    {"id": "measurement-reference-integrity", "test": "test_missing_measurement_cannot_satisfy_result_reference", "property": "Missing referenced facts invalidate a verifier result"},
+    {"id": "domain-implementation-identity", "test": "test_external_domain_changes_are_detected_with_same_revision", "property": "Domain implementation or configuration drift is detected despite the same revision label"},
+    {"id": "read-write-separation", "test": "test_pure_reader_does_not_block_writer_and_sees_committed_snapshot", "property": "Read-only recovery queries proceed during an uncommitted writer transaction"},
+    {"id": "summary-size", "test": "test_summary_size_does_not_scale_with_measurement_bodies", "property": "Summary output stays small across repeated measurements with substantial content"},
+    {"id": "legacy-job-history", "test": "test_historical_aggregate_results_remain_readable", "property": "Historical embedded observation results remain readable without rewriting"},
+    {"id": "cli-json-input", "test": "test_cli_json_sources_and_default_summary", "property": "CLI stdin and explicit inline JSON work, source errors are actionable, and default status is compact"}
   ]
 }

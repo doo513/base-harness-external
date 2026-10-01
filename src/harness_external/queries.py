@@ -9,8 +9,17 @@ def page_bounds(offset, limit):
 
 
 def job_view(job):
-    return {key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
-            "deadline_at", "completed_checks", "total_checks", "error")}
+    return {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
+            "deadline_at", "completed_checks", "total_checks", "error", "check_set_hash", "candidate_hash")},
+            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash")} if job.get("result") else None}
+
+
+def job_summary(api, run_id, job_id):
+    with api.store.transaction(write=False) as connection:
+        job = api.store.job(connection, job_id)
+        require(job["run_id"] == run_id, "JOB_RUN_MISMATCH", "Job belongs to another Run")
+        return {"run_id": run_id, "view": "summary", "job": job_view(job),
+                "measurement_count": connection.execute("SELECT count(*) FROM measurements WHERE run_id=? AND job_id=?", (run_id, job_id)).fetchone()[0]}
 
 
 def run_view(run):
@@ -23,21 +32,24 @@ def run_view(run):
 
 def list_runs(api, *, offset=0, limit=20):
     offset, limit = page_bounds(offset, limit)
-    with api.store.transaction() as connection:
+    with api.store.transaction(write=False) as connection:
+        ids = [row[0] for row in connection.execute("SELECT run_id FROM runs ORDER BY rowid LIMIT ? OFFSET ?", (limit, offset))]
+    for key in ids:
+        api._refresh_for_read(key)
+    with api.store.transaction(write=False) as connection:
         total = connection.execute("SELECT count(*) FROM runs").fetchone()[0]
         ids = [row[0] for row in connection.execute("SELECT run_id FROM runs ORDER BY rowid LIMIT ? OFFSET ?", (limit, offset))]
         items = []
         for key in ids:
             run = api.store.run(connection, key)
-            api._refresh(connection, run)
             items.append(run_view(run))
     return {"items": items, "total": total, "next_offset": offset + len(items) if offset + len(items) < total else None}
 
 
 def resume(api, run_id):
-    with api.store.transaction() as connection:
+    api._refresh_for_read(run_id)
+    with api.store.transaction(write=False) as connection:
         run = api.store.run(connection, run_id)
-        api._refresh(connection, run)
         if run["record"]:
             require(run["record"].get("record_hash") == canonical_hash({k: v for k, v in run["record"].items() if k != "record_hash"}),
                     "RECORD_CORRUPT", "Local completion record digest mismatch")
@@ -48,7 +60,9 @@ def resume(api, run_id):
         counts = {name: len(run[key]) for name, key in COLLECTIONS.items()}
         counts["measurements"] = connection.execute("SELECT count(*) FROM measurements WHERE run_id=?", (run_id,)).fetchone()[0]
         counts["jobs"] = connection.execute("SELECT count(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]
-        return {"run": run_view(run), "intent": run["intent"], "policy": run["policy"],
+        gate_results = semantics.gates(run, api.store.gate_measurements(connection, run))
+        return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
+                "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),
                 "interpretation": {key: latest[key] for key in ("ref", "goal_summary", "assumptions", "open_questions")},
                 "domain_questions": run["domain_questions"], "domain_preparation": run["domain_preparation"],
                 "limits": run["limits"], "usage": {"actions": run["actions"], "verification_attempts": run["verification_attempts"]},
@@ -56,7 +70,7 @@ def resume(api, run_id):
                 "checks": [{"check_id": c["check_id"], "ref": c["ref"], "kind": c["spec"]["parameters"]["kind"],
                             "gated": c["check_id"] in run["gate_bindings"]} for c in checks],
                 "measurement": run["verification"], "assessment": semantics.assessment_view(run),
-                "gates": semantics.gates(run, api.store.gate_measurements(connection, run)),
+                "gates": gate_results,
                 "unresolved_work": [t["task_id"] for t in run["logical_tasks"] if t["state"] != "settled"],
                 "recent_jobs": jobs, "history_counts": counts, "record": run["record"]}
 
@@ -69,7 +83,7 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
     offset, limit = page_bounds(offset, limit)
     require(isinstance(kind, str) and kind in {*COLLECTIONS, "measurements", "jobs"}, "INVALID_PARAMETERS", "Unknown history kind")
     require(job_id is None or kind == "measurements", "INVALID_PARAMETERS", "job_id only filters measurements")
-    with api.store.transaction() as connection:
+    with api.store.transaction(write=False) as connection:
         run = api.store.run(connection, run_id)
         if job_id:
             require(api.store.job(connection, job_id)["run_id"] == run_id, "JOB_RUN_MISMATCH", "Job belongs to another Run")

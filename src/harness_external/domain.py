@@ -11,7 +11,7 @@ from .errors import HarnessError, require, fields, relative_path, integer, limit
 
 
 def normalize_file(expectation, inputs):
-    fields(expectation, {"path", "operator", "expected"}, {"path", "operator", "expected"})
+    fields(expectation, {"id", "path", "operator", "expected"}, {"path", "operator", "expected"})
     target = relative_path(expectation["path"])
     require(target in inputs, "INVALID_PARAMETERS", "Expectation target must be an input")
     operator, expected = expectation["operator"], expectation["expected"]
@@ -19,18 +19,29 @@ def normalize_file(expectation, inputs):
             "INVALID_PARAMETERS", "Use equals, contains or sha256 with a bounded string")
     require(operator != "contains" or bool(expected), "INVALID_PARAMETERS", "Empty substring checks are vacuous")
     require(operator != "sha256" or bool(re.fullmatch(r"[a-f0-9]{64}", expected)), "INVALID_PARAMETERS", "Expected sha256 is invalid")
-    return {"kind": "file", **copy.deepcopy(expectation)}
+    return {"kind": "file", **{k: v for k, v in copy.deepcopy(expectation).items() if k != "id"},
+            **check_identity(expectation, "file", {"path": target, "operator": operator})}
+
+
+def check_identity(value, kind, semantic_key):
+    if "id" in value:
+        require(isinstance(value["id"], str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", value["id"])),
+                "INVALID_CHECK_ID", "Check id must be a bounded logical name")
+        return {"check_key": "named:" + value["id"], "check_id": "domain." + value["id"]}
+    return {"check_key": kind + ":" + canonical_hash(semantic_key)}
 
 
 def normalize_command(command):
-    fields(command, {"argv", "cwd", "timeout_seconds"}, {"argv"})
+    fields(command, {"id", "argv", "cwd", "timeout_seconds"}, {"argv"})
     argv = command["argv"]
     require(isinstance(argv, list) and 1 <= len(argv) <= 64 and all(
         isinstance(a, str) and len(a) <= 8192 and "\x00" not in a for a in argv) and bool(argv[0].strip()),
         "INVALID_PARAMETERS", "Test command must be a bounded argv array")
     require(len(canonical_bytes(argv)) <= 64000, "INVALID_PARAMETERS", "Test argv exceeds 64 KiB")
-    return {"kind": "command", "argv": copy.deepcopy(argv), "cwd": relative_path(command.get("cwd", "."), directory=True),
-            "timeout_seconds": integer(command.get("timeout_seconds", 30), 1, 120, "timeout_seconds"), "expectedExitCode": 0}
+    cwd = relative_path(command.get("cwd", "."), directory=True)
+    return {"kind": "command", "argv": copy.deepcopy(argv), "cwd": cwd,
+            "timeout_seconds": integer(command.get("timeout_seconds", 30), 1, 120, "timeout_seconds"), "expectedExitCode": 0,
+            **check_identity(command, "command", {"argv": argv, "cwd": cwd})}
 
 
 def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) -> dict:
@@ -68,6 +79,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
             "NEEDS_INPUT", "Execution requires test_commands; structural explicitly excludes command execution")
     for command in commands:
         checks.append(normalize_command(command))
+    require(len({c["check_key"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS",
+            "Checks with the same target/operator or command need distinct explicit id values")
     body = {
         "schema_version": "external-goal-contract-v1", "domain_id": "develop", "domain_revision": "develop-external-1",
         "source_domain": {"id": source_domain["id"], "revision": source_domain["revision"], "manifest_hash": canonical_hash(source_domain)},
