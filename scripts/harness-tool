@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+harness_python="$harness_root/.venv/bin/python"
+if [[ ! -x "$harness_python" ]]; then
+  harness_python="$(command -v python3)"
+fi
+# wsl.exe --exec does not load interactive shell startup files. Preserve an
+# explicit BUN selection; otherwise discover Bun's standard per-user install.
+if [[ -z "${BUN:-}" ]] && ! command -v bun >/dev/null 2>&1 && [[ -x "${HOME:-}/.bun/bin/bun" ]]; then
+  export BUN="${HOME}/.bun/bin/bun"
+fi
+exec "$harness_python" -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from harness_external.__main__ import main; raise SystemExit(main())' "$harness_root/src" "$@"

@@ -110,11 +110,13 @@ class Store:
     @staticmethod
     def save_run(connection, run: dict):
         run["revision"] += 1
-        connection.execute("INSERT OR REPLACE INTO runs VALUES(?,?)", (run["run_id"], canonical_bytes(run).decode()))
+        connection.execute("INSERT INTO runs VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET data=excluded.data",
+                           (run["run_id"], canonical_bytes(run).decode()))
 
     @staticmethod
     def save_job(connection, job: dict):
-        connection.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?)", (job["job_id"], job["run_id"], canonical_bytes(job).decode()))
+        connection.execute("INSERT INTO jobs VALUES(?,?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data",
+                           (job["job_id"], job["run_id"], canonical_bytes(job).decode()))
 
     @staticmethod
     def replay(connection, scope: str, request_id: str, fingerprint: str):
@@ -130,13 +132,33 @@ class Store:
         connection.execute("INSERT INTO requests VALUES(?,?,?,?)", (scope, request_id, fingerprint, canonical_bytes(response).decode()))
 
     @staticmethod
-    def measurements(connection, run_id: str, job_id: str | None = None):
+    def measurements(connection, run_id: str, job_id: str | None = None, *, limit=None, offset=0):
         query = "SELECT data FROM measurements WHERE run_id=?"
         args = [run_id]
         if job_id:
             query += " AND job_id=?"
             args.append(job_id)
-        rows = connection.execute(query + " ORDER BY rowid", args)
+        query += " ORDER BY rowid"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            args.extend([limit, offset])
+        return Store._measurement_rows(connection.execute(query, args), run_id)
+
+    @staticmethod
+    def gate_measurements(connection, run):
+        if not run.get("candidate"):
+            return []
+        result = []
+        for ref in run["gate_bindings"].values():
+            rows = connection.execute("""SELECT data FROM measurements WHERE run_id=?
+                AND json_extract(data,'$.check_ref')=? AND json_extract(data,'$.subject')=?
+                ORDER BY rowid DESC LIMIT 1""", (run["run_id"], canonical_bytes(ref).decode(),
+                                                  canonical_bytes(run["candidate"]["subject"]).decode()))
+            result.extend(Store._measurement_rows(rows, run["run_id"]))
+        return result
+
+    @staticmethod
+    def _measurement_rows(rows, run_id):
         result = []
         for row in rows:
             item = decode(row[0])

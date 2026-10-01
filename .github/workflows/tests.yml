@@ -1,0 +1,35 @@
+name: Common Harness checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_sandbox:
+        description: Run the namespace test (runner must permit unprivileged namespaces)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  common:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest -q tests
+      - run: bun test tests/sandbox.test.ts
+      - run: python scripts/evaluate.py --output evaluation/ci.json
+      - if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_sandbox }}
+        run: BASE_HARNESS_EXTERNAL_LIVE=1 python -m pytest -q tests/test_external_harness.py -k live_sandboxed
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: common-evaluation
+          path: evaluation/ci.json

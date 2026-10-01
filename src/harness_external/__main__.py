@@ -11,6 +11,7 @@ from harness.common import canonical_bytes
 from . import API_VERSION, ASSURANCE
 from .errors import HarnessError
 from .service import Harness
+from . import diagnostics, queries
 
 
 def load_json(path: str) -> dict:
@@ -34,25 +35,55 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--required-check", action="append", default=[], help="initial explicit gate check ID; exploratory mode only")
     start.add_argument("--constraints", help="optional JSON string array of original constraints")
     start.add_argument("--budget", help="optional JSON file with max_actions/max_verifications/timeout_seconds")
-    for name in ("observe", "revise", "check", "assess", "submit", "verify", "status", "finish"):
+    doctor = commands.add_parser("doctor")
+    doctor.add_argument("--sandbox", action="store_true", help="run a controlled command through the strict Sandbox")
+    listing = commands.add_parser("list-runs")
+    listing.add_argument("--offset", type=int, default=0)
+    listing.add_argument("--limit", type=int, default=20)
+    for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--run-id", required=True)
-        if name in {"observe", "revise", "check", "assess"}:
+        if name in {"observe", "revise", "check", "retire-check", "assess"}:
             cmd.add_argument("--data", required=True, help="JSON record/proposal for this operation")
         if name == "status":
             cmd.add_argument("--job-id")
             cmd.add_argument("--check-workspace", action="store_true")
+        elif name == "cancel":
+            cmd.add_argument("--job-id", required=True)
+        elif name == "records":
+            cmd.add_argument("--kind", choices=(*queries.COLLECTIONS, "jobs", "measurements"), required=True)
+            cmd.add_argument("--job-id")
+            cmd.add_argument("--offset", type=int, default=0)
+            cmd.add_argument("--limit", type=int, default=20)
+        elif name == "cleanup":
+            cmd.add_argument("--apply", action="store_true", help="quarantine abandoned captures; default is preview")
+            cmd.add_argument("--min-age-seconds", type=int, default=3600)
         elif name == "finish":
             cmd.add_argument("--outcome", choices=("completed", "partial", "abandoned"), required=True)
             cmd.add_argument("--summary", default="")
             cmd.add_argument("--assessment", help="optional final caller assessment JSON, including uncertainty and observation references")
-        if name != "status":
+        if name not in {"status", "resume", "records", "cleanup"}:
             cmd.add_argument("--request-id", required=True, help="stable idempotency key; do not reuse for a different action")
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
         api = Harness(args.state_dir)
-        if args.command == "start":
+        if args.command == "doctor":
+            from .service import response
+            result = response(**diagnostics.doctor(api.store, sandbox=args.sandbox))
+        elif args.command == "list-runs":
+            result = api.list_runs(offset=args.offset, limit=args.limit)
+        elif args.command == "resume":
+            result = api.resume(args.run_id)
+        elif args.command == "records":
+            result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id)
+        elif args.command == "cleanup":
+            result = api.cleanup(args.run_id, apply=args.apply, min_age_seconds=args.min_age_seconds)
+        elif args.command == "cancel":
+            result = api.cancel(args.run_id, args.job_id, args.request_id)
+        elif args.command == "retire-check":
+            result = api.retire_check(args.run_id, load_json(args.data), args.request_id)
+        elif args.command == "start":
             result = api.start(domain_id=args.domain, goal=args.goal, workspace=args.workspace,
                                parameters=load_json(args.parameters) if args.parameters else {}, budget=load_json(args.budget) if args.budget else None,
                                request_id=args.request_id, mode=args.mode, required_checks=args.required_check,
@@ -75,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             result = api.finish(args.run_id, args.request_id, outcome=args.outcome, summary=args.summary,
                                 assessment=load_json(args.assessment) if args.assessment else None)
         print(canonical_bytes({"ok": True, **result}).decode())
-        return 0
+        return 2 if args.command == "doctor" and not result["healthy"] else 0
     except (HarnessError, MeasurementProtocolError, OSError, ValueError, sqlite3.Error) as error:
         print(canonical_bytes({"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
                                "error": {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]}}).decode())

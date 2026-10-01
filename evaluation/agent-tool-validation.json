@@ -1,0 +1,47 @@
+{
+  "schema_version": "external-agent-tool-validation-v1",
+  "validated_on": "2026-10-01",
+  "head_commit": "638ebfec1d7914cbb77e75eedfbdc60aca1ad395",
+  "dirty": true,
+  "tested_tree_digest": "778b96133f0c0a943fc2809d8953b2502ce4d4739a3f2abdd17d9ede3b69aab7",
+  "architecture": "The existing model agent calls the Harness CLI; the Harness never calls a model.",
+  "checks": {
+    "python_suite": {"passed": 104, "skipped_opt_in": 1},
+    "semantic_scenarios": {"passed": 43, "failed": 0, "skipped": 0, "missing": 0, "source_unchanged": true},
+    "sandbox_unit": {"passed": 3, "skipped_windows_only": 3},
+    "real_namespace_sandbox": {
+      "passed": 1,
+      "run_id": "run_3f885f29c9fa486b9e5254e66207c827",
+      "job_id": "job_68634d90315b4fac9cd147d73b8ebcb7",
+      "workspace_unchanged": true
+    },
+    "windows_to_wsl_tool_call": {
+      "path": "Windows PowerShell -> wsl.exe -d Ubuntu-24.04 --exec bash -> scripts/harness-tool doctor --sandbox",
+      "healthy": true,
+      "command_execution_verified": true,
+      "command_exit_code": 0,
+      "bun": "/home/doo33/.bun/bin/bun",
+      "noninteractive_path_discovery": "The launcher finds the standard per-user Bun installation when PATH omits it.",
+      "execution_environment": "Approved tool execution outside the outer sandbox; Harness namespace isolation remains enabled."
+    },
+    "git_diff_check": "passed"
+  },
+  "implemented_scope": [
+    "Domain revalidation of current checks on interpretation revision and verification",
+    "Advisory check retirement and monotonic reactivation",
+    "Owned worker startup error handling and explicit per-job cancellation",
+    "Stable paginated Run discovery, recovery summaries and history",
+    "OS-lock-protected recoverable capture quarantine",
+    "Local readiness diagnostics and generic checkout CLI launcher",
+    "External agent calling instructions and GitHub CI configuration"
+  ],
+  "limitations": [
+    "No commercial AGY model session was launched or evaluated.",
+    "Windows-to-WSL transport was tested; Windows-native Harness execution was not.",
+    "GitHub Actions configuration was added locally; remote CI has not run.",
+    "Capture recovery is explicit and recoverable, not automatic deletion of all orphaned files.",
+    "Same-user tamper-resistant certification remains outside the local-advisory scope."
+  ],
+  "assurance": "local-advisory",
+  "ready": false
+}

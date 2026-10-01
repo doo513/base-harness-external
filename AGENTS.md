@@ -13,6 +13,10 @@
 - Do not edit or publish workspace files; verify pinned snapshots.
 - Test commands may execute only through the existing strict Sandbox adapter. Never add an unsandboxed fallback.
 - Preserve request idempotency, deadlines, budgets, ownership and late-result rejection.
+- Revalidate active checks through the Domain port when interpretation scope changes. Retired checks retain history; reactivation must advance their revision.
+- Required gates cannot be retired. Late worker startup failures cannot rewrite terminal Runs or replace a newer Job owner.
+- Prefer resume and paginated records for agent-facing reads. Preserve the original status response for compatibility.
+- Capture recovery must acquire an OS lock and retain data in quarantine; never remove workspaces or published Candidates.
 - The Python package has no runtime dependencies. Bun is currently required only for sandboxed command checks from the source checkout.
 - Do not restore the old Host, UI, provider gateway or legacy Ready engine.
 - Run Python tests and an opt-in real Sandbox test when changing execution boundaries.

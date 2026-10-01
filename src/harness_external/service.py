@@ -7,15 +7,17 @@ from pathlib import Path
 import time
 import uuid
 import copy
+import tempfile
 
 from harness import measurement_v5, common
 from harness.common import canonical_bytes, canonical_hash, redact
 from . import API_VERSION, ASSURANCE
-from .errors import HarnessError, fields, limits, require
+from .errors import HarnessError, fields, integer, limits, require
 from .snapshots import capture, no_links, read_file, validate_candidate
 from .store import Store, StopRun, identifier
 from . import semantics
 from .registry import builtin_registry
+from . import queries, maintenance
 
 
 LEASE_SECONDS = 20
@@ -26,6 +28,7 @@ def verifier_identity() -> dict:
              Path(__file__).with_name("worker.py"), Path(__file__).with_name("snapshots.py"), Path(__file__).with_name("store.py"),
              Path(__file__).with_name("develop_manifest.json"), Path(__file__).with_name("errors.py"),
              Path(__file__).with_name("semantics.py"), Path(__file__).with_name("registry.py")]
+    paths += [Path(queries.__file__), Path(maintenance.__file__)]
     bridge = Path(__file__).resolve().parents[2] / "runtime" / "script" / "external-harness-sandbox.ts"
     sandbox = bridge.parent.parent / "packages" / "security" / "src" / "sandbox.ts"
     sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
@@ -71,12 +74,31 @@ class Harness:
             run.update(status="blocked", phase="handoff", termination_reason=reason)
             if run.get("active_job"):
                 job = self.store.job(connection, run["active_job"])
-                job.update(status="cancelled", cleanup="pending")
+                job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
                 self.store.save_job(connection, job)
                 run["active_job"] = None
             self.store.save_run(connection, run)
             raise StopRun(reason, "Harness limit reached; hand off to the user. External model execution is not controlled.")
         run["actions"] += 1
+
+    def _refresh(self, connection, run):
+        self._reconcile(connection, run)
+        if run["status"] == "active" and time.time() >= run["deadline_at"]:
+            run.update(status="blocked", phase="handoff", termination_reason="DEADLINE_EXCEEDED")
+            self.store.save_run(connection, run)
+
+    def _validate_checks(self, run, contract):
+        module = self._module(run)
+        for item in semantics.current_checks(run):
+            parameters = copy.deepcopy(item["spec"]["parameters"])
+            if parameters["kind"] == "command":
+                parameters["timeout_seconds"] = item["spec"]["timeoutMs"] // 1000
+            try:
+                normalized = module.normalize_check(parameters, copy.deepcopy(contract))
+                require(semantics.check_equivalent(item, normalized), "CHECK_SCOPE_CONFLICT", "Check normalization changed")
+            except HarnessError as error:
+                raise HarnessError("CHECK_SCOPE_CONFLICT", "Check " + item["check_id"] +
+                                   " is incompatible with this interpretation; revise or retire the advisory check first (" + error.code + ")") from error
 
     def start(self, *, domain_id: str, goal: str, workspace: str, parameters: dict, request_id: str, budget: dict | None = None,
               mode: str = "strict", required_checks: list[str] | None = None, constraints: list[str] | None = None):
@@ -238,7 +260,9 @@ class Harness:
                 require(isinstance(assumption["statement"], str) and len(assumption["statement"]) <= 16000, "INVALID_INTERPRETATION", "Invalid assumption")
                 self._observations_exist(connection, run_id, assumption.get("observation_ids", []))
             require(len({item["id"] for item in assumptions}) == len(assumptions), "INVALID_INTERPRETATION", "Duplicate assumption IDs")
-            questions = proposal.get("open_questions", [])
+            # Early v0.2 records duplicated structured Domain questions here.
+            # Those are regenerated in domain_questions; caller questions persist.
+            questions = proposal.get("open_questions", [q for q in previous["open_questions"] if isinstance(q, str)])
             require(isinstance(questions, list) and len(questions) <= 100 and all(isinstance(q, str) and len(q) <= 2000 for q in questions),
                     "INVALID_INTERPRETATION", "Invalid open questions")
             cited = proposal.get("observation_ids", [])
@@ -250,6 +274,7 @@ class Harness:
                              "open_questions": questions, "observation_ids": cited, "activity_ids": activity_ids,
                              "origin": "caller", "trust": "untrusted"})
             semantics.sync_checks(run, prepared["contract"]["checks"], interpretation["ref"])
+            self._validate_checks(run, prepared["contract"])
             old_inputs = run["contract"]["inputs"]
             run["interpretations"].append(interpretation)
             run["contract"] = prepared["contract"]
@@ -280,18 +305,44 @@ class Harness:
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Check proposal refers to an older interpretation")
             key = semantics.named(proposal["check_id"])
             require(not key.startswith(("file-", "command-")), "CHECK_ID_RESERVED", "Domain-generated check IDs are reserved")
-            old = next((item for item in semantics.current_checks(run) if item["check_id"] == key), None)
+            old = semantics.latest_checks(run).get(key)
             require(type(proposal.get("expected_revision", 0)) is int and proposal.get("expected_revision", 0) == (old["ref"]["revision"] if old else 0), "STALE_CHECK", "Check revision changed")
             require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate checks cannot be revised")
             require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
             parameters = self._module(run).normalize_check(copy.deepcopy(proposal["parameters"]), run["contract"])
-            created = semantics.check_record(run_id, key, old["ref"]["revision"] + 1 if old else 1, parameters, latest)
+            created = semantics.check_record(run_id, key, semantics.next_check_revision(run, key), parameters, latest)
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]
             run["verification"] = {"status": "not_run"}
             self.store.save_run(connection, run)
             result = response(run_id=run_id, check=created, gated=key in run["gate_bindings"])
+            self.store.remember(connection, run_id, request_id, fingerprint, result)
+            return result
+
+    def retire_check(self, run_id: str, proposal: dict, request_id: str):
+        fields(proposal, {"check_id", "expected_revision", "interpretation_revision", "reason"},
+               {"check_id", "expected_revision", "interpretation_revision", "reason"})
+        require(isinstance(proposal["reason"], str) and 0 < len(proposal["reason"]) <= 2000, "INVALID_PARAMETERS", "A bounded retirement reason is required")
+        fingerprint = canonical_hash({"operation": "retire-check", "proposal": proposal})
+        with self.store.transaction() as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior
+            run = self.store.run(connection, run_id)
+            self._admit(connection, run)
+            require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait or cancel verification before retiring a check")
+            latest = run["interpretations"][-1]["ref"]
+            require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Interpretation changed")
+            key = semantics.named(proposal["check_id"])
+            require(not key.startswith(("file-", "command-")), "CHECK_ID_RESERVED", "Revise Domain parameters to remove a Domain-generated check")
+            previous = semantics.latest_checks(run).get(key)
+            require(previous is not None and previous["active"], "CHECK_NOT_ACTIVE", "Check is not active")
+            require(type(proposal["expected_revision"]) is int and proposal["expected_revision"] == previous["ref"]["revision"], "STALE_CHECK", "Check revision changed")
+            retired = semantics.retire_check(run, previous, latest, redact(proposal["reason"]))
+            run["verification"] = {"status": "not_run"}
+            self.store.save_run(connection, run)
+            result = response(run_id=run_id, check=retired)
             self.store.remember(connection, run_id, request_id, fingerprint, result)
             return result
 
@@ -336,11 +387,34 @@ class Harness:
             self._admit(connection, run)
             require("submit" in run["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation still needs an input scope; revise this Run")
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait for verification or finish as abandoned")
-            candidate = capture(Path(run["workspace"]), run["contract"]["inputs"], self.store.directory(run_id))
-            run.update(candidate=candidate, generation=run["generation"] + 1, phase="submitted", verification={"status": "not_run"})
-            self.store.save_run(connection, run)
-            result = response(run_id=run_id, candidate=candidate)
-            self.store.remember(connection, run_id, request_id, fingerprint, result)
+            expected_revision = run["revision"]
+            directory = self.store.directory(run_id)
+        # Slow file reads/copies must not hold the store's global writer lock.
+        # Staging is owned by this call and cannot be observed by a verifier.
+        with tempfile.TemporaryDirectory(prefix=".submit_", dir=directory) as staging, maintenance.capture_lease(staging):
+            candidate = capture(Path(run["workspace"]), run["contract"]["inputs"], Path(staging))
+            published = None
+            try:
+                with self.store.transaction() as connection:
+                    prior = self.store.replay(connection, run_id, request_id, fingerprint)
+                    if prior:
+                        return prior
+                    current = self.store.run(connection, run_id)
+                    self._admit(connection, current)
+                    require(current["revision"] == expected_revision and not current["active_job"],
+                            "SUBMISSION_CONFLICT", "Run changed during capture; inspect the Run and submit again")
+                    target = directory / identifier(candidate["candidate_id"], "candidate")
+                    os.rename(Path(staging) / candidate["candidate_id"], target)
+                    published = target
+                    current.update(candidate=candidate, generation=current["generation"] + 1,
+                                   phase="submitted", verification={"status": "not_run"})
+                    self.store.save_run(connection, current)
+                    result = response(run_id=run_id, candidate=candidate)
+                    self.store.remember(connection, run_id, request_id, fingerprint, result)
+            except BaseException:
+                if published is not None:
+                    os.rename(published, Path(staging) / candidate["candidate_id"])
+                raise
             return result
 
     def verify(self, run_id: str, request_id: str):
@@ -357,14 +431,16 @@ class Harness:
             require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed; start a new Run with the new version")
             job_id = "job_" + uuid.uuid4().hex
             now = time.time()
-            timeout = 45 + sum(check.get("timeout_seconds", 1) + 10 for check in run["contract"]["checks"])
+            checks = copy.deepcopy(semantics.current_checks(run))
+            self._validate_checks(run, run["contract"])
+            timeout = 45 + sum(check["spec"]["timeoutMs"] / 1000 + 10 for check in checks)
             job = {"job_id": job_id, "run_id": run_id, "status": "queued", "heartbeat_at": now,
                    "deadline_at": min(run["deadline_at"], now + timeout), "generation": run["generation"],
                    "contract_hash": run["contract"]["contract_hash"], "candidate_hash": run["candidate"]["candidate_hash"],
                    "cleanup": "not_started", "result": None}
-            job.update(checks=copy.deepcopy(semantics.current_checks(run)), candidate=copy.deepcopy(run["candidate"]),
+            job.update(checks=checks, candidate=copy.deepcopy(run["candidate"]),
                        interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
-                       completed_checks=0, total_checks=len(semantics.current_checks(run)))
+                       completed_checks=0, total_checks=len(checks))
             require(job["total_checks"] > 0, "CHECKS_REQUIRED", "Register a measurement before verification")
             run.update(active_job=job_id, phase="verifying", verification={"status": "queued", "job_id": job_id},
                        verification_attempts=run["verification_attempts"] + 1)
@@ -379,21 +455,53 @@ class Harness:
         except OSError:
             with self.store.transaction() as connection:
                 job = self.store.job(connection, job_id)
-                job.update(status="error", error={"code": "WORKER_START_FAILED", "message": "Could not start verifier worker"})
-                self.store.save_job(connection, job)
                 run = self.store.run(connection, run_id)
-                run.update(active_job=None, phase="review", verification={"status": "error", "job_id": job_id})
-                self.store.save_run(connection, run)
+                if job["status"] == "queued" and run["status"] == "active" and run["active_job"] == job_id and run["generation"] == job["generation"]:
+                    job.update(status="error", cleanup="complete", error={"code": "WORKER_START_FAILED", "message": "Could not start verifier worker"})
+                    self.store.save_job(connection, job)
+                    run.update(active_job=None, phase="review", verification={"status": "error", "job_id": job_id})
+                    self.store.save_run(connection, run)
         return result
+
+    def cancel(self, run_id: str, job_id: str, request_id: str):
+        fingerprint = canonical_hash({"operation": "cancel", "job_id": job_id})
+        with self.store.transaction() as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior
+            run = self.store.run(connection, run_id)
+            job = self.store.job(connection, job_id)
+            require(job["run_id"] == run_id, "JOB_RUN_MISMATCH", "Job belongs to another Run")
+            self._refresh(connection, run)
+            job = self.store.job(connection, job_id)
+            if job["status"] in {"queued", "running"}:
+                job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
+                self.store.save_job(connection, job)
+                if run["active_job"] == job_id:
+                    run.update(active_job=None, verification={"status": "cancelled", "job_id": job_id})
+                    if run["status"] == "active":
+                        run["phase"] = "review"
+                    self.store.save_run(connection, run)
+            result = response(run_id=run_id, job=queries.job_view(job))
+            self.store.remember(connection, run_id, request_id, fingerprint, result)
+            return result
+
+    def list_runs(self, *, offset=0, limit=20):
+        return response(**queries.list_runs(self, offset=offset, limit=limit))
+
+    def resume(self, run_id):
+        return response(**queries.resume(self, run_id))
+
+    def records(self, run_id, kind, *, offset=0, limit=20, job_id=None):
+        return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id))
+
+    def cleanup(self, run_id, *, apply=False, min_age_seconds=3600):
+        return response(**maintenance.cleanup(self.store, run_id, apply=apply, min_age_seconds=min_age_seconds))
 
     def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False):
         with self.store.transaction() as connection:
             run = self.store.run(connection, run_id)
-            self._reconcile(connection, run)
-            # Merely inspecting an expired Run does not execute/resume anything.
-            if run["status"] == "active" and time.time() >= run["deadline_at"]:
-                run.update(status="blocked", phase="handoff", termination_reason="DEADLINE_EXCEEDED")
-                self.store.save_run(connection, run)
+            self._refresh(connection, run)
             jobs = [decode_job[0] for decode_job in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))]
             if job_id:
                 job = self.store.job(connection, job_id)
@@ -405,7 +513,7 @@ class Harness:
             measured = self.store.measurements(connection, run_id)
             result = response(run=run, jobs=[self.store.job(connection, item) for item in jobs], measurements=measured,
                               closeout={"measurement": run["verification"], "assessment": semantics.assessment_view(run),
-                                        "gates": semantics.gates(run, measured), "lifecycle": "closed" if run["status"] == "finished" else "waiting_input" if run["domain_questions"] and not run["active_job"] else run["status"],
+                                        "gates": semantics.gates(run, measured), "lifecycle": semantics.lifecycle(run),
                                         "termination_reason": run.get("termination_reason")})
         if check_workspace:
             matches = False
@@ -432,7 +540,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._reconcile(connection, run)
+            self._refresh(connection, run)
             require(run["status"] != "finished", "RUN_CLOSED", "Run is already finished")
             if assessment is not None:
                 self._assessment_record(connection, run, assessment)
@@ -444,6 +552,8 @@ class Harness:
                         "VERIFICATION_REQUIRED", "Pinned completion gates have not been satisfied")
                 if run["policy"]["mode"] == "strict":
                     require(run["verification"]["status"] == "passed", "VERIFICATION_REQUIRED", "Strict policy requires all measurements to pass")
+                require(not run["contract"]["rules"].get("snapshot_required", False) or run["candidate"] is not None,
+                        "SUBMIT_REQUIRED", "The contract requires a submitted snapshot before completion")
                 job = self.store.job(connection, run["verification"]["job_id"]) if run["verification"].get("job_id") else None
                 observed = (job.get("result") or {}) if job else {}
                 if run["policy"]["mode"] == "strict":
@@ -459,7 +569,7 @@ class Harness:
                 require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
             if run["active_job"]:
                 job = self.store.job(connection, run["active_job"])
-                job.update(status="cancelled", cleanup="pending")
+                job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
                 self.store.save_job(connection, job)
                 run.update(active_job=None, verification={"status": "cancelled", "job_id": job["job_id"]})
             record = {"schema_version": "local-verification-record-v1", "run_id": run_id, "outcome": outcome,

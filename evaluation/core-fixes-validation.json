@@ -1,0 +1,52 @@
+{
+  "schema_version": "closeout-core-fixes-validation-v1",
+  "validated_on": "2026-10-01",
+  "head_commit": "638ebfec1d7914cbb77e75eedfbdc60aca1ad395",
+  "dirty": true,
+  "tested_tree_digest": "a30e0e8d71be68fb145393530b24b8c88af07a4225dc53690bcff0551596a6a1",
+  "scope": [
+    "Current check timeouts with the original Run deadline cap",
+    "Terminal and active verification lifecycle precedence",
+    "Omitted versus explicit caller-question revisions",
+    "Declared snapshot requirement without mandatory model assessment",
+    "Unlocked snapshot capture with revision checks and idempotent attachment",
+    "Required evaluation coverage and tested source identity"
+  ],
+  "checks": {
+    "python_suite": {
+      "command": ".venv/bin/python -m pytest -q tests",
+      "passed": 90,
+      "skipped_opt_in": 1
+    },
+    "semantic_scenarios": {
+      "command": ".venv/bin/python scripts/evaluate.py --output evaluation/latest.json",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "source_unchanged": true
+    },
+    "sandbox_unit": {
+      "command": "bun test tests/sandbox.test.ts",
+      "passed": 3,
+      "skipped_windows_only": 3
+    },
+    "real_namespace_sandbox": {
+      "command": "BASE_HARNESS_EXTERNAL_LIVE=1 .venv/bin/python -m pytest -q -s tests/test_external_harness.py -k live_sandboxed",
+      "restricted_attempt": "SANDBOX_SETUP_FAILED; measurement not_run, aggregate incomplete",
+      "approved_retry_passed": 1,
+      "run_id": "run_815d3f4dcdeb4f09968cf9a3ad841823",
+      "job_id": "job_ca7563cdcfe047f8bc65c0a6749a848f",
+      "candidate_hash": "cc90d0593e11330a38203aafba534f58923c8a4bf3fd439ce7f20b4f3412898b",
+      "workspace_unchanged": true
+    },
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "Dynamic long-command timing uses a controlled clock and adapter; actual Sandbox execution is checked separately.",
+    "Windows-native execution and commercial model quality are not evaluated.",
+    "Automatic crash-orphan collection and status pagination remain follow-up work."
+  ],
+  "assurance": "local-advisory",
+  "ready": false
+}

@@ -60,7 +60,7 @@ def ensure(run: dict, *, mode="strict", required_checks=None, parameters=None, q
     }
     intent = initial_intent or record("intent:" + run_id, 1, {"original_goal": run["goal"], "domain_id": contract["domain_id"], "constraints": []})
     interpretation = record("interpretation:" + run_id, 1, {"goal_summary": run["goal"], "parameters": params,
-                           "assumptions": [], "open_questions": questions or [], "origin": "caller", "trust": "untrusted"})
+                           "assumptions": [], "open_questions": [], "origin": "caller", "trust": "untrusted"})
     checks, ids = [], {"file": 0, "command": 0}
     for item in contract["checks"]:
         key = item["kind"] + "-" + str(ids[item["kind"]])
@@ -100,10 +100,26 @@ def validate_run(run):
 
 
 def current_checks(run):
-    latest = {}
-    for item in run["check_records"]:
-        latest[item["check_id"]] = item
-    return [item for item in latest.values() if item.get("active", True)]
+    return [item for item in latest_checks(run).values() if item.get("active", True)]
+
+
+def latest_checks(run):
+    return {item["check_id"]: item for item in run["check_records"]}
+
+
+def next_check_revision(run, key):
+    # max also handles historical v0.2 records whose reactivation reset to 1.
+    return 1 + max((item["ref"]["revision"] for item in run["check_records"] if item["check_id"] == key), default=0)
+
+
+def retire_check(run, previous, interpretation_ref, reason):
+    require(previous["check_id"] not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate checks cannot be retired")
+    require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
+    body = {k: copy.deepcopy(v) for k, v in previous.items() if k != "ref"}
+    body.update(active=False, interpretation_ref=interpretation_ref, retirement_reason=reason)
+    result = record(previous["ref"]["id"], next_check_revision(run, previous["check_id"]), body)
+    run["check_records"].append(result)
+    return result
 
 
 def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
@@ -119,7 +135,7 @@ def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
             continue
         require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate check cannot be weakened or changed by interpretation revision")
         require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
-        created = check_record(run["run_id"], key, old["ref"]["revision"] + 1 if old else 1, copy.deepcopy(item), interpretation_ref)
+        created = check_record(run["run_id"], key, next_check_revision(run, key), copy.deepcopy(item), interpretation_ref)
         run["check_records"].append(created)
         if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks":
             run["gate_bindings"][key] = created["ref"]
@@ -127,10 +143,7 @@ def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
             "GATE_POLICY_CHANGED", "Revision removed a required gate check")
     for key, previous in existing.items():
         if key.startswith(("file-", "command-")) and key not in seen:
-            require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
-            retired = {k: copy.deepcopy(v) for k, v in previous.items() if k != "ref"}
-            retired["active"] = False
-            run["check_records"].append(record(previous["ref"]["id"], previous["ref"]["revision"] + 1, retired))
+            retire_check(run, previous, interpretation_ref, "Removed by Domain preparation")
 
 
 def gates(run, measurements):
@@ -160,6 +173,16 @@ def comparison_status(report):
         return "incomplete"
     findings = [item for item in result.get("findings", []) if item.get("kind") == "comparison"]
     return "passed" if findings and all(item.get("result") == "pass" for item in findings) else "failed"
+
+
+def lifecycle(run):
+    if run["status"] == "finished":
+        return "closed"
+    if run["status"] != "active":
+        return run["status"]
+    if run["active_job"]:
+        return "verifying"
+    return "waiting_input" if run["domain_questions"] else "active"
 
 
 def assessment_view(run):
