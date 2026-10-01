@@ -4,7 +4,7 @@ A model-free Develop Harness called by an existing agent through a JSON CLI.
 It owns independent Run state, pinned contracts, snapshots and verification jobs.
 It does not include a model gateway, agent Host, UI or MCP server.
 
-For AGY or another agent's shell tools, see [AGY usage](AGY_USAGE.md).
+For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.
 
@@ -164,6 +164,13 @@ same-user tampering. Modules are responsible for declaring all relevant configur
 and dependencies. Historical Runs without this binding can be read and closed as
 partial/abandoned; use a new Run for continued mutation/verification.
 
+Assessment records retain the caller's cited observation IDs and add kernel-derived
+`citation_bindings`. Each binding reports whether the observation belongs to the
+current subject, interpretation and check set. A citation is `current` only when
+all three match; otherwise it is `contextual`. Contextual observations remain useful
+history but are not presented as measurements of the current Candidate. Assessment
+status and sufficiency remain untrusted caller judgments.
+
 `check_set_hash` identifies the exact ordered frozen checks independently of
 `contract_hash`. It is attached to Job, measurements, result and completion. The
 per-check Measurement row is the canonical body; a Job result stores only bound
@@ -175,6 +182,12 @@ All JSON options accept a file path, `-` for bounded UTF-8 stdin, or an explicit
 `json:` inline prefix. Bare inline JSON gets an input-source error rather than a
 file-open traceback. Only one option per call may consume stdin. Per-input bounds,
 unique JSON keys and downstream schema checks remain enforced.
+
+Default Job summaries, `resume`, full status and paginated Job history validate
+v2 result references against their canonical Measurement records. Missing or
+changed facts fail with `RESULT_BINDING`. If a request itself persists a deadline
+or budget handoff, retrying that request ID replays the original terminal error
+instead of returning a later generic `RUN_CLOSED` result.
 
 Start an exploratory Run with just the original goal and workspace:
 

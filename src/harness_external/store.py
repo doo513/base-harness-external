@@ -140,11 +140,21 @@ class Store:
         if row is None:
             return None
         require(row[0] == fingerprint, "REQUEST_CONFLICT", "This request ID was already used for different input")
-        return decode(row[1])
+        value = decode(row[1])
+        error = value.get("__harness_error__") if isinstance(value, dict) else None
+        if error:
+            exception = StopRun if error.get("terminal") else HarnessError
+            raise exception(error["code"], error["message"])
+        return value
 
     @staticmethod
     def remember(connection, scope: str, request_id: str, fingerprint: str, response: dict):
         connection.execute("INSERT INTO requests VALUES(?,?,?,?)", (scope, request_id, fingerprint, canonical_bytes(response).decode()))
+
+    @staticmethod
+    def remember_error(connection, scope: str, request_id: str, fingerprint: str, code: str, message: str, *, terminal=False):
+        Store.remember(connection, scope, request_id, fingerprint,
+                       {"__harness_error__": {"code": code, "message": message, "terminal": terminal}})
 
     @staticmethod
     def measurements(connection, run_id: str, job_id: str | None = None, *, limit=None, offset=0):

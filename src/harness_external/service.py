@@ -60,7 +60,7 @@ class Harness:
             run.update(active_job=None, phase="review", verification={"status": "interrupted", "job_id": job_id})
             self.store.save_run(connection, run)
 
-    def _admit(self, connection, run, *, verification=False):
+    def _admit(self, connection, run, *, verification=False, request=None):
         self._reconcile(connection, run)
         require(run["status"] == "active", "RUN_CLOSED", "Start a new Run; a closed or blocked Run cannot be reopened")
         reason = None
@@ -71,6 +71,7 @@ class Harness:
         elif verification and run["verification_attempts"] >= run["limits"]["max_verifications"]:
             reason = "VERIFICATION_BUDGET_EXHAUSTED"
         if reason:
+            message = "Harness limit reached; hand off to the user. External model execution is not controlled."
             run.update(status="blocked", phase="handoff", termination_reason=reason)
             if run.get("active_job"):
                 job = self.store.job(connection, run["active_job"])
@@ -78,7 +79,10 @@ class Harness:
                 self.store.save_job(connection, job)
                 run["active_job"] = None
             self.store.save_run(connection, run)
-            raise StopRun(reason, "Harness limit reached; hand off to the user. External model execution is not controlled.")
+            if request:
+                scope, request_id, fingerprint = request
+                self.store.remember_error(connection, scope, request_id, fingerprint, reason, message, terminal=True)
+            raise StopRun(reason, message)
         run["actions"] += 1
 
     def _refresh(self, connection, run):
@@ -189,7 +193,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require(len(run["observations"]) < 100, "OBSERVATION_LIMIT", "At most 100 caller observations per Run")
             item = {"observation_id": "note_" + uuid.uuid4().hex, "origin": "caller", "trust": "untrusted", **redact(observation)}
             run["observations"].append(item)
@@ -239,9 +243,11 @@ class Harness:
             return result
 
     def _observations_exist(self, connection, run_id, ids):
-        require(isinstance(ids, list) and len(ids) <= 128 and all(isinstance(i, str) for i in ids), "OBSERVATION_REFERENCE", "Invalid observation references")
-        known = {item["observation_id"] for item in self.store.measurements(connection, run_id)}
-        require(set(ids) <= known, "OBSERVATION_REFERENCE", "Observation is not a verifier measurement owned by this Run")
+        require(isinstance(ids, list) and len(ids) <= 128 and len(set(ids)) == len(ids)
+                and all(isinstance(i, str) for i in ids), "OBSERVATION_REFERENCE", "Invalid observation references")
+        known = {item["observation_id"]: item for item in self.store.measurements(connection, run_id)}
+        require(set(ids) <= set(known), "OBSERVATION_REFERENCE", "Observation is not a verifier measurement owned by this Run")
+        return [known[item] for item in ids]
 
     def _module(self, run):
         module = self.domains.resolve(run["domain_module"]["id"])
@@ -262,7 +268,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait for the owned verification before revising")
             previous = run["interpretations"][-1]
             require(len(run["interpretations"]) < 100, "INTERPRETATION_LIMIT", "Interpretation history limit reached")
@@ -323,7 +329,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Cannot change checks while verification owns the Run")
             latest = run["interpretations"][-1]["ref"]
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Check proposal refers to an older interpretation")
@@ -356,7 +362,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait or cancel verification before retiring a check")
             latest = run["interpretations"][-1]["ref"]
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Interpretation changed")
@@ -381,11 +387,25 @@ class Harness:
                 and all(isinstance(u, str) and len(u) <= 2000 for u in assessment["uncertainties"]), "ASSESSMENT_INVALID", "Invalid uncertainty list")
         latest = run["interpretations"][-1]["ref"]
         require(type(assessment["interpretation_revision"]) is int and assessment["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Assessment refers to an older interpretation")
-        self._observations_exist(connection, run["run_id"], assessment["cited_observation_ids"])
+        cited = self._observations_exist(connection, run["run_id"], assessment["cited_observation_ids"])
         require(len(run["assessments"]) < 100, "ASSESSMENT_LIMIT", "Assessment limit reached")
+        subject = run["candidate"]["subject"] if run["candidate"] else None
+        check_set = semantics.check_set_hash(semantics.current_checks(run))
+        bindings = []
+        for item in cited:
+            current_subject = item["subject"] == subject
+            current_interpretation = item["interpretation_ref"] == latest
+            current_check_set = item.get("check_set_hash") == check_set
+            bindings.append({"observation_id": item["observation_id"], "subject": item["subject"],
+                             "interpretation_ref": item["interpretation_ref"], "check_set_hash": item.get("check_set_hash"),
+                             "current_subject": current_subject, "current_interpretation": current_interpretation,
+                             "current_check_set": current_check_set,
+                             "relevance": "current" if current_subject and current_interpretation and current_check_set else "contextual"})
+        summary = {"current": sum(item["relevance"] == "current" for item in bindings),
+                   "contextual": sum(item["relevance"] == "contextual" for item in bindings)}
         created = semantics.record("assessment:" + run["run_id"] + ":" + uuid.uuid4().hex, 1,
-                  {**redact(assessment), "interpretation_ref": latest, "subject": run["candidate"]["subject"] if run["candidate"] else None,
-                   "origin": "caller", "trust": "untrusted"})
+                  {**redact(assessment), "interpretation_ref": latest, "subject": subject,
+                   "citation_bindings": bindings, "citation_summary": summary, "origin": "caller", "trust": "untrusted"})
         run["assessments"].append(created)
         return created
 
@@ -396,7 +416,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             created = self._assessment_record(connection, run, assessment)
             self.store.save_run(connection, run)
             result = response(run_id=run_id, assessment=created)
@@ -410,7 +430,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run)
+            self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require("submit" in run["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation still needs an input scope; revise this Run")
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait for verification or finish as abandoned")
             expected_revision = run["revision"]
@@ -426,7 +446,7 @@ class Harness:
                     if prior:
                         return prior
                     current = self.store.run(connection, run_id)
-                    self._admit(connection, current)
+                    self._admit(connection, current, request=(run_id, request_id, fingerprint))
                     require(current["revision"] == expected_revision and not current["active_job"],
                             "SUBMISSION_CONFLICT", "Run changed during capture; inspect the Run and submit again")
                     target = directory / identifier(candidate["candidate_id"], "candidate")
@@ -450,7 +470,7 @@ class Harness:
             if prior:
                 return prior
             run = self.store.run(connection, run_id)
-            self._admit(connection, run, verification=True)
+            self._admit(connection, run, verification=True, request=(run_id, request_id, fingerprint))
             require(not run["active_job"], "VERIFICATION_ACTIVE", "A verifier already owns this Run")
             require(run["candidate"] is not None, "SUBMIT_REQUIRED", "Submit a snapshot before verification")
             require("verify" in run["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation has not admitted measurements")
@@ -546,7 +566,12 @@ class Harness:
                 require(run["record"].get("record_hash") == canonical_hash({k: v for k, v in run["record"].items() if k != "record_hash"}),
                         "RECORD_CORRUPT", "Local completion record digest mismatch")
             measured = self.store.measurements(connection, run_id)
-            result = response(run=run, jobs=[self.store.job(connection, item) for item in jobs], measurements=measured,
+            job_records = []
+            for item in jobs:
+                job = self.store.job(connection, item)
+                self.store.validate_result(connection, job)
+                job_records.append(job)
+            result = response(run=run, jobs=job_records, measurements=measured,
                               view="full", resolution=semantics.resolution(run, semantics.gates(run, measured)),
                               closeout={"measurement": run["verification"], "assessment": semantics.assessment_view(run),
                                         "gates": semantics.gates(run, measured), "lifecycle": semantics.lifecycle(run),

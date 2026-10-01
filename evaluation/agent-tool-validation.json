@@ -36,7 +36,7 @@
     "External agent calling instructions and GitHub CI configuration"
   ],
   "limitations": [
-    "No commercial AGY model session was launched or evaluated.",
+    "No external model-agent quality or speed benchmark was run.",
     "Windows-to-WSL transport was tested; Windows-native Harness execution was not.",
     "GitHub Actions configuration was added locally; remote CI has not run.",
     "Capture recovery is explicit and recoverable, not automatic deletion of all orphaned files.",

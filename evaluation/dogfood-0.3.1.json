@@ -1,0 +1,92 @@
+{
+  "schema_version": "external-harness-dogfood-v1",
+  "validated_on": "2026-10-01",
+  "package_version": "0.3.1",
+  "base_commit": "04fcf0436e25d50169984da8190c94219a3ce253",
+  "dirty": true,
+  "tested_tree_digest": "f44982f90340b507b598d2cc8911aa8ca5523bc46a33e9d67eabeb9aa7b63a25",
+  "architecture": "A stable copy of Harness called the working checkout as an external tool; the Harness did not invoke a model.",
+  "initial_environment_run": {
+    "run_id": "run_5930afd341cd4300abb06385d91f22ea",
+    "job_id": "job_6404b8fa3ade403d9b26fd51ce4579b6",
+    "outcome": "partial",
+    "gate_status": "unsatisfied",
+    "finding": "The pinned pytest command could not run in the isolated standard-library environment.",
+    "response": "The failed gate was retained; the Run was closed partial and a new standard-library Run was started."
+  },
+  "repair_run": {
+    "run_id": "run_9871e2bfebb249ad87bec913be97c894",
+    "required_gate": "domain.regressions",
+    "check_set_hash": "499cec322e19293088eceb94a430e7dfef65f3c7354125c78f52f3e7911a129e",
+    "baseline": {
+      "candidate_hash": "de548c6adea1610df8e7be8096f585e4b7fcbd80e04638ff9358a324dbbdab24",
+      "job_id": "job_820c407843a1421f8667e5e3c55bfcec",
+      "regressions_passed": 0,
+      "regressions_failed_or_errored": 4,
+      "gate_status": "unsatisfied"
+    },
+    "fixed": {
+      "candidate_hash": "ff939fa1607bb34452d23c986bb5ec66e5dfd2b56ca4a83f5726e8e658274851",
+      "job_id": "job_e08b74c5b9994e83a7d7359dc4d6978a",
+      "regressions_passed": 4,
+      "regressions_failed_or_errored": 0,
+      "gate_status": "passed"
+    },
+    "history_counts": {
+      "jobs": 2,
+      "measurements": 12,
+      "interpretations": 2,
+      "assessments": 1
+    },
+    "usage": {
+      "actions": 6,
+      "verification_attempts": 2
+    },
+    "resolution": {
+      "lifecycle": "closed",
+      "display_status": "closed_checks_passed",
+      "measurement_status": "passed",
+      "gate_status": "passed",
+      "assessment_status": "satisfied",
+      "certification": "not_issued"
+    },
+    "record_hash": "87f9b55eddc96521617971e374ec25e8c9c322b48df057c520a075998c8c2680"
+  },
+  "checks": {
+    "python_suite": {
+      "passed": 120,
+      "skipped_opt_in": 1
+    },
+    "semantic_scenarios": {
+      "passed": 59,
+      "failed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "source_unchanged": true
+    },
+    "sandbox_unit": {
+      "passed": 3,
+      "skipped_windows_only": 3
+    },
+    "real_namespace_sandbox": {
+      "passed": 1,
+      "run_id": "run_8b973acc22db43ffacce5427afc3ca66",
+      "job_id": "job_5091679ef5004b60bcae355553d14bbb"
+    },
+    "git_diff_check": "passed"
+  },
+  "implemented_scope": [
+    "Default Job summaries validate v2 observation references.",
+    "Closed Run recovery validates referenced Job measurements.",
+    "Assessment citations classify current and contextual bindings.",
+    "Persisted terminal limit transitions replay the original error after caller restart.",
+    "Product-specific caller naming was removed from general usage documentation."
+  ],
+  "limitations": [
+    "The controlling Harness was the stable 0.3.0 checkout, so its final assessment record does not contain the new citation binding fields; those fields were verified inside the Candidate regression suite.",
+    "Display-status composition, a reusable caller integration profile, measurement environment terminology, and path-independent Domain identity remain follow-up work.",
+    "No protected Ready certificate or external model-quality benchmark is claimed."
+  ],
+  "assurance": "local-advisory",
+  "ready": false
+}

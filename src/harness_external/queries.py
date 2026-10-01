@@ -18,6 +18,7 @@ def job_summary(api, run_id, job_id):
     with api.store.transaction(write=False) as connection:
         job = api.store.job(connection, job_id)
         require(job["run_id"] == run_id, "JOB_RUN_MISMATCH", "Job belongs to another Run")
+        api.store.validate_result(connection, job)
         return {"run_id": run_id, "view": "summary", "job": job_view(job),
                 "measurement_count": connection.execute("SELECT count(*) FROM measurements WHERE run_id=? AND job_id=?", (run_id, job_id)).fetchone()[0]}
 
@@ -55,8 +56,12 @@ def resume(api, run_id):
                     "RECORD_CORRUPT", "Local completion record digest mismatch")
         latest = run["interpretations"][-1]
         checks = semantics.current_checks(run)
-        jobs = [job_view(api.store.job(connection, row[0])) for row in connection.execute(
-            "SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid DESC LIMIT 5", (run_id,))]
+        jobs = []
+        for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid DESC", (run_id,)):
+            job = api.store.job(connection, row[0])
+            api.store.validate_result(connection, job)
+            if len(jobs) < 5:
+                jobs.append(job_view(job))
         counts = {name: len(run[key]) for name, key in COLLECTIONS.items()}
         counts["measurements"] = connection.execute("SELECT count(*) FROM measurements WHERE run_id=?", (run_id,)).fetchone()[0]
         counts["jobs"] = connection.execute("SELECT count(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]
@@ -93,7 +98,11 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
         elif kind == "jobs":
             total = connection.execute("SELECT count(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]
             ids = connection.execute("SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid LIMIT ? OFFSET ?", (run_id, limit, offset))
-            items = [job_view(api.store.job(connection, row[0])) for row in ids]
+            items = []
+            for row in ids:
+                job = api.store.job(connection, row[0])
+                api.store.validate_result(connection, job)
+                items.append(job_view(job))
         else:
             where, args = "run_id=?", [run_id]
             if job_id:

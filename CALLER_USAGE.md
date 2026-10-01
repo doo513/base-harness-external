@@ -1,11 +1,12 @@
-# AGY에서 사용하기
+# 외부 호출자 사용 안내
 
-AGY가 작업을 분석하고 파일을 편집합니다. Harness는 CLI 도구로 호출하며,
-Run·원문·개정 이력·제출 스냅샷·검증 결과를 보관합니다. 모델을 Harness 내부에
-등록하거나 AGY 로그인 정보를 넘길 필요는 없습니다.
+외부 호출자가 작업을 분석하고 파일을 편집하며, Harness를 CLI 도구로 호출합니다.
+Harness는 Run·원문·개정 이력·제출 스냅샷·검증 결과를 보관합니다. 호출자는 모델
+에이전트, 일반 프로그램, 플러그인 또는 사람이 될 수 있습니다. Harness 내부에
+호출자의 모델이나 계정 정보를 등록할 필요는 없습니다.
 
-현재 확인한 실행 환경은 WSL/Linux의 Python 3.11+와 Bun입니다. AGY가 Windows에서
-동작해도 Harness 도구 호출만 WSL로 보낼 수 있습니다. 모델의 설치 위치와 Harness
+현재 확인한 실행 환경은 WSL/Linux의 Python 3.11+와 Bun입니다. 호출 프로그램이
+Windows에서 동작해도 Harness 명령만 WSL에서 실행할 수 있습니다. 호출자와 Harness
 프로세스의 실행 위치는 독립적입니다. 아래 저장소 경로는 자신의 체크아웃 위치로 설정하세요.
 
 ## 1. 먼저 환경 확인
@@ -19,7 +20,7 @@ bash "$HARNESS_REPO/scripts/harness-tool" doctor
 bash "$HARNESS_REPO/scripts/harness-tool" doctor --sandbox
 ```
 
-Windows PowerShell 또는 Windows에서 실행되는 AGY의 셸 도구에서는:
+Windows PowerShell 또는 Windows 프로그램의 셸 도구에서는:
 
 ```powershell
 $HarnessRepo = "/path/in/wsl/base-harness-external"
@@ -39,10 +40,11 @@ Bun이 없을 때 기본 설치 위치인 `~/.bun/bin/bun`도 확인합니다. `
 현재 호스트 실행 제한이 namespace 사용을 허용하는지 확인해야 합니다.
 이 경우 Harness는 격리 없는 명령 실행으로 대체하지 않습니다.
 
-## 2. AGY에 전달할 호출 규칙
+## 2. 호출자 통합 규칙
 
-아래 내용을 작업 요청과 함께 전달할 수 있습니다. 셸 도구가 없는 AGY 환경에는
-먼저 에이전트 측 CLI/MCP 어댑터가 필요합니다. 이 저장소는 MCP 서버를 띄우지 않습니다.
+모델 에이전트에 작업을 맡긴다면 아래 내용을 작업 요청과 함께 전달할 수 있습니다.
+셸 도구가 없는 호출 환경에는 먼저 호출자 측 CLI/MCP 어댑터가 필요합니다. 이
+저장소는 MCP 서버를 띄우지 않습니다.
 
 > 이 작업은 Base Harness External CLI로 진행 상태와 검증을 관리해 주세요.
 > 도구 명령은 위에서 확인한 harness-tool 경로를 사용하세요.
@@ -54,6 +56,9 @@ Bun이 없을 때 기본 설치 위치인 `~/.bun/bin/bun`도 확인합니다. `
 > verify가 반환한 job_id를 status 또는 resume으로 조회하세요. 오류나 실패는 실제
 > 관측으로 기록하고, 이를 근거로 다음 행동을 판단하세요. 해결 여부와 불확실성은
 > assess에 별도로 남기세요. completed, 측정 통과, 모델의 satisfied를 구분하세요.
+> Assessment의 citation_bindings와 citation_summary에서 인용 관측이 현재 Candidate,
+> 해석 및 검사 집합에 속하는지 확인하세요. contextual 관측은 과거 이력이며 현재
+> Candidate를 직접 측정한 사실로 취급하지 마세요.
 > 종결 판단은 resolution의 display_status, measurement_status, assessment_status,
 > gate_status를 함께 읽으세요. 정책 승인 주장은 unverified이며 사용자 인증이 아닙니다.
 > 상태·검증기·스냅샷 파일을 직접 수정하지 마세요. 최종 보고에는 run_id,
@@ -96,6 +101,8 @@ bash "$HARNESS_REPO/scripts/harness-tool" observe --run-id RUN_ID --data 'json:{
 
 동일 요청의 재시도에는 같은 request-id를 쓰고, 의도적으로 다시 실행하는 작업은
 새 ID를 사용하세요. 원문·필수 정책·누적 예산은 같은 Run에서 유지됩니다.
+한계 도달로 Run이 handoff 상태가 된 요청도 같은 request-id로 재시도하면 최초의
+한계 오류가 다시 반환됩니다.
 검증기 소스가 바뀌어 `VERIFIER_CHANGED`가 나오면 새 Run으로 시작해야 합니다.
 
 ## 4. 문맥 복원과 검사 변경
@@ -157,5 +164,5 @@ recovery_path에서 내용을 확인할 수 있고, 작업 파일과 제출된 C
 
 이 경로는 local-advisory이며 `ready=false`입니다. 같은 사용자 권한에서 상태와
 검증기를 악의적으로 수정하는 경우를 막는 보호된 인증은 별도 기능입니다.
-AGY 상용 모델의 품질·속도 비교와 Windows에서 실제 AGY 세션을 연결한 검증은
-별도로 수행해야 합니다. 여기서 제공하는 것은 모델 독립적인 도구 호출 경로입니다.
+외부 모델 에이전트의 작업 품질·속도 비교와 Windows 네이티브 Harness 실행 검증은
+별도로 수행해야 합니다. 여기서 제공하는 것은 호출자에 독립적인 도구 호출 경로입니다.

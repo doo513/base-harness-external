@@ -51,7 +51,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="closeout-evaluation-") as temporary:
         results = Path(temporary) / "results.xml"
         execution = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/test_closeout_semantics.py",
-                                    "tests/test_core_regressions.py", "tests/test_agent_workflow.py", "tests/test_protocol_v2.py", "--junitxml", str(results)],
+                                    "tests/test_core_regressions.py", "tests/test_agent_workflow.py", "tests/test_protocol_v2.py",
+                                    "tests/test_dogfood_regressions.py", "--junitxml", str(results)],
                                    cwd=repository, capture_output=True, text=True)
         require_results = results.is_file()
         cases = {item.get("name"): item for item in ET.parse(results).iter("testcase")} if require_results else {}

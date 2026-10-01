@@ -57,6 +57,10 @@
     {"id": "read-write-separation", "test": "test_pure_reader_does_not_block_writer_and_sees_committed_snapshot", "property": "Read-only recovery queries proceed during an uncommitted writer transaction"},
     {"id": "summary-size", "test": "test_summary_size_does_not_scale_with_measurement_bodies", "property": "Summary output stays small across repeated measurements with substantial content"},
     {"id": "legacy-job-history", "test": "test_historical_aggregate_results_remain_readable", "property": "Historical embedded observation results remain readable without rewriting"},
-    {"id": "cli-json-input", "test": "test_cli_json_sources_and_default_summary", "property": "CLI stdin and explicit inline JSON work, source errors are actionable, and default status is compact"}
+    {"id": "cli-json-input", "test": "test_cli_json_sources_and_default_summary", "property": "CLI stdin and explicit inline JSON work, source errors are actionable, and default status is compact"},
+    {"id": "summary-reference-integrity", "test": "test_default_job_summary_validates_observation_references", "property": "The default agent-facing Job summary validates every referenced measurement"},
+    {"id": "closed-reference-integrity", "test": "test_closed_resume_validates_referenced_measurements", "property": "A closed Run cannot summarize a passing result after canonical measurements are missing"},
+    {"id": "assessment-citation-binding", "test": "test_assessment_classifies_contextual_observation_bindings", "property": "Assessment citations disclose whether they bind the current subject, interpretation and check set"},
+    {"id": "terminal-request-idempotency", "test": "test_persisted_budget_transition_replays_the_same_error", "property": "A persisted budget transition replays the same error after caller restart"}
   ]
 }

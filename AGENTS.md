@@ -18,6 +18,8 @@
 - Prefer resume and paginated records for agent-facing reads. Job results store observation references; new measurements have one canonical body.
 - Domain check keys are identity, not list positions. Keep approval claims unverified without an authenticated approval mechanism.
 - Pin Domain implementation/configuration identity and the executed check-set hash. Pure queries use read-only transactions.
+- Agent-facing summaries and closed Run recovery validate Job observation references. Assessments classify current versus contextual citations.
+- Persist and replay terminal limit errors for the same request ID; retrying a state-changing request must not change its outcome.
 - Capture recovery must acquire an OS lock and retain data in quarantine; never remove workspaces or published Candidates.
 - The Python package has no runtime dependencies. Bun is currently required only for sandboxed command checks from the source checkout.
 - Do not restore the old Host, UI, provider gateway or legacy Ready engine.

@@ -823,7 +823,7 @@
   "conclusion": "Usable for bounded external-agent tasks on the evaluated WSL/Linux source-checkout environment.",
   "limitations": [
     "This was a controlled task, not a broad project-quality or performance benchmark.",
-    "No AGY commercial model session was invoked.",
+    "No external model-agent quality or speed benchmark was run.",
     "Tests were caller-authored and remain untrusted criteria, even though their hashes were unchanged between submitted candidates.",
     "User approval claims remain unverified; no protected Ready certificate is issued.",
     "Windows-native Harness execution and remote CI for this working tree were not evaluated."
