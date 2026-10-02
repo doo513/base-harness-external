@@ -10,8 +10,42 @@ The helper config pins `harness_repo`, `state_dir`, `state_lifetime` and schema 
 Production uses a durable state directory outside every workspace. `--ephemeral`
 is an explicit disposable-test setting, not a recovery strategy. Setup is documented
 in the repository's `INSTALL.md`; the helper's `configure --help` is self-contained.
-The helper calls the existing CLI, not a second service. It never picks a Run,
-retries a mutation, generates an assessment, or changes an initial policy for you.
+The helper calls the existing CLI, not a second service. Optional `policy_root`
+selects an operator-configured acceptance registry. It is configuration, not a
+field the caller can replace in a task request. Configured Domain defaults cannot
+be overridden by selecting a weaker policy.
+
+## Low-overhead workflow
+
+`preflight` runs the real strict Sandbox doctor without creating a task Run. If
+unavailable, preserve the limitation; never fall back to unsandboxed verification.
+After starting or explicitly selecting the correct Run, save its binding once:
+
+```sh
+python3 <skill>/scripts/harness_client.py --config /absolute/client.json bind \
+  --run-id RUN_ID --workspace /absolute/project --domain develop \
+  --output /absolute/task-binding.json
+python3 <skill>/scripts/harness_client.py --config /absolute/client.json checkpoint \
+  --binding /absolute/task-binding.json --action-id implementation-1 --wait-seconds 30
+```
+
+`checkpoint` performs exactly one submit and one verify and returns a compact job
+summary. It does not assess, repair, finish, choose another method, or retry on an
+unknown response. Repeating the same action ID replays the original submission
+and Job. Use a new action ID for a new intentional checkpoint. Concurrent helper
+mutations return `CALLER_BUSY`; Core still enforces concurrency for all clients.
+
+`wait_status: pending` does not cancel the job. Use `wait --binding ... --job-id ...`
+to observe that same job. `terminal` means the job ended; inspect its result, scope
+and error. Failed checks and unavailable execution are not passing evidence.
+
+For other operations, `request --binding ... --operation observe --arguments
+'json:{"data":{"note":"Decision and next step"}}' --action-id note-1 --output
+/absolute/note-1.json` saves the exact envelope. Send it with `call --request` and
+reuse that file after response loss. Existing files are never overwritten. Bindings
+are references only, not a second Run ledger; every use checks the authoritative
+workspace, Domain, intent and policy in Harness. The helper never picks a Run,
+generates an assessment, or changes an initial policy for you.
 
 ## Envelope and initial request
 
@@ -30,7 +64,14 @@ retries a mutation, generates an assessment, or changes an initial policy for yo
 }
 ```
 
-Choose policy explicitly: `exploratory` permits a clarification state and gates
+With a configured acceptance policy, use `mode: "acceptance"`; `parameters` may
+be omitted and initial `provenance` describes caller proposals, not the policy
+author. The Domain compiles mandatory checks from the registry and merges any
+additional exploratory parameters. `policy_id` can select a registered profile
+only where the operator has not pinned a Domain default. A missing profile or
+incompatible Domain is an error, not permission to invent replacement criteria.
+
+Without configured acceptance, choose policy explicitly: `exploratory` permits a clarification state and gates
 only declared checks; `strict` needs complete Domain parameters and gates all checks.
 Do not pass `required_check` or `deferred_check` with `strict`; those fields belong
 to exploratory policy and combining them with strict is rejected.
@@ -39,7 +80,16 @@ for required definitions supplied later. Those fields are string arrays in this
 envelope. Never assume a gate-free exploratory closure means tests passed. The
 example omits gates rather than inventing one for every Domain/task.
 `provenance` is a caller declaration, not authenticated approval. An application
-default is not a user approval. The current checkout supports the Develop Domain.
+default is not authenticated user approval. Registered policies are separately
+configured, but are still same-user, local-advisory records. The current checkout
+supports the Develop Domain.
+
+Set `capture_baseline: true` at start to pin declared input files before editing.
+Files must already exist; Harness never reconstructs an original from later edits.
+Use `checkpoint --compare-baseline` or verify argument `compare_baseline: true` to
+measure both subjects with identical checks. `baseline_comparison.changes` reports
+improved/already_passing/regressed/still_failing/inconclusive. Command comparisons
+without pinned acceptance tests are inconclusive, not proof of improvement.
 
 Arguments use the CLI's option names with underscores: `run_id`, `check_workspace`,
 `test_commands` (inside Develop parameters), etc. JSON options (`parameters`, `data`,
@@ -90,7 +140,7 @@ Use the same context with these operations/arguments:
 | Operation | Arguments in addition to `run_id` | Request ID |
 |---|---|---|
 | `submit` | none | required |
-| `verify` | none; response contains `job_id` | required |
+| `verify` | optional `compare_baseline`, `expected_candidate_hash`; returns `job_id` | required |
 | `status` | optional `job_id`, `check_workspace: true`, `view: "summary"` | omit |
 | `resume` | none; query only, does not restart a worker | omit |
 | `records` | `kind`, optional `job_id` (measurements only), `offset`, `limit` | omit |

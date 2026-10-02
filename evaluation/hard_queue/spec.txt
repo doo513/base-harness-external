@@ -1,0 +1,84 @@
+Build leasequeue.py and leasequeue_cli.py, a durable transactional work queue on
+POSIX using only Python standard library (SQLite is allowed). This is a harder
+state-machine task, not a network service. Preserve the public API below.
+
+Queue(path) opens/creates persistent state. Independent Queue instances and
+independent processes using the same path must agree. All mutations, their audit
+events and idempotency receipts commit atomically. Concurrent callers must not
+lose jobs, double-claim an attempt, or corrupt the database. Parent directory exists.
+
+API (request_id is a required keyword argument on every mutation):
+ add(job_id, payload, depends_on=None, priority=0, max_attempts=3, *, request_id) -> True
+ claim(worker, now, lease_seconds, *, request_id) -> job dictionary or None
+ renew(job_id, token, now, lease_seconds, *, request_id) -> bool
+ finish(job_id, token, now, success, result=None, *, request_id) -> bool
+ get(job_id) -> job dictionary or None
+ events() -> event list
+
+Identifiers (job_id, worker, token, request_id, dependency IDs) are nonblank strings;
+preserve their original spelling. priority is an integer, including negatives,
+not bool. max_attempts and lease_seconds are positive integers, not bool. now is a
+nonnegative integer, not bool. success is exactly bool. payload/result must be
+finite JSON-compatible data, with string object keys; tuples and nonfinite numbers
+are invalid. Invalid argument shapes raise ValueError without changing jobs, events
+or the request cache. Reads must not expire leases or otherwise change logical state.
+
+add requires a new job ID. Dependencies are None (meaning []) or a list of unique
+already-existing job IDs; no self-reference. Preserve dependency order. Payload is
+detached from caller memory. A duplicate job ID with a new request ID is an error,
+even with identical payload. New jobs have attempts=0, status=queued, and null
+worker/token/lease_until/result. Adding a job with failed prerequisites is allowed;
+the next claim will mark it blocked. Dependency insertion cannot create a cycle
+because all dependencies must already exist.
+
+A returned job has exactly these fields: id, payload, dependencies, priority,
+max_attempts, attempts, status, worker, token, lease_until, result.
+status is queued, running, succeeded, failed, or blocked. Returned mutable data
+must not alias stored state. No model-chosen wall clock: only the supplied now counts.
+
+claim first reconciles ALL expired running jobs in insertion order. A running job
+expires when lease_until <= now. If attempts >= max_attempts it becomes failed;
+otherwise queued. Clear worker/token/lease_until, leave result null. Then repeatedly
+mark queued jobs blocked when any dependency is failed or blocked, processing in
+insertion order until stable. Among queued jobs whose dependencies are ALL succeeded,
+choose highest priority, breaking ties by insertion order. Increment attempts;
+set running, supplied worker, a new opaque nonblank token NEVER reused for another
+attempt in this database, and lease_until=now+lease_seconds. Return that full job
+snapshot, or None if there is no eligible job. Queued retries keep original order.
+
+renew/finish accept only a currently running job with the matching token and
+now < lease_until. A valid-shaped request for a missing job, wrong token, old token,
+or expired lease returns False and has no job/event effects. In particular renewal
+at exactly the deadline is too late. These methods do not run reconciliation.
+renew sets lease_until=now+lease_seconds (not old_deadline+lease_seconds).
+finish success sets succeeded and stores a detached result. finish failure sets
+queued if attempts < max_attempts, otherwise failed, with null result. Both clear
+worker/token/lease_until. Only claim reconciles blocked dependents. Return True.
+
+Idempotency is GLOBAL across all mutating methods. The first successfully handled
+request ID binds method plus effective arguments (including defaults) to its exact
+return value, including None/False and the original claim snapshot/token. Identical
+replay, including after process restart or later job transitions, returns that value
+without transitions/events. Same ID with different method/arguments raises ValueError
+without mutation. Argument equivalence is canonical JSON: sorted keys, compact
+separators, ensure_ascii=False, allow_nan=False. Thus object key order is irrelevant,
+but true vs 1 and 1 vs 1.0 differ. Validation exceptions do not reserve request IDs.
+
+events are durable, ordered and exactly {seq, job_id, kind, attempt}. seq starts at
+1 and is contiguous. Emit one added event (attempt=0) for add; claimed for a claim;
+renewed for successful renewal; succeeded for successful finish; retry for a failed
+finish that can retry; failed for exhausted finish or exhausted expiry; expired for
+retryable expiry; blocked for blocked propagation. attempt is the job's current
+attempt count. Replays, missing/wrong/stale token returns, and reads emit no events.
+
+CLI: python3 leasequeue_cli.py DB JSON_REQUEST. JSON_REQUEST is exactly
+{"op": METHOD, "args": OBJECT}; methods are add, claim, renew, finish, get, events.
+Call the API using keyword args; main(argv=None) accepts an explicit argument list.
+Reject duplicate JSON object keys, unknown operations, malformed argument sets,
+invalid JSON and I/O failures. Success prints exactly one JSON object
+{"ok":true,"value":RETURN_VALUE} and exits 0. Errors print
+{"ok":false,"error":NONEMPTY_STRING} and exit 2, without a traceback.
+
+Add your own tests and notes. Supplied acceptance tests are partial, not an exhaustive
+goal proof. Do not edit provided acceptance tests. Preserve required interfaces and
+all interactions above; you may use any internal design meeting them.

@@ -1,0 +1,29 @@
+{
+  "schema_version": "acceptance-policy-v1",
+  "policy_id": "addition",
+  "revision": "1",
+  "domain_id": "develop",
+  "parameters": {
+    "profile": "execution",
+    "inputs": ["main.py", "acceptance_tests/test_addition.py"],
+    "artifacts": ["main.py"],
+    "expectations": [{"id": "entrypoint", "path": "main.py", "operator": "contains", "expected": "def add("}],
+    "test_commands": [{"id": "addition", "argv": ["python3", "-m", "unittest", "discover", "-s", "acceptance_tests", "-v"], "timeout_seconds": 30}]
+  },
+  "required_check_ids": ["domain.entrypoint", "domain.addition"],
+  "requirements": [{"id": "integer-sum", "statement": "add returns the sum of two integer arguments, including zero and negatives", "check_ids": ["domain.entrypoint", "domain.addition"], "minimum_evidence": "command"}],
+  "coverage": {
+    "profile_id": "develop.behavioral",
+    "profile_revision": "1",
+    "scenarios": [
+      {"id": "sum.positive", "requirement_id": "integer-sum", "check_id": "domain.addition", "kind": "positive", "test_ref": {"path": "acceptance_tests/test_addition.py", "case_id": "Addition.test_positive"}},
+      {"id": "sum.zero", "requirement_id": "integer-sum", "check_id": "domain.addition", "kind": "boundary", "test_ref": {"path": "acceptance_tests/test_addition.py", "case_id": "Addition.test_zero"}},
+      {"id": "sum.negative", "requirement_id": "integer-sum", "check_id": "domain.addition", "kind": "negative", "test_ref": {"path": "acceptance_tests/test_addition.py", "case_id": "Addition.test_negative"}}
+    ],
+    "known_gaps": [
+      {"id": "sum.performance-bound", "requirement_id": "integer-sum", "reason": "This profile declares no performance or large-input bound."}
+    ]
+  },
+  "bundle": {"version": "addition-examples-1", "files": ["acceptance_tests/test_addition.py"]},
+  "approval": {"declared_by": "repository example", "reference": "Demonstration only; not independent task approval"}
+}

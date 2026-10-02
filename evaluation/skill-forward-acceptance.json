@@ -1,0 +1,234 @@
+{
+  "schema_version": "acceptance-skill-forward-v1",
+  "scope": "Separate same-Host agent using the actual Skill and helper, not a third-party audit or model comparison",
+  "tested_tree_digest": "0771ba64c48e4289db4a9af72ba6bb821bc390f945284c7b6454d0544cb731f0",
+  "run_id": "run_aa9d7c306f724fe59514ba9fbc3cc3e9",
+  "resolution": {
+    "acceptance": {
+      "authority": {
+        "approval": {
+          "declared_by": "local evaluation operator",
+          "reference": "Frozen forward-test task, internal evaluation not third-party audit"
+        },
+        "approval_status": "configured_not_authenticated",
+        "change_authority": "operator_configuration_and_new_run",
+        "same_user_tamper_protection": false,
+        "selection": "operator_default",
+        "source": "operator_configuration"
+      },
+      "binding_hash": "bf31bddaf7043936efa5129900221875f624c1cd75b43fbb40bcca1e55c8bf7f",
+      "bundle_hash": "d496778cc438a6f133c4e7a1403090fe734ed81a48920ab7df3d4677856af8c9",
+      "bundle_pinned": true,
+      "bundle_version": "ledger-forward-1",
+      "definition_hash": "2cbd76ce19fd05ddd94e2804a582fc60ccfe2b6561b2e110ccdf34d799752191",
+      "goal_coverage": "declared_mapping_not_semantically_proven",
+      "policy_id": "ledger",
+      "requirements": [
+        {
+          "check_ids": [
+            "domain.library",
+            "domain.behavior"
+          ],
+          "id": "library",
+          "minimum_evidence": "command",
+          "statement": "Validated NDJSON aggregation and duplicate handling"
+        },
+        {
+          "check_ids": [
+            "domain.cli",
+            "domain.behavior"
+          ],
+          "id": "cli",
+          "minimum_evidence": "command",
+          "statement": "Read-only JSON CLI with structured input errors"
+        }
+      ],
+      "revision": "1",
+      "source": "operator_configuration",
+      "unmapped_requirement_ids": []
+    },
+    "assessment_status": "satisfied",
+    "certification": "not_issued",
+    "display_status": "closed_checks_passed",
+    "gate_status": "passed",
+    "lifecycle": "closed",
+    "measurement_scope": {
+      "check_validity": "not_independently_established",
+      "command_checks": 1,
+      "completed_commands": 1,
+      "execution_statuses": {
+        "completed": 3
+      },
+      "file_checks": 2,
+      "goal_satisfaction": "not_measured",
+      "observations": [
+        {
+          "check_id": "domain.library",
+          "comparison_status": "passed",
+          "environment_hash": "2278d327c0f0770e9fb6427aedef31641f61d72a7643e5745d26baaf6e80ed36",
+          "execution_status": "completed",
+          "kind": "file",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:3",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        },
+        {
+          "check_id": "domain.cli",
+          "comparison_status": "passed",
+          "environment_hash": "2278d327c0f0770e9fb6427aedef31641f61d72a7643e5745d26baaf6e80ed36",
+          "execution_status": "completed",
+          "kind": "file",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:4",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        },
+        {
+          "check_id": "domain.behavior",
+          "comparison_status": "passed",
+          "environment_hash": "076053c95f6df3155436dd4862c710b3e5fe94db8457330b2342c69d60f35ee9",
+          "execution_status": "completed",
+          "kind": "command",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:5",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        }
+      ],
+      "test_case_count": null,
+      "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+    },
+    "measurement_status": "passed",
+    "policy_approval": {
+      "authenticated_by": null,
+      "claimed_reference": null,
+      "status": "not_provided"
+    },
+    "requested_outcome": "completed"
+  },
+  "measurement": {
+    "baseline_comparison": {
+      "acceptance_binding_hash": "bf31bddaf7043936efa5129900221875f624c1cd75b43fbb40bcca1e55c8bf7f",
+      "baseline_hash": "43108f14542371a35fb05baa482d3588bc07151834e624824ee5fcabfc393046",
+      "candidate_hash": "071009bb0dd40550885fc931ef354b22fbc8aa722e9369dabe23be58af882c29",
+      "changes": [
+        {
+          "baseline_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:0",
+          "candidate_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:3",
+          "check_id": "domain.library",
+          "check_ref": {
+            "id": "check:run_aa9d7c306f724fe59514ba9fbc3cc3e9:domain.library",
+            "revision": 1,
+            "sha256": "afae77db870e44c221d3161146fdc6dac3e389d0d2474ddeee4540ded781ebfe"
+          },
+          "comparable": true,
+          "comparison_basis": "identical_file_predicate",
+          "status": "already_passing"
+        },
+        {
+          "baseline_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:1",
+          "candidate_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:4",
+          "check_id": "domain.cli",
+          "check_ref": {
+            "id": "check:run_aa9d7c306f724fe59514ba9fbc3cc3e9:domain.cli",
+            "revision": 1,
+            "sha256": "66c6b00c3aea768a3517006714eabb0faa596da8c374a19a5770312bb506729b"
+          },
+          "comparable": true,
+          "comparison_basis": "identical_file_predicate",
+          "status": "already_passing"
+        },
+        {
+          "baseline_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:2",
+          "candidate_observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:5",
+          "check_id": "domain.behavior",
+          "check_ref": {
+            "id": "check:run_aa9d7c306f724fe59514ba9fbc3cc3e9:domain.behavior",
+            "revision": 1,
+            "sha256": "b57a0ac88968f9322b4cb09818c8bd7d639074560f5d0b74c685772d82f2b7b9"
+          },
+          "comparable": true,
+          "comparison_basis": "configured_command_and_pinned_declared_test_bundle",
+          "status": "improved"
+        }
+      ],
+      "check_set_hash": "cab65c2ee6dcd658a8486dcb05afddd2f62f78f7b3238f784084fab5c5def0c9",
+      "limitations": [
+        "Environment identity covers the recorded runtime, not every transitive dependency or nondeterministic input.",
+        "Pinned declared tests are not proof of independent authorship or sufficient goal coverage."
+      ],
+      "meaning": "check_improvement_not_full_goal_proof",
+      "same_input_scope": true,
+      "status": "compared"
+    },
+    "check_set_hash": "cab65c2ee6dcd658a8486dcb05afddd2f62f78f7b3238f784084fab5c5def0c9",
+    "job_id": "job_d2d3388a47e348acb5854575b4b06db5",
+    "measurement_scope": {
+      "check_validity": "not_independently_established",
+      "command_checks": 1,
+      "completed_commands": 1,
+      "execution_statuses": {
+        "completed": 3
+      },
+      "file_checks": 2,
+      "goal_satisfaction": "not_measured",
+      "observations": [
+        {
+          "check_id": "domain.library",
+          "comparison_status": "passed",
+          "environment_hash": "2278d327c0f0770e9fb6427aedef31641f61d72a7643e5745d26baaf6e80ed36",
+          "execution_status": "completed",
+          "kind": "file",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:3",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        },
+        {
+          "check_id": "domain.cli",
+          "comparison_status": "passed",
+          "environment_hash": "2278d327c0f0770e9fb6427aedef31641f61d72a7643e5745d26baaf6e80ed36",
+          "execution_status": "completed",
+          "kind": "file",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:4",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        },
+        {
+          "check_id": "domain.behavior",
+          "comparison_status": "passed",
+          "environment_hash": "076053c95f6df3155436dd4862c710b3e5fe94db8457330b2342c69d60f35ee9",
+          "execution_status": "completed",
+          "kind": "command",
+          "observation_id": "observation:job_d2d3388a47e348acb5854575b4b06db5:5",
+          "role": "mandatory",
+          "subject_role": "candidate"
+        }
+      ],
+      "test_case_count": null,
+      "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+    },
+    "result_hash": "8f8bcdd33e2a0528e12d4d0a1d42645705674dcd6e0dadb6957ad3933fe3ad04",
+    "status": "passed"
+  },
+  "usage": {
+    "actions": 8,
+    "verification_attempts": 2
+  },
+  "history_counts": {
+    "activity": 0,
+    "assessments": 1,
+    "checks": 3,
+    "interpretations": 3,
+    "jobs": 2,
+    "measurements": 12,
+    "notes": 1,
+    "tasks": 0
+  },
+  "workspace_matches": true,
+  "friction": [
+    {
+      "issue": "INPUT_SCOPE_CHANGED_MISLABELLED_AS_TEST_BUNDLE_NOT_PINNED",
+      "effect": "Agent made an extra revision and checkpoint to match original input scope; first attempt retained."
+    }
+  ],
+  "model_comparison": false,
+  "ready": false
+}

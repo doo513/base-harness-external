@@ -51,6 +51,8 @@ class DomainRegistry:
     def identity(self, domain_id):
         module = self.resolve(domain_id)
         functions = [module.prepare, module.normalize_check]
+        if callable(getattr(module, "prepare_acceptance", None)):
+            functions.append(module.prepare_acceptance)
         sources, code = {}, {}
         for function in functions:
             target = getattr(function, "__func__", function)

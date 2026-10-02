@@ -18,6 +18,7 @@ from .store import Store, StopRun, identifier
 from . import semantics
 from .registry import builtin_registry
 from . import queries, maintenance
+from . import acceptance, evidence
 
 
 LEASE_SECONDS = 20
@@ -28,7 +29,7 @@ def verifier_identity() -> dict:
              Path(__file__).with_name("worker.py"), Path(__file__).with_name("snapshots.py"), Path(__file__).with_name("store.py"),
              Path(__file__).with_name("develop_manifest.json"), Path(__file__).with_name("errors.py"),
              Path(__file__).with_name("semantics.py"), Path(__file__).with_name("registry.py")]
-    paths += [Path(queries.__file__), Path(maintenance.__file__)]
+    paths += [Path(queries.__file__), Path(maintenance.__file__), Path(acceptance.__file__), Path(evidence.__file__)]
     bridge = Path(__file__).resolve().parents[2] / "runtime" / "script" / "external-harness-sandbox.ts"
     sandbox = bridge.parent.parent / "packages" / "security" / "src" / "sandbox.ts"
     sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
@@ -43,9 +44,18 @@ def response(**data) -> dict:
 
 
 class Harness:
-    def __init__(self, state_dir: str | Path | None = None, *, domains=None):
+    def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None):
         self.store = Store(state_dir)
         self.domains = domains or builtin_registry()
+        self.policies = acceptance.PolicyRegistry(policy_root)
+
+    @staticmethod
+    def _domain_preparation_view(preparation):
+        result = {"status": preparation["status"], "available_operations": preparation["available_operations"]}
+        if "coverage_inventory_summary" in preparation:
+            # Forward-only metadata. It never grants an operation or changes a gate.
+            result["coverage_inventory"] = copy.deepcopy(preparation["coverage_inventory_summary"])
+        return result
 
     def _reconcile(self, connection, run):
         job_id = run.get("active_job")
@@ -118,9 +128,15 @@ class Harness:
                                    " is incompatible with this interpretation; revise or retire the advisory check first (" + error.code + ")") from error
 
     def start(self, *, domain_id: str, goal: str, workspace: str, parameters: dict, request_id: str, budget: dict | None = None,
-              mode: str = "strict", required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
-              constraints: list[str] | None = None, provenance: dict | None = None):
-        require(isinstance(mode, str) and mode in {"strict", "exploratory"}, "MODE_UNSUPPORTED", "Mode is strict or exploratory")
+              mode: str | None = None, required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
+              constraints: list[str] | None = None, provenance: dict | None = None, policy_id: str | None = None,
+              predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False):
+        # Request identity does not depend on mutable registry contents. A replay
+        # returns the originally selected policy, even after operator revision.
+        requested_mode = mode
+        require(type(capture_baseline) is bool, "INVALID_PARAMETERS", "capture_baseline must be boolean")
+        require(mode is None or isinstance(mode, str) and mode in {"strict", "exploratory", "acceptance"},
+                "MODE_UNSUPPORTED", "Mode is strict, exploratory or configured acceptance")
         require(required_checks is None or isinstance(required_checks, list), "INVALID_PARAMETERS", "required_checks must be a list")
         require(deferred_checks is None or isinstance(deferred_checks, list), "INVALID_PARAMETERS", "deferred_checks must be a list")
         require(len(required_checks or []) + len(deferred_checks or []) <= 256, "INVALID_PARAMETERS", "Too many gate IDs")
@@ -137,7 +153,7 @@ class Harness:
                 "STATE_WORKSPACE_OVERLAP", "Run state and workspace must be disjoint directories")
         request = {"operation": "start", "domain_id": domain_id, "goal": goal,
                    "workspace": str(source), "parameters": parameters, "budget": budget}
-        if mode != "strict" or required_checks:
+        if mode not in (None, "strict") or required_checks:
             request.update(mode=mode, required_checks=required_checks or [])
         if constraints:
             request["constraints"] = constraints
@@ -145,37 +161,109 @@ class Harness:
             request["deferred_checks"] = deferred_checks
         if provenance is not None:
             request["provenance"] = provenance
+        if policy_id is not None:
+            request["policy_id"] = policy_id
+        if capture_baseline:
+            request["capture_baseline"] = True
+        if predecessor_run_id is not None or policy_change_reason is not None:
+            require(predecessor_run_id is not None and isinstance(policy_change_reason, str) and 0 < len(policy_change_reason) <= 2000,
+                    "POLICY_CHANGE_LINK", "A policy-change Run needs its predecessor ID and a bounded reason")
+            request.update(predecessor_run_id=predecessor_run_id, policy_change_reason=policy_change_reason)
         fingerprint = canonical_hash(request)
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             prior = self.store.replay(connection, "start", request_id, fingerprint)
             if prior:
                 return prior
+            selected = self.policies.select(domain_id, policy_id)
+            mode = requested_mode or ("acceptance" if selected else "strict")
+            require(mode != "strict" or not (required_checks or deferred_checks), "INVALID_PARAMETERS", "Strict mode already gates all checks")
+            require((selected is not None) == (mode == "acceptance"), "POLICY_MODE_CONFLICT",
+                    "Configured policies use acceptance mode; caller strict/exploratory mode cannot override them")
+            require(not selected or not (required_checks or deferred_checks), "POLICY_MODE_CONFLICT",
+                    "Configured policies, not the caller, define mandatory check IDs")
+            if selected:
+                require(not self.policies.root.is_relative_to(source) and not source.is_relative_to(self.policies.root),
+                        "POLICY_WORKSPACE_OVERLAP", "Policy configuration must be outside the task workspace")
+            predecessor = None
+            if predecessor_run_id:
+                predecessor = self.store.run(connection, predecessor_run_id)
+                require(predecessor["workspace"] == str(source) and predecessor["goal"] == goal
+                        and predecessor["intent"]["domain_id"] == domain_id and predecessor["status"] != "active"
+                        and predecessor["intent"]["constraints"] == (constraints or []),
+                        "POLICY_CHANGE_LINK", "Policy changes require the same task and a terminal predecessor Run")
             run_id = "run_" + uuid.uuid4().hex
             original_intent = semantics.record("intent:" + run_id, 1, {"original_goal": goal, "domain_id": domain_id, "constraints": constraints or []})
-            preparation = module.prepare(goal, copy.deepcopy(parameters), verifier_identity(), exploratory=mode == "exploratory", intent=copy.deepcopy(original_intent))
+            if selected:
+                require(callable(getattr(module, "prepare_acceptance", None)), "DOMAIN_POLICY_UNSUPPORTED", "Domain has no acceptance policy compiler")
+                preparation = module.prepare_acceptance(goal, copy.deepcopy(parameters), verifier_identity(),
+                                                        policy=copy.deepcopy(selected["definition"]), intent=copy.deepcopy(original_intent))
+                acceptance.validate_preparation(preparation, selected["definition"])
+                required_checks = selected["definition"]["required_check_ids"]
+            else:
+                preparation = module.prepare(goal, copy.deepcopy(parameters), verifier_identity(), exploratory=mode == "exploratory", intent=copy.deepcopy(original_intent))
             contract = preparation["contract"]
-            if mode == "exploratory":
+            if mode != "strict":
                 contract["rules"]["all_checks_required"] = False
                 contract["contract_hash"] = canonical_hash({k: v for k, v in contract.items() if k != "contract_hash"})
             require(contract["original_goal"] == goal and contract["domain_id"] == domain_id, "DOMAIN_RESULT_BINDING", "Domain changed intent identity")
             bound = limits(budget)
+        require(not capture_baseline or bool(contract["inputs"]), "NEEDS_INPUT", "Declare baseline input files before capturing the original")
+        # File I/O must not block checkpoints in unrelated Runs. Only publish the
+        # captured files while committing the idempotent start request.
+        with tempfile.TemporaryDirectory(prefix=".start_", dir=self.store.root) as temporary, maintenance.capture_lease(temporary):
+            staging = Path(temporary)
+            binding = acceptance.pin(selected, staging) if selected else None
+            baseline = None
+            if capture_baseline:
+                overlays = {path: acceptance.bundle_payload(binding, staging) for path in binding["definition"]["bundle"]["files"]} if binding else {}
+                baseline = capture(source, contract["inputs"], staging, overlays=overlays)
             now = time.time()
             run = {"schema_version": API_VERSION, "run_id": run_id, "workspace": str(source), "goal": goal,
                    "contract": contract, "revision": 0, "status": "active", "phase": "awaiting_submission",
                    "created_at": now, "deadline_at": now + bound["timeout_seconds"], "limits": bound,
                    "actions": 0, "verification_attempts": 0, "generation": 0, "candidate": None,
                    "observations": [], "verification": {"status": "not_run"}, "active_job": None, "record": None}
+            if binding:
+                run["acceptance"] = binding
+            if capture_baseline:
+                run["baseline"] = baseline
+            if predecessor:
+                run["predecessor"] = {"run_id": predecessor_run_id, "policy_ref": predecessor["policy"]["ref"],
+                                      "reason": policy_change_reason, "previous_usage": {"actions": predecessor["actions"],
+                                      "verification_attempts": predecessor["verification_attempts"]},
+                                      "approval": binding["authority"] if binding else {"status": "not_established"}}
             semantics.ensure(run, mode=mode, required_checks=required_checks, parameters=parameters,
                              deferred_checks=deferred_checks, domain_identity=self.domains.identity(domain_id), policy_provenance=provenance,
-                             questions=preparation["questions"], domain_revision=module.revision, initial_intent=original_intent)
-            run["domain_preparation"] = {"status": preparation["status"], "available_operations": preparation["available_operations"]}
+                             questions=preparation["questions"], domain_revision=module.revision, initial_intent=original_intent,
+                             acceptance_binding=binding)
+            run["domain_preparation"] = self._domain_preparation_view(preparation)
             if preparation["status"] == "needs_input":
                 run["phase"] = "waiting_input"
-            self.store.directory(run_id).mkdir(parents=True, mode=0o700)
-            self.store.save_run(connection, run)
             result = response(run_id=run_id, contract=contract, phase=run["phase"], limits=bound,
-                              interpretation=run["interpretations"][-1], policy=run["policy"], questions=run["domain_questions"])
-            self.store.remember(connection, "start", request_id, fingerprint, result)
+                              interpretation=run["interpretations"][-1], policy=run["policy"], questions=run["domain_questions"],
+                              domain_preparation=run["domain_preparation"],
+                              acceptance=acceptance.view(binding),
+                              baseline={key: run["baseline"][key] for key in ("candidate_id", "candidate_hash", "subject")} if capture_baseline else None)
+            published = []
+            try:
+                with self.store.transaction() as connection:
+                    prior = self.store.replay(connection, "start", request_id, fingerprint)
+                    if prior:
+                        return prior
+                    require(contract["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier changed while starting the Run")
+                    require(run["domain_module"] == self.domains.identity(domain_id), "DOMAIN_MODULE_CHANGED", "Domain changed while starting the Run")
+                    directory = self.store.directory(run_id)
+                    directory.mkdir(parents=True, mode=0o700)
+                    for snapshot in ([binding["bundle"]] if binding else []) + ([baseline] if baseline else []):
+                        target = directory / snapshot["candidate_id"]
+                        os.rename(staging / snapshot["candidate_id"], target)
+                        published.append(target)
+                    self.store.save_run(connection, run)
+                    self.store.remember(connection, "start", request_id, fingerprint, result)
+            except BaseException:
+                for target in published:
+                    os.rename(target, staging / target.name)
+                raise
             return result
 
     def observe(self, run_id: str, observation: dict, request_id: str):
@@ -277,7 +365,14 @@ class Harness:
             patch = proposal.get("parameters", {})
             require(isinstance(patch, dict), "INVALID_PARAMETERS", "Parameter revision must be an object")
             parameters = {**copy.deepcopy(previous["parameters"]), **copy.deepcopy(patch)}
-            prepared = self._module(run).prepare(run["goal"], parameters, run["contract"]["verifier"], exploratory=run["policy"]["mode"] == "exploratory", intent=copy.deepcopy(run["intent"]))
+            module = self._module(run)
+            if run.get("acceptance"):
+                acceptance.validate(run["acceptance"], self.store.directory(run_id))
+                prepared = module.prepare_acceptance(run["goal"], parameters, run["contract"]["verifier"],
+                                                     policy=copy.deepcopy(run["acceptance"]["definition"]), intent=copy.deepcopy(run["intent"]))
+                acceptance.validate_preparation(prepared, run["acceptance"]["definition"])
+            else:
+                prepared = module.prepare(run["goal"], parameters, run["contract"]["verifier"], exploratory=run["policy"]["mode"] == "exploratory", intent=copy.deepcopy(run["intent"]))
             require(prepared["contract"]["original_goal"] == run["goal"] and prepared["contract"]["domain_id"] == run["domain_module"]["id"],
                     "DOMAIN_RESULT_BINDING", "Domain revision changed the original intent identity")
             summary = proposal.get("goal_summary", previous["goal_summary"])
@@ -308,16 +403,17 @@ class Harness:
             old_inputs = run["contract"]["inputs"]
             run["interpretations"].append(interpretation)
             run["contract"] = prepared["contract"]
-            if run["policy"]["mode"] == "exploratory":
+            if run["policy"]["mode"] != "strict":
                 run["contract"]["rules"]["all_checks_required"] = False
                 run["contract"]["contract_hash"] = canonical_hash({k: v for k, v in run["contract"].items() if k != "contract_hash"})
             if old_inputs != run["contract"]["inputs"]:
                 run["candidate"] = None
             run.update(domain_questions=prepared["questions"], phase="waiting_input" if prepared["status"] == "needs_input" else "awaiting_submission",
                        verification={"status": "not_run"})
-            run["domain_preparation"] = {"status": prepared["status"], "available_operations": prepared["available_operations"]}
+            run["domain_preparation"] = self._domain_preparation_view(prepared)
             self.store.save_run(connection, run)
-            result = response(run_id=run_id, interpretation=interpretation, phase=run["phase"], questions=run["domain_questions"])
+            result = response(run_id=run_id, interpretation=interpretation, phase=run["phase"],
+                              questions=run["domain_questions"], domain_preparation=run["domain_preparation"])
             self.store.remember(connection, run_id, request_id, fingerprint, result)
             return result
 
@@ -342,6 +438,7 @@ class Harness:
             parameters = self._module(run).normalize_check(copy.deepcopy(proposal["parameters"]), run["contract"])
             author = semantics.provenance(proposal.get("provenance"))["declared_author"]
             created = semantics.check_record(run_id, key, semantics.next_check_revision(run, key), parameters, latest,
+                                             role="mandatory" if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"] else "exploratory",
                                              author=author, generator={"kind": "domain_normalization", "module": run["domain_module"]})
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
@@ -438,7 +535,12 @@ class Harness:
         # Slow file reads/copies must not hold the store's global writer lock.
         # Staging is owned by this call and cannot be observed by a verifier.
         with tempfile.TemporaryDirectory(prefix=".submit_", dir=directory) as staging, maintenance.capture_lease(staging):
-            candidate = capture(Path(run["workspace"]), run["contract"]["inputs"], Path(staging))
+            overlays = {}
+            if run.get("acceptance"):
+                acceptance.validate(run["acceptance"], directory)
+                overlays = {path: acceptance.bundle_payload(run["acceptance"], directory)
+                            for path in run["acceptance"]["definition"]["bundle"]["files"]}
+            candidate = capture(Path(run["workspace"]), run["contract"]["inputs"], Path(staging), overlays=overlays)
             published = None
             try:
                 with self.store.transaction() as connection:
@@ -463,8 +565,16 @@ class Harness:
                 raise
             return result
 
-    def verify(self, run_id: str, request_id: str):
-        fingerprint = canonical_hash({"operation": "verify"})
+    def verify(self, run_id: str, request_id: str, *, compare_baseline: bool = False, expected_candidate_hash: str | None = None):
+        require(type(compare_baseline) is bool, "INVALID_PARAMETERS", "compare_baseline must be boolean")
+        request = {"operation": "verify"}
+        if compare_baseline:
+            request["compare_baseline"] = True
+        if expected_candidate_hash is not None:
+            require(isinstance(expected_candidate_hash, str) and len(expected_candidate_hash) == 64
+                    and all(c in "0123456789abcdef" for c in expected_candidate_hash), "INVALID_PARAMETERS", "Invalid expected Candidate hash")
+            request["expected_candidate_hash"] = expected_candidate_hash
+        fingerprint = canonical_hash(request)
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -473,21 +583,30 @@ class Harness:
             self._admit(connection, run, verification=True, request=(run_id, request_id, fingerprint))
             require(not run["active_job"], "VERIFICATION_ACTIVE", "A verifier already owns this Run")
             require(run["candidate"] is not None, "SUBMIT_REQUIRED", "Submit a snapshot before verification")
+            require(expected_candidate_hash is None or expected_candidate_hash == run["candidate"]["candidate_hash"],
+                    "CANDIDATE_SUPERSEDED", "Another submission replaced the expected Candidate; no verification was started")
+            require(not compare_baseline or run.get("baseline"), "BASELINE_REQUIRED", "This Run has no pre-edit baseline; do not reconstruct one from edited files")
             require("verify" in run["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation has not admitted measurements")
             require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed; start a new Run with the new version")
             job_id = "job_" + uuid.uuid4().hex
             now = time.time()
             checks = copy.deepcopy(semantics.current_checks(run))
             self._validate_checks(run, run["contract"])
-            timeout = 45 + sum(check["spec"]["timeoutMs"] / 1000 + 10 for check in checks)
+            timeout = 45 + (2 if compare_baseline else 1) * sum(check["spec"]["timeoutMs"] / 1000 + 10 for check in checks)
             job = {"job_id": job_id, "run_id": run_id, "status": "queued", "heartbeat_at": now,
                    "deadline_at": min(run["deadline_at"], now + timeout), "generation": run["generation"],
                    "contract_hash": run["contract"]["contract_hash"], "candidate_hash": run["candidate"]["candidate_hash"],
                    "cleanup": "not_started", "result": None}
             job.update(checks=checks, candidate=copy.deepcopy(run["candidate"]),
                        interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
-                       completed_checks=0, total_checks=len(checks))
+                       completed_checks=0, total_checks=len(checks) * (2 if compare_baseline else 1))
+            if compare_baseline:
+                job["baseline"] = copy.deepcopy(run["baseline"])
             job.update(check_set_hash=semantics.check_set_hash(checks), domain_identity=copy.deepcopy(run["domain_module"]))
+            if run.get("acceptance"):
+                acceptance.validate(run["acceptance"], self.store.directory(run_id))
+                acceptance.validate_subject(run["acceptance"], run["candidate"])
+                job["acceptance_binding_hash"] = run["acceptance"]["binding_hash"]
             require(job["total_checks"] > 0, "CHECKS_REQUIRED", "Register a measurement before verification")
             run.update(active_job=job_id, phase="verifying", verification={"status": "queued", "job_id": job_id},
                        verification_attempts=run["verification_attempts"] + 1)
@@ -553,6 +672,9 @@ class Harness:
             if check_workspace:
                 expected = (result.get("candidate") or result.get("job") or {}).get("candidate_hash")
                 result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, expected)
+                with self.store.transaction(write=False) as connection:
+                    run = self.store.run(connection, run_id)
+                    result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])
             return result
         with self.store.transaction(write=False) as connection:
             run = self.store.run(connection, run_id)
@@ -578,6 +700,7 @@ class Harness:
                                         "termination_reason": run.get("termination_reason")})
         if check_workspace:
             result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, (run["candidate"] or {}).get("candidate_hash"))
+            result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])
         return result
 
     def _workspace_matches(self, run_id, expected_candidate_hash):
@@ -587,6 +710,10 @@ class Harness:
             return False
         try:
             def same(entry):
+                if entry["path"] in (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", []):
+                    # These bytes come from the pinned operator bundle, never
+                    # an identically named workspace file.
+                    return True
                 data, mode = read_file(Path(run["workspace"]), entry["path"])
                 return hashlib.sha256(data).hexdigest() == entry["sha256"] and mode == run["candidate"]["executable"][entry["path"]]
             return all(same(entry) for entry in run["candidate"]["manifest"]["files"])
@@ -634,6 +761,9 @@ class Harness:
                             "RESULT_BINDING", "Verification does not cover the current check set")
                 if run["candidate"]:
                     validate_candidate(run["candidate"], self.store.directory(run_id) / identifier(run["candidate"]["candidate_id"], "candidate") / "payload")
+                    if run.get("acceptance"):
+                        acceptance.validate(run["acceptance"], self.store.directory(run_id))
+                        acceptance.validate_subject(run["acceptance"], run["candidate"])
                 require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
                 self._module(run)
             if run["active_job"]:
@@ -653,6 +783,8 @@ class Harness:
                           measurement=copy.deepcopy(run["verification"]), assessment=semantics.assessment_view(run), gates=gate_results,
                           unresolved_work=[task["task_id"] for task in run["logical_tasks"] if task["state"] != "settled"])
             record.update(check_set_hash=semantics.check_set_hash(semantics.current_checks(run)), domain_identity=run["domain_module"],
+                          acceptance=acceptance.view(run.get("acceptance")), predecessor=run.get("predecessor"),
+                          baseline_comparison=run["verification"].get("baseline_comparison"),
                           outcome_meaning="caller_requested_disposition_not_verification_success")
             record["unresolved_verification_jobs"] = [row[0] for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))
                                                       if self.store.job(connection, row[0]).get("cleanup") not in {"complete", "not_started"}]

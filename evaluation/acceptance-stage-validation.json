@@ -1,0 +1,28 @@
+{
+  "schema_version": "acceptance-stage-validation-v1",
+  "scope": "Implementation-stage conformance, not comparative model quality",
+  "base_commit": "8dad67a475dfeaedd8e3653f82697be5165e20cf",
+  "tests": [
+    {
+      "suite": "harness-acceptance-full-20261001.xml",
+      "passed": 166,
+      "skipped": 4,
+      "failed": 0,
+      "scope_note": "Full Python suite before top-level runtime identity and request fsync follow-up; later conformance and live checks cover those changes."
+    },
+    {
+      "suite": "harness-acceptance-live-20261001.xml",
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0
+    }
+  ],
+  "model_comparison_completed": false,
+  "full_objective_completed": false,
+  "conformance": "0771ba64c48e4289db4a9af72ba6bb821bc390f945284c7b6454d0544cb731f0",
+  "limitations": [
+    "Internal scripted/real Sandbox tests, not third-party audit.",
+    "Configured policy approval is not authenticated human identity.",
+    "Matched multi-model cost and quality evaluation remains pending."
+  ]
+}

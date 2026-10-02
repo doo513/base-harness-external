@@ -46,7 +46,7 @@ def provenance(value=None):
 
 
 def check_record(run_id: str, check_id: str, revision: int, parameters: dict, interpretation_ref: dict, *,
-                 origin="caller_proposal", author="unknown", generator=None) -> dict:
+                 origin="caller_proposal", author="unknown", generator=None, role="exploratory", authority=None) -> dict:
     named(check_id)
     definition_key = parameters.get("check_key") if origin == "domain_preparation" else None
     parameters = parameters_only(parameters)
@@ -58,7 +58,9 @@ def check_record(run_id: str, check_id: str, revision: int, parameters: dict, in
     spec["parameters"].pop("timeout_seconds", None)
     return record("check:" + run_id + ":" + check_id, revision,
                   {"check_id": check_id, "active": True, "origin": origin, "trust": "untrusted", "interpretation_ref": interpretation_ref,
-                   "definition_key": definition_key, "authored_by": {"declared_kind": author, "trust": "caller_claim"},
+                   "role": role, "authority": authority or {"source": "caller_proposal", "approval_status": "not_established"},
+                   "definition_key": definition_key, "authored_by": {"declared_kind": author,
+                       "trust": "configuration_claim" if authority and authority.get("source") == "operator_configuration" else "caller_claim"},
                    "generated_by": generator or {"kind": "domain_normalization"}, "spec": spec})
 
 
@@ -69,7 +71,8 @@ def check_equivalent(existing: dict, parameters: dict) -> bool:
 
 
 def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=None, parameters=None, questions=None,
-           domain_revision=None, domain_identity=None, policy_provenance=None, projected=False, initial_intent=None) -> None:
+           domain_revision=None, domain_identity=None, policy_provenance=None, projected=False, initial_intent=None,
+           acceptance_binding=None) -> None:
     if run.get("semantic_schema_version"):
         return
     run_id, contract = run["run_id"], run["contract"]
@@ -87,8 +90,13 @@ def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=No
     for item in contract["checks"]:
         key = item.get("check_id", item["kind"] + "-" + str(ids[item["kind"]]))
         ids[item["kind"]] += 1
+        mandatory = mode == "strict" or key in (required_checks or [])
+        configured = acceptance_binding and key in acceptance_binding["definition"]["required_check_ids"]
         checks.append(check_record(run_id, key, 1, copy.deepcopy(item), interpretation["ref"], origin="domain_preparation",
-                                   author=sources["declared_author"], generator={"kind": "domain", "module": module}))
+                                   author=acceptance_binding["authority"]["authorship"]["criteria"] if configured else sources["declared_author"],
+                                   role="mandatory" if mandatory else "exploratory",
+                                   authority=acceptance_binding["authority"] if configured else None,
+                                   generator={"kind": "domain", "module": module}))
     require(len({c["check_id"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS", "Duplicate check IDs")
     gate_ids = [item["check_id"] for item in checks] if mode == "strict" else list(required_checks or []) + list(deferred_checks or [])
     for key in gate_ids:
@@ -97,11 +105,20 @@ def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=No
     missing = set(gate_ids) - {item["check_id"] for item in checks}
     require(projected or missing <= set(deferred_checks or []), "UNKNOWN_GATE_CHECK",
             "Unknown required check IDs: " + ", ".join(sorted(missing)) + "; explicitly declare deferred_checks for future definitions")
-    policy = record("policy:" + run_id, 1, {"mode": mode, "required_check_ids": gate_ids,
+    policy_body = {"mode": mode, "required_check_ids": gate_ids,
                     "origin": "initial_configuration", "domain_revision": domain_revision or contract["domain_revision"],
                     "action": "finish_completed", "ready_attestation": False, "provenance": sources,
                     "deferred_check_ids": list(deferred_checks or []),
-                    "rule": "all_registered_checks" if mode == "strict" else "explicit_gates"})
+                    "rule": "all_registered_checks" if mode == "strict" else "explicit_gates"}
+    if acceptance_binding:
+        policy_body.update(origin="operator_configuration", acceptance_binding_hash=acceptance_binding["binding_hash"],
+                           authority=acceptance_binding["authority"], caller_proposal_provenance=sources,
+                           provenance={"declared_author": acceptance_binding["authority"]["authorship"]["criteria"],
+                                       "author_trust": "configuration_claim",
+                                       "approval": {"status": "configured_not_authenticated", "authenticated_by": None,
+                                                    "claimed_reference": acceptance_binding["definition"]["approval"]["reference"],
+                                                    "configured_approver": acceptance_binding["definition"]["approval"]["declared_by"]}})
+    policy = record("policy:" + run_id, 1, policy_body)
     run.update(semantic_schema_version=SEMANTIC_VERSION, intent=intent, policy=policy,
                semantic_projection_origin="legacy_strict_projection" if projected else "native",
                domain_module=module,
@@ -115,6 +132,14 @@ def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=No
 def validate_run(run):
     validate(run["intent"])
     validate(run["policy"])
+    if run.get("acceptance"):
+        from .acceptance import validate as validate_acceptance, compiled_check_ids
+        validate_acceptance(run["acceptance"])
+        require(run["policy"].get("acceptance_binding_hash") == run["acceptance"]["binding_hash"],
+                "ACCEPTANCE_BINDING_CORRUPT", "Completion policy no longer references its acceptance bundle")
+        compiled_check_ids({"acceptance_check_ids": run["policy"]["required_check_ids"]}, run["acceptance"]["definition"])
+        from .acceptance import validate_coverage_binding
+        validate_coverage_binding(run["contract"], run.get("domain_preparation", {}), run["acceptance"]["definition"])
     require(run["intent"]["original_goal"] == run["goal"], "INTENT_CHANGED", "Original goal is immutable")
     require(run["contract"]["original_goal"] == run["goal"] and run["contract"]["domain_id"] == run["intent"]["domain_id"],
             "INTENT_CHANGED", "Compiled contract changed the original intent identity")
@@ -181,7 +206,8 @@ def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
         require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate check cannot be weakened or changed by interpretation revision")
         require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
         created = check_record(run["run_id"], key, next_check_revision(run, key), {**item, "check_key": definition}, interpretation_ref,
-                               origin="domain_preparation", author=run["policy"].get("provenance", {}).get("declared_author", "unknown"),
+                               origin="domain_preparation", author=run["policy"].get("caller_proposal_provenance", run["policy"].get("provenance", {})).get("declared_author", "unknown"),
+                               role="mandatory" if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks" else "exploratory",
                                generator={"kind": "domain", "module": run["domain_module"]})
         run["check_records"].append(created)
         if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks":
@@ -250,8 +276,18 @@ def resolution(run, gate_results):
     measurement = run["verification"]["status"]
     closed = run["status"] == "finished"
     label = "closed_unverified" if measurement in {"not_run", "queued", "running", "cancelled", "interrupted", "error"} else "closed_checks_" + measurement
-    return {"lifecycle": lifecycle(run), "display_status": label if closed else lifecycle(run),
+    from .acceptance import view as acceptance_view
+    from .evidence import unmeasured
+    result = {"lifecycle": lifecycle(run), "display_status": label if closed else lifecycle(run),
             "requested_outcome": run["record"]["outcome"] if run.get("record") else None,
             "measurement_status": measurement, "assessment_status": assessment_view(run)["status"],
             "gate_status": gate_results["status"], "policy_approval": run["policy"].get("provenance", {}).get("approval", {"status": "unknown"}),
-            "certification": "not_issued"}
+            "certification": "not_issued", "acceptance": acceptance_view(run.get("acceptance")),
+            "measurement_scope": run["verification"].get("measurement_scope", unmeasured())}
+    preparation = run.get("domain_preparation") or {}
+    inventory = preparation.get("coverage_inventory") if isinstance(preparation, dict) else None
+    if inventory is not None:
+        # Coverage is a Domain declaration shown to callers, never a gate or
+        # verifier observation.
+        result["coverage_inventory"] = copy.deepcopy(inventory)
+    return result

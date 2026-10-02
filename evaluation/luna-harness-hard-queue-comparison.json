@@ -1,0 +1,609 @@
+{
+  "schema_version": "luna-hard-queue-matched-workflow-v1",
+  "generated_at": "2026-10-02T00:58:25.935244+00:00",
+  "complete": true,
+  "conditions": [
+    {
+      "id": "codex__leasequeue__plain",
+      "task": "leasequeue",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-hard-queue-20261002/receipts/codex__leasequeue__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 36,
+          "total_checks": 36,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 169.63958105299753,
+          "tool_calls": 15,
+          "raw_usage": {
+            "input_tokens": 334786,
+            "cached_input_tokens": 301312,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 8530,
+            "reasoning_output_tokens": 1033
+          },
+          "external_grading_seconds": 1.8523221729992656,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "leasequeue.py": "08c849b2cac38d8bc1ef5679d3ded7492dd355519039f75916146095a8b42c6b",
+            "leasequeue_cli.py": "2d6ce9606b4e2cae32a904224fb86092b66eaf5de8267128005dd3f411c85fd1"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 36,
+          "total_checks": 36,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 32.04188580600021,
+          "tool_calls": 5,
+          "raw_usage": {
+            "input_tokens": 101800,
+            "cached_input_tokens": 78592,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 928,
+            "reasoning_output_tokens": 332
+          },
+          "external_grading_seconds": 1.9496109760002582,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "leasequeue.py": "08c849b2cac38d8bc1ef5679d3ded7492dd355519039f75916146095a8b42c6b",
+            "leasequeue_cli.py": "2d6ce9606b4e2cae32a904224fb86092b66eaf5de8267128005dd3f411c85fd1"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 169.63958105299753,
+      "total_seconds": 201.68146685899774,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false,
+      "requested_model": {
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      },
+      "tool_calls": 20,
+      "raw_usage_totals": {
+        "input_tokens": 436586,
+        "cached_input_tokens": 379904,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9458,
+        "reasoning_output_tokens": 1365
+      },
+      "usage_missing_sessions": 0
+    },
+    {
+      "id": "codex__leasequeue__after",
+      "task": "leasequeue",
+      "arm": "after",
+      "source_receipts": "external-local/harness-hard-queue-luna-harness-20261002/receipts/codex__leasequeue__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 36,
+          "total_checks": 36,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 513.8926230180004,
+          "tool_calls": 23,
+          "raw_usage": {
+            "input_tokens": 751814,
+            "cached_input_tokens": 690432,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 13730,
+            "reasoning_output_tokens": 3867
+          },
+          "external_grading_seconds": 2.416763957000512,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_21963d66603246c3a1b232979a3695a2",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "4dd29fbf59ac3e11ed323458e87b2474812517c005aa4c4f840370be18be6e50",
+                  "bundle_hash": "522a12f789469741c88b63f8c150a287d00e7c047f1f34c56e66a58d6ca263ab",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "b95ffb35217e1a8befaee482db5cb20e93d9523def0af3bc015cfb12accf956e",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "leasequeue",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 2,
+                  "completed_commands": 2,
+                  "execution_statuses": {
+                    "completed": 6
+                  },
+                  "file_checks": 4,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:6",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:7",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.queue-api",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:8",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.cli-entry",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:9",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "f994c9c16f14dca4c0794b8f80e447b296b82efc20c2e1d7c45b5aa9a13803f7",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:10",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.acceptance",
+                      "comparison_status": "passed",
+                      "environment_hash": "f994c9c16f14dca4c0794b8f80e447b296b82efc20c2e1d7c45b5aa9a13803f7",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:11",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 2,
+              "workspace_matches": true,
+              "baseline_status": "incomplete",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "4dd29fbf59ac3e11ed323458e87b2474812517c005aa4c4f840370be18be6e50",
+                "bundle_hash": "522a12f789469741c88b63f8c150a287d00e7c047f1f34c56e66a58d6ca263ab",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "b95ffb35217e1a8befaee482db5cb20e93d9523def0af3bc015cfb12accf956e",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "leasequeue",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 6,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 12,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "leasequeue.py": "592252c8a917b06e3208672e054d9ce379ab52f792b8c13a4521782fdd60e2c8",
+            "leasequeue_cli.py": "d872e1b3e2ebebf5bcd50d1058109d4b3ca4bb7d7ea8b433721a6e0059365193"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 36,
+          "total_checks": 36,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 71.62862818100257,
+          "tool_calls": 9,
+          "raw_usage": {
+            "input_tokens": 162039,
+            "cached_input_tokens": 124416,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2433,
+            "reasoning_output_tokens": 561
+          },
+          "external_grading_seconds": 2.2729383509977197,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_21963d66603246c3a1b232979a3695a2",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "4dd29fbf59ac3e11ed323458e87b2474812517c005aa4c4f840370be18be6e50",
+                  "bundle_hash": "522a12f789469741c88b63f8c150a287d00e7c047f1f34c56e66a58d6ca263ab",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "b95ffb35217e1a8befaee482db5cb20e93d9523def0af3bc015cfb12accf956e",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "leasequeue",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 2,
+                  "completed_commands": 2,
+                  "execution_statuses": {
+                    "completed": 6
+                  },
+                  "file_checks": 4,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:6",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:7",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.queue-api",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:8",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.cli-entry",
+                      "comparison_status": "passed",
+                      "environment_hash": "20f43b81586a5198806d5f1560191f86864cb8ea81048b7fcd01bd07d1179b2c",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:9",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "f994c9c16f14dca4c0794b8f80e447b296b82efc20c2e1d7c45b5aa9a13803f7",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:10",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.acceptance",
+                      "comparison_status": "passed",
+                      "environment_hash": "f994c9c16f14dca4c0794b8f80e447b296b82efc20c2e1d7c45b5aa9a13803f7",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_d58a641dd4a44ac59c48cc2ec12c6548:11",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 2,
+              "workspace_matches": true,
+              "baseline_status": "incomplete",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "4dd29fbf59ac3e11ed323458e87b2474812517c005aa4c4f840370be18be6e50",
+                "bundle_hash": "522a12f789469741c88b63f8c150a287d00e7c047f1f34c56e66a58d6ca263ab",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "b95ffb35217e1a8befaee482db5cb20e93d9523def0af3bc015cfb12accf956e",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "leasequeue",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 6,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 12,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "leasequeue.py": "592252c8a917b06e3208672e054d9ce379ab52f792b8c13a4521782fdd60e2c8",
+            "leasequeue_cli.py": "d872e1b3e2ebebf5bcd50d1058109d4b3ca4bb7d7ea8b433721a6e0059365193"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 513.8926230180004,
+      "total_seconds": 585.521251199003,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": true,
+      "implementation_changed_during_followup": false,
+      "requested_model": {
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      },
+      "tool_calls": 32,
+      "raw_usage_totals": {
+        "input_tokens": 913853,
+        "cached_input_tokens": 814848,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 16163,
+        "reasoning_output_tokens": 4428
+      },
+      "usage_missing_sessions": 0
+    }
+  ],
+  "comparability": {
+    "same_requested_model_and_effort": true,
+    "same_original_files": true,
+    "same_task_and_fixed_36_scenarios": true,
+    "same_frozen_harness_bytes_and_policy": true,
+    "initial_budget_seconds": 900,
+    "followup_budget_seconds": 300,
+    "fresh_workspace_and_host_session": true,
+    "previous_implementation_or_failure_hints_provided": false
+  },
+  "comparison": {
+    "initial_seconds_plain": 169.63958105299753,
+    "initial_seconds_harness": 513.8926230180004,
+    "initial_time_ratio": 3.0293202790771687,
+    "total_seconds_plain": 201.68146685899774,
+    "total_seconds_harness": 585.521251199003,
+    "total_time_ratio": 2.903198099051712,
+    "initial_scenarios_plain": "36/36",
+    "initial_scenarios_harness": "36/36",
+    "recovery_scenarios_both": "36/36"
+  },
+  "harness_run_id": "run_21963d66603246c3a1b232979a3695a2",
+  "deliverable_workspace": "external-local/harness-hard-queue-luna-harness-20261002/trials/codex__leasequeue__after/workspace",
+  "conclusion": "Same measured correctness, longer observed time with Harness in this single Luna pair. Harness preserved configured scope, paired evidence, workspace identity and the same closed Run across recovery. No demonstrated model-ceiling improvement.",
+  "limitations": [
+    "One non-simultaneous run per condition, not a statistical or generally causal performance result.",
+    "Elapsed time includes model planning/implementation/review choices and provider latency, not just Harness computation.",
+    "The 36 scenarios are internally authored finite coverage, not universal correctness or independent third-party certification.",
+    "Generic Harness command measurement covers the six public tests via command exit; the 36 holdout scenarios are a separate evaluator result.",
+    "Raw usage retains cached-input counters separately; no monetary savings are inferred.",
+    "Requested model identifiers are not attestations of served weights."
+  ],
+  "committed": false,
+  "pushed": false
+}

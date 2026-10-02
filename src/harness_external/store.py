@@ -221,7 +221,10 @@ class Store:
         require(job["status"] == "running" and job.get("owner") == owner and run["status"] == "active"
                 and run["active_job"] == job_id and run["generation"] == job["generation"] and time.time() < job["deadline_at"],
                 "STALE_CHECKPOINT", "Worker no longer owns this measurement")
-        require(item["run_id"] == run["run_id"] and item["job_id"] == job_id and item["subject"] == job["candidate"]["subject"]
+        role = item.get("subject_role", "candidate")
+        subject = job.get("baseline") if role == "baseline" else job["candidate"] if role == "candidate" else None
+        require(subject is not None and item["run_id"] == run["run_id"] and item["job_id"] == job_id and item["subject"] == subject["subject"]
+                and item["candidate_hash"] == subject["candidate_hash"]
                 and any(check["ref"] == item["check_ref"] for check in job["checks"]), "CHECKPOINT_BINDING", "Measurement/check/subject binding mismatch")
         require(item.get("check_set_hash") == job.get("check_set_hash"), "CHECKPOINT_BINDING", "Measurement check set mismatch")
         observation = item["report"]["observation"]

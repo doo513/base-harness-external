@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+from functools import lru_cache
 from pathlib import Path
 import platform
 import shutil
@@ -17,7 +19,7 @@ from harness.common import canonical_bytes, canonical_hash, redact
 from .errors import HarnessError, require
 from .snapshots import validate_candidate
 from .store import Store, identifier
-from . import semantics
+from . import semantics, acceptance, evidence
 
 
 def clean_environment() -> dict:
@@ -59,6 +61,47 @@ def stop_child(child: subprocess.Popen) -> None:
             except ProcessLookupError:
                 pass
         child.wait(timeout=3)
+
+
+def file_fingerprint(info):
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+@lru_cache(maxsize=64)
+def runtime_digest(filename, fingerprint):
+    # Recheck inode/ctime/mtime on every use, but avoid reading a large Bun binary
+    # four times per paired command. This is still local consistency, not an
+    # adversarial same-user tamper barrier or a transitive dependency digest.
+    path = Path(filename)
+    require(file_fingerprint(path.stat()) == fingerprint, "RUNTIME_CHANGED", "Runtime changed before hashing")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while data := stream.read(1024 * 1024):
+            digest.update(data)
+    require(file_fingerprint(path.stat()) == fingerprint, "RUNTIME_CHANGED", "Runtime changed during hashing")
+    return digest.hexdigest()
+
+
+def runtime_identity(check):
+    """Identify top-level runtime binaries; not their entire dependency graph."""
+    binaries = {"adapter": shutil.which(os.environ.get("BUN", "bun")),
+                "verifier_python": sys.executable,
+                "command": shutil.which(check["argv"][0], path="/usr/local/bin:/usr/bin:/bin")
+                           if "/" not in check["argv"][0] or Path(check["argv"][0]).is_absolute() else None}
+    result = {}
+    for name, filename in binaries.items():
+        if filename is None:
+            result[name] = {"status": "unresolved_or_candidate_local"}
+            continue
+        path = Path(filename).resolve()
+        before = path.stat()
+        require(before.st_size <= 256 * 1024 * 1024, "RUNTIME_IDENTITY_LIMIT", "Runtime executable exceeds identity bound")
+        digest = runtime_digest(str(path), file_fingerprint(before))
+        after = path.stat()
+        require(file_fingerprint(before) == file_fingerprint(after),
+                "RUNTIME_CHANGED", "Runtime executable changed while identifying it")
+        result[name] = {"path": str(path), "sha256": digest}
+    return result
 
 
 def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threading.Event, remaining: float) -> dict:
@@ -138,21 +181,34 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
     failure = None
     reports = []
     comparisons = []
+    measured_scope = []
     environment = {}
     try:
         require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
         require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
         require(job.get("check_set_hash") == semantics.check_set_hash(job["checks"]), "CHECK_SET_CHANGED", "Pinned check set changed")
-        candidate = job["candidate"]
-        payload = store.directory(run["run_id"]) / identifier(candidate["candidate_id"], "candidate") / "payload"
-        validate_candidate(candidate, payload)
-        environment = {"python": platform.python_version(), "platform": platform.platform(),
-                       "verifier": run["contract"]["verifier"]["implementation_hash"], "assurance": "local-advisory"}
-        engine = MeasurementEngine()
+        if run.get("acceptance"):
+            acceptance.validate(run["acceptance"], store.directory(run["run_id"]))
+            require(job.get("acceptance_binding_hash") == run["acceptance"]["binding_hash"],
+                    "ACCEPTANCE_BINDING_CORRUPT", "Job has a different acceptance policy")
         def envelope(kind, request_id, body):
             return {"version": 5, "id": request_id, "runId": run["run_id"], "scopeId": job_id, "type": kind, "payload": body}
-        engine.handle(envelope("run.open", "open-" + job_id, {"snapshotRoot": str(payload)}))
-        for index, check_record in enumerate(job["checks"]):
+        subjects = ([("baseline", job["baseline"])] if job.get("baseline") else []) + [("candidate", job["candidate"])]
+        tasks = [(role, subject, check) for role, subject in subjects for check in job["checks"]]
+        last_subject = None
+        for index, (subject_role, candidate, check_record) in enumerate(tasks):
+            payload = store.directory(run["run_id"]) / identifier(candidate["candidate_id"], "candidate") / "payload"
+            if last_subject != candidate["candidate_id"]:
+                validate_candidate(candidate, payload)
+                if run.get("acceptance"):
+                    acceptance.validate_subject(run["acceptance"], candidate)
+                engine = MeasurementEngine()
+                engine.handle(envelope("run.open", "open-" + job_id + "-" + subject_role, {"snapshotRoot": str(payload)}))
+                last_subject = candidate["candidate_id"]
+            environment = {"python": platform.python_version(), "platform": platform.platform(),
+                           "verifier": verifier_identity()["implementation_hash"], "assurance": "local-advisory"}
+            require(environment["verifier"] == run["contract"]["verifier"]["implementation_hash"],
+                    "VERIFIER_CHANGED", "Verifier implementation changed during measurements")
             spec = dict(check_record["spec"])
             check = dict(spec["parameters"])
             require(not abort.is_set() and time.time() < job["deadline_at"], "VERIFICATION_CANCELLED", "Worker no longer owns the verification")
@@ -162,7 +218,11 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             provenance = None
             if check["kind"] == "command":
                 check["timeout_seconds"] = max(1, spec["timeoutMs"] // 1000)
+                environment["top_level_runtime"] = runtime_identity(check)
                 capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())
+                require(environment["top_level_runtime"] == runtime_identity(check), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
+                measured_runtime = capture.get("provenance") or {}
+                environment["sandbox"] = {key: measured_runtime[key] for key in ("backend", "containment", "network", "kernel", "distro") if key in measured_runtime}
                 parameters = {"kind": "command", "argv": check["argv"], "cwd": check["cwd"], "expectedExitCode": 0}
                 if capture["status"] in {"completed", "error"} and capture.get("capture"):
                     receipt = capture["capture"]
@@ -175,8 +235,10 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             else:
                 parameters, capabilities, timeout = check, ["read"], 1000
             spec = {**spec, "parameters": parameters, "ref": check_record["ref"]}
+            measurement["environmentHash"] = canonical_hash(environment)
             measurement["check"] = spec
             report = engine.handle(envelope("measure", job_id + ":" + str(index), measurement))
+            validate_candidate(candidate, payload)
             item = {"check_index": index, "observation": redact(report), "sandbox": provenance}
             checkpoint = {"observation_id": report["observationId"], "run_id": run["run_id"], "job_id": job_id,
                           "attempt": run["verification_attempts"], "check_id": check_record["check_id"], "check_ref": check_record["ref"],
@@ -185,25 +247,39 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                           "check_set_hash": job["check_set_hash"], "domain_identity": job["domain_identity"],
                           "comparison_status": semantics.comparison_status(report), "origin": "verifier", "trust": "locally_measured",
                           "report": item}
+            checkpoint.update(measurement_kind=check["kind"], execution_status=evidence.execution_status(report, provenance),
+                              role=check_record.get("role", "mandatory" if check_record["check_id"] in run["gate_bindings"] else "exploratory"),
+                              acceptance_binding_hash=job.get("acceptance_binding_hash"), subject_role=subject_role)
             checkpoint["record_hash"] = canonical_hash(checkpoint)
             with store.transaction() as connection:
                 store.checkpoint(connection, job_id, owner, checkpoint)
             reports.append({"observation_id": checkpoint["observation_id"], "record_hash": checkpoint["record_hash"]})
-            comparisons.append(checkpoint["comparison_status"])
+            if subject_role == "candidate":
+                comparisons.append(checkpoint["comparison_status"])
+            measured_scope.append({"observation_id": checkpoint["observation_id"], "check_id": checkpoint["check_id"],
+                                   "kind": check["kind"], "role": checkpoint["role"],
+                                   "subject_role": subject_role, "environment_hash": canonical_hash(environment),
+                                   "execution_status": checkpoint["execution_status"], "comparison_status": checkpoint["comparison_status"]})
         validate_candidate(candidate, payload)
         status = "passed" if all(s == "passed" for s in comparisons) else "failed"
         if "incomplete" in comparisons:
             status = "incomplete"
         result = {"status": status, "candidate_hash": job["candidate_hash"], "contract_hash": job["contract_hash"],
                   "schema_version": "verification-result-v2", "check_set_hash": job["check_set_hash"],
-                  "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports, "finished_at": time.time()}
+                  "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports,
+                  "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
+                  "baseline_comparison": evidence.compare(measured_scope, job, run),
+                  "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
         result["result_hash"] = canonical_hash(result)
     except Exception as error:
         failure = {"code": getattr(error, "code", "VERIFICATION_ERROR"), "message": str(redact(str(error)))[:2000]}
         if reports:
             result = {"status": "incomplete", "candidate_hash": job["candidate_hash"], "contract_hash": job["contract_hash"],
                       "schema_version": "verification-result-v2", "check_set_hash": job["check_set_hash"],
-                      "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports, "finished_at": time.time()}
+                      "domain_identity": job["domain_identity"], "environment": environment, "observation_refs": reports,
+                      "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
+                      "baseline_comparison": evidence.compare(measured_scope, job, run),
+                      "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
             result["result_hash"] = canonical_hash(result)
     finally:
         done.set()
@@ -220,7 +296,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         if valid:
             current.update(status="error" if failure else "completed", result=result, error=failure)
             active.update(active_job=None, phase="review", verification={"status": "error" if failure else result["status"],
-                          "job_id": job_id, "result_hash": result["result_hash"] if result else None, "check_set_hash": job["check_set_hash"]})
+                          "job_id": job_id, "result_hash": result["result_hash"] if result else None, "check_set_hash": job["check_set_hash"],
+                          "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
+                          "baseline_comparison": evidence.compare(measured_scope, job, run)})
             store.save_run(connection, active)
         elif current["status"] == "running":
             current.update(status="interrupted", error={"code": "LATE_RESULT_DISCARDED", "message": "Result arrived after ownership or deadline changed"})

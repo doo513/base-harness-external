@@ -16,8 +16,7 @@ WSL의 도우미를 호출할 수 있으며, 모델을 WSL에 설치할 필요�
 python3 skills/harness-workflow/scripts/harness_client.py configure \
   --harness-repo "$PWD" \
   --state-dir "$HOME/.local/state/base-harness-external"
-python3 skills/harness-workflow/scripts/harness_client.py call \
-  --request 'json:{"operation":"doctor","arguments":{"sandbox":true}}'
+python3 skills/harness-workflow/scripts/harness_client.py preflight
 ```
 
 Python 패키지 설치 없이 기존 `scripts/harness-tool`을 호출합니다. Bun 또는 namespace
@@ -28,6 +27,11 @@ Python 패키지 설치 없이 기존 `scripts/harness-tool`을 호출합니다.
 `--config /absolute/client.json`을 붙이거나 `BASE_HARNESS_CLIENT_CONFIG`로 지정하세요.
 설정은 절대 경로를 저장하고 기존 파일을 덮어쓰지 않습니다. 기존 설정 변경은 내용을 확인한
 뒤 명시적으로 편집하세요. 개인 설정이나 Run 데이터는 GitHub에 커밋하지 않습니다.
+
+운영자가 필수 검증 기준을 제공하는 작업에서는 [정책 설정](POLICIES.md)에 따라 별도
+정책 디렉터리를 마련하고 `configure --policy-root /absolute/policies` 또는 설정 파일의
+`policy_root`로 연결하세요. 에이전트의 검사 제안과 달리 이 경로의 검사·코드·픽스처는
+Run 시작 시 고정됩니다. 등록은 로컬 운영 설정이지 인증된 사용자 승인이나 OS 보호가 아닙니다.
 
 상태 디렉터리는 **모든 작업장 밖의 영구 위치**여야 합니다. 컨테이너라면 지속되는 볼륨에
 두세요. 경로만으로 저장 수명을 완전히 판별할 수 없으므로 환경 전환 뒤에도 같은 저장소가
@@ -75,7 +79,7 @@ wsl.exe -d YOUR_DISTRO --exec python3 /absolute/host/skills/harness-workflow/scr
 | 구성 | 책임 |
 |---|---|
 | Skill / Host 에이전트 | 요청 해석, Domain 선택, 문제 해결·수정·종결 판단, 관측 검토 |
-| 도우미 | 고정 설정, JSON/argv 전달, Run의 작업장·Domain 대조, 명시적 조회 |
+| 도우미 | 고정 설정, 명시적 Run 바인딩, 요청 재전송·직렬화, 제출·검증·대기의 기계적 연결 |
 | Domain | 계약·검사의 의미와 정규화, 작업별 검증 범위 |
 | Core / Verifier | 상태·스냅샷·검사 참조·예산·수명주기, 격리 실행과 사실 기록 |
 
@@ -91,6 +95,11 @@ Host 세션 기억이나 로컬 메모는 연결을 돕는 힌트이며, 상태 
 고친 뒤 새 제출에는 새 ID를 씁니다. `resume`은 조회일 뿐 작업을 자동 재개하지 않습니다.
 `verify`는 비동기 job_id를 반환합니다. 선택적인 도우미 timeout은 응답 대기만 제한하며,
 timeout을 검증 실패 또는 worker 종료로 해석하지 마세요.
+
+반복 호출은 `bind`로 Run을 한 번 연결한 뒤 `checkpoint --binding ... --action-id ...`를
+사용하면 됩니다. 같은 action ID는 같은 제출·검증을 재조회하고, 새 수정본에는 새 ID를
+사용합니다. `pending`이면 `wait`로 같은 Job을 확인합니다. 도우미는 성공 판정이나 종결을
+자동으로 하지 않으며, 응답 유실 때문에 새 시도를 자동 생성하지 않습니다.
 
 ## 4. 설치·운영 검증
 

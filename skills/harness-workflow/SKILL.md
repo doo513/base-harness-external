@@ -12,9 +12,11 @@ Installation alone does not opt every unrelated task into Harness.
 
 ## Connect and prepare
 
-Read [the caller protocol](references/protocol.md) before the first call; it includes
-the helper request envelope, precise fields and recovery examples. Run the bundled
-`scripts/harness_client.py` with the persistent config selected during installation.
+Read [the caller protocol](references/protocol.md) for setup and first use. Run the
+bundled `scripts/harness_client.py` with the persistent installation config. Use
+`preflight` when execution capability is unknown, `bind` once for an explicitly
+selected Run, and `checkpoint` for submit/verify/wait. These helpers make no task,
+assessment or closeout decisions. Use saved `request` envelopes for other actions.
 If configuration/runtime is absent, report the missing setup. Do not guess another
 checkout, create a temporary production state store, or silently bypass Harness.
 
@@ -25,14 +27,15 @@ checkout, create a temporary production state store, or silently bypass Harness.
 - For a resumed task, find and inspect the existing Run's goal, workspace, Domain,
   lifecycle and active job. Explicitly use that Run ID. Never select a Run merely
   because it is newest, or hide missing state by starting another one.
-- For a new task, select a supported Domain and state the initial policy/provenance.
-  Use any explicitly supplied operational policy and user requirements; otherwise
-  record the proposed policy as model-authored. Do not
-  label model choices as authenticated user approval. Do not weaken a pinned gate.
-  Domain modules own contract/check semantics; propose criteria through their API.
-- Reuse a request ID only to retransmit the exact same operation and payload. A new
-  intentional action needs a new ID. Save request IDs/payloads in Host task context;
-  do not invent a second authoritative Run database.
+- Use the operator-configured Domain acceptance profile when one is installed;
+  `mode: acceptance` keeps mandatory checks/test bundles separate from your
+  exploratory probes. Do not create or edit operator approvals as part of solving
+  the task. Without a configured policy, label caller-defined criteria and coverage
+  limitations honestly; do not invent independent approval.
+- A binding file only caches immutable references. Core remains authoritative.
+  Give each intentional action an ID; repeat that ID only to retransmit the same
+  request. Keep the exact saved request after response loss. A new checkpoint ID
+  means a new submission, not a retry of a lost response.
 
 ## Explore, execute and measure
 
@@ -46,12 +49,16 @@ fixtures. Use task/Domain reasoning to consider the intended runtime environment
 a Linux measurement is not evidence of Windows behavior. Missing execution support
 is an explicit limitation, not permission to bypass the strict Sandbox.
 
-At meaningful checkpoints, submit the current files and verify the submitted
-Candidate. Poll the returned job with bounded `status`/`records` reads; a queued job
-is not a pass. A Host turn ending does not mean a job should be reissued or cancelled.
-After a change, submit again and obtain measurements for that new Candidate.
+At meaningful checkpoints, use `checkpoint --binding ... --action-id ...`.
+`wait_status: pending` means the observation window ended, not that the job failed;
+use `wait` for the same job. After an intentional edit, use a new checkpoint ID.
+For change/regression evidence, capture the baseline before editing and request
+`--compare-baseline`. An improved check does not prove the whole goal was met.
 
-Read actual observations, their scope and limitations. Verifier facts do not order
+Read actual observations, `measurement_scope`, requirement links and limitations.
+A process exit is not a count of tests or independent goal validation. A mandatory
+command that cannot run stays unavailable, not replaced with a substring check.
+Verifier facts do not order
 a retry: you decide whether to revise, try another method, stop partially, or ask
 the user. Keep caller observations and direct Host tests distinct from Harness
 measurements. Do not convert a test skip or unavailable runtime into a pass.
@@ -64,7 +71,9 @@ actually concern the current Candidate/check set. A past measurement can inform
 reasoning but is not current proof. Report scope changes rather than rewriting the
 original goal. Do not erase failed attempts or reset budgets by quietly creating Runs.
 
-Use `finish` with the disposition supported by the facts and current policy.
+Use `finish` with the disposition supported by the facts and current policy. A
+mandatory-policy change requires explicit operator configuration and a new Run
+linked to its terminal predecessor and reason; do not quietly reset the task.
 On a budget/deadline boundary, explain the remaining work and preserve the Run for
 inspection; do not continue by silently resetting the policy. On interruption,
 record a concise decision/next step when possible and use `resume` next time.

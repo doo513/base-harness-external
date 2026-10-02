@@ -23,4 +23,14 @@
 - Capture recovery must acquire an OS lock and retain data in quarantine; never remove workspaces or published Candidates.
 - The Python package has no runtime dependencies. Bun is currently required only for sandboxed command checks from the source checkout.
 - Do not restore the old Host, UI, provider gateway or legacy Ready engine.
+- Configured acceptance policies are a separate operator input channel. Domain
+  compiles their criteria; Core pins policy and test/fixture content. Never turn
+  a caller proposal into configured approval or infer authorship from its loader.
+- Acceptance approval is configured, not authenticated. Same-user file access is
+  still outside the protection of these local-advisory records.
+- Baseline observations cannot satisfy current Candidate gates. Pair outcomes
+  distinguish check improvement from goal proof and retain explicit incomparable
+  reasons. Command exit is not an independently measured test-case count.
+- Caller bindings and transport locks are references/mechanics, not another Run
+  database. Checkpoint must not assess, repair, finish or silently retry a mutation.
 - Run Python tests and an opt-in real Sandbox test when changing execution boundaries.

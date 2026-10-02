@@ -27,7 +27,7 @@ jobs:
       - run: bun test tests/sandbox.test.ts
       - run: python scripts/evaluate.py --output evaluation/ci.json
       - if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_sandbox }}
-        run: BASE_HARNESS_EXTERNAL_LIVE=1 python -m pytest -q tests/test_external_harness.py tests/test_skill_workflow.py -k live
+        run: BASE_HARNESS_EXTERNAL_LIVE=1 python -m pytest -q tests/test_external_harness.py tests/test_skill_workflow.py tests/test_acceptance_policy.py tests/test_agent_study.py -k live
       - uses: actions/upload-artifact@v4
         if: always()
         with:

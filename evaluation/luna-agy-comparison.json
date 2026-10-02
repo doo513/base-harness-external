@@ -1,0 +1,3020 @@
+{
+  "schema_version": "luna-agy-study-audit-v1",
+  "generated_at": "2026-10-01T16:05:34.931234+00:00",
+  "complete": true,
+  "planned_conditions": 18,
+  "observed_conditions": 18,
+  "missing": [],
+  "groups": [
+    {
+      "model": "luna",
+      "arm": "plain",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 374.79873972300265,
+      "total_consumed_seconds": 415.47464695000235,
+      "external_grading_seconds": 3.8201992220019747,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 36,
+      "raw_usage_totals": {
+        "input_tokens": 743804,
+        "cached_input_tokens": 641280,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 13856,
+        "reasoning_output_tokens": 1748
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    },
+    {
+      "model": "luna",
+      "arm": "before",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 932.8681321340082,
+      "total_consumed_seconds": 1019.2829732700084,
+      "external_grading_seconds": 3.607663593997131,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 76,
+      "raw_usage_totals": {
+        "input_tokens": 1950729,
+        "cached_input_tokens": 1751040,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 34419,
+        "reasoning_output_tokens": 6416
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    },
+    {
+      "model": "luna",
+      "arm": "after",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 821.7350499530003,
+      "total_consumed_seconds": 860.5824732180008,
+      "external_grading_seconds": 3.705862202998105,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 71,
+      "raw_usage_totals": {
+        "input_tokens": 1743804,
+        "cached_input_tokens": 1542400,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 26686,
+        "reasoning_output_tokens": 6314
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    },
+    {
+      "model": "agy",
+      "arm": "plain",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 993.2583559200011,
+      "total_consumed_seconds": 1099.9217853620012,
+      "external_grading_seconds": 3.553353100003733,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 103,
+      "raw_usage_totals": {
+        "input_tokens": 1020170,
+        "output_tokens": 196889,
+        "thinking_tokens": 158176,
+        "cache_read_tokens": 3835546,
+        "total_tokens": 1217059
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    },
+    {
+      "model": "agy",
+      "arm": "before",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 1192.1686724519968,
+      "total_consumed_seconds": 1404.879697710996,
+      "external_grading_seconds": 3.6062104019983963,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 158,
+      "raw_usage_totals": {
+        "input_tokens": 1781378,
+        "output_tokens": 189367,
+        "thinking_tokens": 135749,
+        "cache_read_tokens": 7410204,
+        "total_tokens": 1970745
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    },
+    {
+      "model": "agy",
+      "arm": "after",
+      "tasks_observed": 3,
+      "tasks_planned": 3,
+      "initial_passed": 3,
+      "final_passed": 3,
+      "initial_consumed_seconds": 1118.3820418689993,
+      "total_consumed_seconds": 1287.2691214690003,
+      "external_grading_seconds": 3.66041178100204,
+      "repair_sessions": 0,
+      "recovery_sessions": 1,
+      "timed_out_sessions": 0,
+      "false_completion_sessions": 0,
+      "tool_calls": 160,
+      "raw_usage_totals": {
+        "input_tokens": 2033673,
+        "output_tokens": 183117,
+        "thinking_tokens": 133343,
+        "cache_read_tokens": 6992461,
+        "total_tokens": 2216790
+      },
+      "usage_sessions": 4,
+      "usage_missing_sessions": 0,
+      "human_solver_interventions": 0
+    }
+  ],
+  "trials": [
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__settings__plain",
+      "task": "settings",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__settings__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 182.5330982710002,
+          "tool_calls": 10,
+          "raw_usage": {
+            "input_tokens": 212261,
+            "cached_input_tokens": 184576,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 4470,
+            "reasoning_output_tokens": 374
+          },
+          "external_grading_seconds": 0.923265393001202,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "settings.py": "c02f85747c3440d074064ed6d1bd2ebc61a00b5f153e0c286147bd4f7d899825",
+            "settings_cli.py": "fc628d54b69974a65ed6e301625ab08bd96f886001f7cdc0362582a7fb08d984"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 182.5330982710002,
+      "total_seconds": 182.5330982710002,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__settings__before",
+      "task": "settings",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__settings__before",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 203.87017960100275,
+          "tool_calls": 19,
+          "raw_usage": {
+            "input_tokens": 551493,
+            "cached_input_tokens": 495872,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 9039,
+            "reasoning_output_tokens": 1430
+          },
+          "external_grading_seconds": 0.8453795050008921,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_4a905d58714b45b1b1fe73802650b345",
+              "mandatory_scope_preserved": false,
+              "checks": {
+                "domain.entry0": false,
+                "domain.entry1": false,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 2,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "settings.py": "8b4013df0550fdb8d3141f9a29281311a238237a640a129e5ba7c53b81bbeacd",
+            "settings_cli.py": "f0ba57f584a66d78fac257130f9d5be9651230e743a5ae6728b2f6e965378699"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 203.87017960100275,
+      "total_seconds": 203.87017960100275,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__settings__after",
+      "task": "settings",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__settings__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 361.9241050339988,
+          "tool_calls": 19,
+          "raw_usage": {
+            "input_tokens": 430310,
+            "cached_input_tokens": 392960,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 6737,
+            "reasoning_output_tokens": 1106
+          },
+          "external_grading_seconds": 0.8053310319992306,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_98472e272db844339cbdea697c2adecf",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "b851b4d64f82db55eb7892e14fd8ed1342532fd5fafad259abd44b388ff79fdf",
+                  "bundle_hash": "7958740b0cd3bd61fe7118e1663bbd39c5c25c456a85a3739c6e5256e8b0c58a",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "e2d59bd5274ff59a5f0cf0531e121740b4b44934555c5c0721d847ff0be087aa",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "settings",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_6756c8577e124f64a4fdd0be20845d92:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_6756c8577e124f64a4fdd0be20845d92:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_6756c8577e124f64a4fdd0be20845d92:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "b851b4d64f82db55eb7892e14fd8ed1342532fd5fafad259abd44b388ff79fdf",
+                "bundle_hash": "7958740b0cd3bd61fe7118e1663bbd39c5c25c456a85a3739c6e5256e8b0c58a",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "e2d59bd5274ff59a5f0cf0531e121740b4b44934555c5c0721d847ff0be087aa",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "settings",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "settings.py": "d8a2b162710dac5fe8c9b1abd81548c5869eaa1d6243bcc4772a8b9aa53e335f",
+            "settings_cli.py": "397942a0dbbfe4c2d62d844b0045fd8f279fb2754bde40056913b5db93e5828f"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 361.9241050339988,
+      "total_seconds": 361.9241050339988,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__journal__before",
+      "task": "journal",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__journal__before",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 466.7061315400024,
+          "tool_calls": 19,
+          "raw_usage": {
+            "input_tokens": 441507,
+            "cached_input_tokens": 401152,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 11490,
+            "reasoning_output_tokens": 2634
+          },
+          "external_grading_seconds": 0.9350104320001265,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_a6b163a064374661a1340b5087d28a52",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 2,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "c3220937830da7e60168d799d222cbd07027548c18d4b41506ada9faa097c344",
+            "journal_cli.py": "30ae89c8769342e9ed4a181b5f584a305c23eda0c2993cb576848cf5af9d2a0b"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 86.41484113600018,
+          "tool_calls": 14,
+          "raw_usage": {
+            "input_tokens": 281354,
+            "cached_input_tokens": 236544,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2540,
+            "reasoning_output_tokens": 606
+          },
+          "external_grading_seconds": 0.9869345259976399,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_a6b163a064374661a1340b5087d28a52",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 2,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "c3220937830da7e60168d799d222cbd07027548c18d4b41506ada9faa097c344",
+            "journal_cli.py": "30ae89c8769342e9ed4a181b5f584a305c23eda0c2993cb576848cf5af9d2a0b"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 466.7061315400024,
+      "total_seconds": 553.1209726760026,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": true,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__journal__after",
+      "task": "journal",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__journal__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 234.622045737,
+          "tool_calls": 21,
+          "raw_usage": {
+            "input_tokens": 557541,
+            "cached_input_tokens": 504832,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 8723,
+            "reasoning_output_tokens": 1882
+          },
+          "external_grading_seconds": 0.9405479849992844,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_80ec6c06b63046078963e5c182868a8e",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "8a4042f09802d00d5d797d7b19f669580e4cb1318be9768e32f49f00e3115aa6",
+                  "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "journal",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "8a4042f09802d00d5d797d7b19f669580e4cb1318be9768e32f49f00e3115aa6",
+                "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "journal",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "d7f13a45c52d6c5f9beda733280ce6e844cad998f642a0bbb9e64af89adeb178",
+            "journal_cli.py": "080a0545514493ae6b7b757fb6f53b386c5b7910e9ad61e67af306a5aee02f56"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 38.84742326500054,
+          "tool_calls": 6,
+          "raw_usage": {
+            "input_tokens": 138693,
+            "cached_input_tokens": 86784,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1473,
+            "reasoning_output_tokens": 462
+          },
+          "external_grading_seconds": 1.0000598820006417,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_80ec6c06b63046078963e5c182868a8e",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "8a4042f09802d00d5d797d7b19f669580e4cb1318be9768e32f49f00e3115aa6",
+                  "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "journal",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_c88a03a2352a49d8a65f04e36dcea506:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "8a4042f09802d00d5d797d7b19f669580e4cb1318be9768e32f49f00e3115aa6",
+                "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "journal",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "d7f13a45c52d6c5f9beda733280ce6e844cad998f642a0bbb9e64af89adeb178",
+            "journal_cli.py": "080a0545514493ae6b7b757fb6f53b386c5b7910e9ad61e67af306a5aee02f56"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 234.622045737,
+      "total_seconds": 273.46946900200055,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": true,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__journal__plain",
+      "task": "journal",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__journal__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 104.02568263099965,
+          "tool_calls": 12,
+          "raw_usage": {
+            "input_tokens": 250265,
+            "cached_input_tokens": 220928,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 4529,
+            "reasoning_output_tokens": 640
+          },
+          "external_grading_seconds": 0.9384617899995646,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "journal.py": "e95733f60971172b81c8dfe13099809cc5ec215209444698e57c6488a295e8d3",
+            "journal_cli.py": "4c24261564dd49c4f690847569ea96ce9a9855bfd92f7059cb18e54c20ac9c98"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 40.6759072269997,
+          "tool_calls": 4,
+          "raw_usage": {
+            "input_tokens": 79294,
+            "cached_input_tokens": 58368,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1060,
+            "reasoning_output_tokens": 432
+          },
+          "external_grading_seconds": 1.0584944139991421,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "journal.py": "e95733f60971172b81c8dfe13099809cc5ec215209444698e57c6488a295e8d3",
+            "journal_cli.py": "4c24261564dd49c4f690847569ea96ce9a9855bfd92f7059cb18e54c20ac9c98"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 104.02568263099965,
+      "total_seconds": 144.70158985799935,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__planner__after",
+      "task": "planner",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__planner__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 225.18889918200148,
+          "tool_calls": 25,
+          "raw_usage": {
+            "input_tokens": 617260,
+            "cached_input_tokens": 557824,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 9753,
+            "reasoning_output_tokens": 2864
+          },
+          "external_grading_seconds": 0.9599233039989485,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_87c3f2dc63904d188822f76953177e43",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "c85fd07fbff21cf76b73a02316a4fcb133526e40dda97223afde87c15c2de5ec",
+                  "bundle_hash": "10e3b344f883e76ccc90765745dc4d08a155b5f4bac3ee879cb1b1ad3fe9e0c1",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "37ae0d2d63b2191f7342b59a887d2f6eeff86b6270dc094524b37c58620b92bf",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "planner",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 2,
+                  "completed_commands": 2,
+                  "execution_statuses": {
+                    "completed": 6
+                  },
+                  "file_checks": 4,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:6",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:7",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.planner-entry",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:8",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.cli-entry",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:9",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:10",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.acceptance",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_59444384d66249b7bafdf2272858889a:11",
+                      "role": "exploratory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 2,
+              "workspace_matches": true,
+              "baseline_status": "incomplete",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "c85fd07fbff21cf76b73a02316a4fcb133526e40dda97223afde87c15c2de5ec",
+                "bundle_hash": "10e3b344f883e76ccc90765745dc4d08a155b5f4bac3ee879cb1b1ad3fe9e0c1",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "37ae0d2d63b2191f7342b59a887d2f6eeff86b6270dc094524b37c58620b92bf",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "planner",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 6,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 12,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "planner.py": "c992dbb121525a5f54df0212f337a8685a64f8350fa4558f5d7dbef88ef7358f",
+            "planner_cli.py": "aef3dee6a9003ace58b30e9ccc12a88108c3ed5f0ca310cca3a0fce3fb91691e"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 225.18889918200148,
+      "total_seconds": 225.18889918200148,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__planner__plain",
+      "task": "planner",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__planner__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 88.2399588210028,
+          "tool_calls": 10,
+          "raw_usage": {
+            "input_tokens": 201984,
+            "cached_input_tokens": 177408,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 3797,
+            "reasoning_output_tokens": 302
+          },
+          "external_grading_seconds": 0.8999776250020659,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "planner.py": "deec4670442241f6c2316c6f7543b77632b6c6107e67ac9eef246800f6665504",
+            "planner_cli.py": "7be8438ab88e930e27a8f598e47958f88bf64af4482eec6dd07c86c6bad44469"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 88.2399588210028,
+      "total_seconds": 88.2399588210028,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "luna",
+      "requested_profile": {
+        "model": "gpt-6-luna",
+        "effort": "medium",
+        "host": "Codex CLI"
+      },
+      "id": "codex__planner__before",
+      "task": "planner",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/luna-final/receipts/codex__planner__before",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 262.29182099300306,
+          "tool_calls": 24,
+          "raw_usage": {
+            "input_tokens": 676375,
+            "cached_input_tokens": 617472,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 11350,
+            "reasoning_output_tokens": 1746
+          },
+          "external_grading_seconds": 0.8403391309984727,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_b2b3ac580cbe4a2290eead89f24cbd54",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 6,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 2,
+                "checks": 3,
+                "interpretations": 3,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "planner.py": "74d0a2175b54e883ab961893805fdf705a902056096f6d2c09e4ba0cb94e69d1",
+            "planner_cli.py": "d23b3b0509baefc6220bfad849ae89034424243e2a64f97ba5b0daa1d1fc0759"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 262.29182099300306,
+      "total_seconds": 262.29182099300306,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__settings__plain",
+      "task": "settings",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-v2/receipts/agy__settings__plain",
+      "reused": true,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": null,
+          "reuse_validation": {
+            "source_and_policy_identical": true,
+            "same_task_and_initial_files": true,
+            "normal_exit_with_final_claim_and_usage": true,
+            "no_remaining_trace_holders": true,
+            "artifact_hashes_unchanged": true
+          },
+          "consumed_seconds": 329.9991157429995,
+          "tool_calls": 26,
+          "raw_usage": {
+            "input_tokens": 254948,
+            "output_tokens": 70222,
+            "thinking_tokens": 58294,
+            "cache_read_tokens": 1277217,
+            "total_tokens": 325170
+          },
+          "external_grading_seconds": 0.7335261420012102,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "settings.py": "4950e7da04fbbb75c7a71419ec727c018e6a513186a0c8c645db70651fa00547",
+            "settings_cli.py": "bbfaa709aa8aceb96c62d1afca09c6e1ab3cc51ef38d62729a68ace39779404a"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 329.9991157429995,
+      "total_seconds": 329.9991157429995,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__settings__after",
+      "task": "settings",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-v2/receipts/agy__settings__after",
+      "reused": true,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": null,
+          "reuse_validation": {
+            "source_and_policy_identical": true,
+            "same_task_and_initial_files": true,
+            "normal_exit_with_final_claim_and_usage": true,
+            "no_remaining_trace_holders": true,
+            "artifact_hashes_unchanged": true
+          },
+          "consumed_seconds": 396.3096399240003,
+          "tool_calls": 41,
+          "raw_usage": {
+            "input_tokens": 565819,
+            "output_tokens": 63225,
+            "thinking_tokens": 47901,
+            "cache_read_tokens": 2180508,
+            "total_tokens": 629044
+          },
+          "external_grading_seconds": 0.7500167079997482,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_88bc26fab6db4f3dad0cd0939381bb8a",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "5e67c01d24fc81668785a86050bd49935a18bf86aee20b7f4dfbb66f1616508d",
+                  "bundle_hash": "7958740b0cd3bd61fe7118e1663bbd39c5c25c456a85a3739c6e5256e8b0c58a",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "e2d59bd5274ff59a5f0cf0531e121740b4b44934555c5c0721d847ff0be087aa",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "settings",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_88c3cb13b80a42ccb1b3540da02297fb:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_88c3cb13b80a42ccb1b3540da02297fb:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_88c3cb13b80a42ccb1b3540da02297fb:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "5e67c01d24fc81668785a86050bd49935a18bf86aee20b7f4dfbb66f1616508d",
+                "bundle_hash": "7958740b0cd3bd61fe7118e1663bbd39c5c25c456a85a3739c6e5256e8b0c58a",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "e2d59bd5274ff59a5f0cf0531e121740b4b44934555c5c0721d847ff0be087aa",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "settings",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "settings.py": "66cb238d376d631d3a074432e1b5d1ba526cfc1ff98e399e2608218ef07166c8",
+            "settings_cli.py": "e964044ac301e93c3bc29f35607742b901fa4101105f87c88cb28388ca2375b3"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 396.3096399240003,
+      "total_seconds": 396.3096399240003,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__settings__before",
+      "task": "settings",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-v2/receipts/agy__settings__before",
+      "reused": true,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 23,
+          "total_checks": 23,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": null,
+          "reuse_validation": {
+            "source_and_policy_identical": true,
+            "same_task_and_initial_files": true,
+            "normal_exit_with_final_claim_and_usage": true,
+            "no_remaining_trace_holders": true,
+            "artifact_hashes_unchanged": true
+          },
+          "consumed_seconds": 407.08919070699994,
+          "tool_calls": 29,
+          "raw_usage": {
+            "input_tokens": 445313,
+            "output_tokens": 51231,
+            "thinking_tokens": 36214,
+            "cache_read_tokens": 1088709,
+            "total_tokens": 496544
+          },
+          "external_grading_seconds": 0.8005197040001804,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_25d1505206a84f169ade708358a8424d",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 2,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "settings.py": "b8b969de431783006c8db94f6000f045f20420974f51beb60b3fe0a4b399c302",
+            "settings_cli.py": "5d2b3a8c7633041ab1145543ca00fb893d29bd28859fa5f27c04ed04cadb53ad"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 407.08919070699994,
+      "total_seconds": 407.08919070699994,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__journal__before",
+      "task": "journal",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__journal__before",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 450.775150554,
+          "tool_calls": 54,
+          "raw_usage": {
+            "input_tokens": 461789,
+            "output_tokens": 71506,
+            "thinking_tokens": 54572,
+            "cache_read_tokens": 3468145,
+            "total_tokens": 533295
+          },
+          "external_grading_seconds": 0.9465367420016264,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_5969530b3a884ec8a52fc0d8eb8a0833",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 5,
+                "verification_attempts": 2
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 2,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "b1d933578251911c8cccaac35ce239aa8c7bf92736da6f1179863283372931db",
+            "journal_cli.py": "88e2197a749a1424176e19ececae56c0cfd72a61540c46e4b4ad8fff59612214"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 212.71102525899914,
+          "tool_calls": 28,
+          "raw_usage": {
+            "input_tokens": 228123,
+            "output_tokens": 11038,
+            "thinking_tokens": 5509,
+            "cache_read_tokens": 781178,
+            "total_tokens": 239161
+          },
+          "external_grading_seconds": 0.9709578619986132,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_5969530b3a884ec8a52fc0d8eb8a0833",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 5,
+                "verification_attempts": 2
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 2,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "b1d933578251911c8cccaac35ce239aa8c7bf92736da6f1179863283372931db",
+            "journal_cli.py": "88e2197a749a1424176e19ececae56c0cfd72a61540c46e4b4ad8fff59612214"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 450.775150554,
+      "total_seconds": 663.4861758129991,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": true,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__journal__plain",
+      "task": "journal",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__journal__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 342.1860840590016,
+          "tool_calls": 34,
+          "raw_usage": {
+            "input_tokens": 345942,
+            "output_tokens": 63666,
+            "thinking_tokens": 51026,
+            "cache_read_tokens": 1360747,
+            "total_tokens": 409608
+          },
+          "external_grading_seconds": 0.9731415909991483,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "journal.py": "35893ebd55912be516e9402d7415faa05d2fd8cc03b2bca3b67cc23c939f83c6",
+            "journal_cli.py": "292a5869ba65472bd37e815eb7e94b3a15b3df2a23b043de296786cd0726d3f4"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 106.66342944200005,
+          "tool_calls": 19,
+          "raw_usage": {
+            "input_tokens": 163819,
+            "output_tokens": 7682,
+            "thinking_tokens": 5710,
+            "cache_read_tokens": 337347,
+            "total_tokens": 171501
+          },
+          "external_grading_seconds": 1.0014682510009152,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "journal.py": "35893ebd55912be516e9402d7415faa05d2fd8cc03b2bca3b67cc23c939f83c6",
+            "journal_cli.py": "292a5869ba65472bd37e815eb7e94b3a15b3df2a23b043de296786cd0726d3f4"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 342.1860840590016,
+      "total_seconds": 448.84951350100164,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__journal__after",
+      "task": "journal",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__journal__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 364.92908990700016,
+          "tool_calls": 45,
+          "raw_usage": {
+            "input_tokens": 641877,
+            "output_tokens": 61976,
+            "thinking_tokens": 45981,
+            "cache_read_tokens": 2109496,
+            "total_tokens": 703853
+          },
+          "external_grading_seconds": 1.0026046259990835,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_3eb5620c98214fde8297a98a4aca6a2d",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "8522a9d1b1dee0abaf5b6eab0048c91d764980fdfbf5d62c0d23e17bde20ce5c",
+                  "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "journal",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "8522a9d1b1dee0abaf5b6eab0048c91d764980fdfbf5d62c0d23e17bde20ce5c",
+                "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "journal",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "da1debc7557f49b5dcc332d5d5c4b578640db8d319d3c00e1594982469f42c64",
+            "journal_cli.py": "eda9125e5b9818eb024c2290cf4ddf436738b26081dc606d8880e3e77f82550d"
+          }
+        },
+        {
+          "stage": "recovery",
+          "artifact_passed": true,
+          "passed_checks": 20,
+          "total_checks": 20,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 168.88707960000102,
+          "tool_calls": 30,
+          "raw_usage": {
+            "input_tokens": 279388,
+            "output_tokens": 10614,
+            "thinking_tokens": 5516,
+            "cache_read_tokens": 805288,
+            "total_tokens": 290002
+          },
+          "external_grading_seconds": 1.067088160001731,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_3eb5620c98214fde8297a98a4aca6a2d",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "8522a9d1b1dee0abaf5b6eab0048c91d764980fdfbf5d62c0d23e17bde20ce5c",
+                  "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "journal",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_8e3bf338770744089160c884444c5a0b:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "8522a9d1b1dee0abaf5b6eab0048c91d764980fdfbf5d62c0d23e17bde20ce5c",
+                "bundle_hash": "dda267facdb867cb7944923d39c2df7a4a70a07dd097fae3d6d9b62980931be5",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "2b93d345946c05352ce1520d484be2200921b1c7f7ccbe7a3a7a166dd7054687",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "journal",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "journal.py": "da1debc7557f49b5dcc332d5d5c4b578640db8d319d3c00e1594982469f42c64",
+            "journal_cli.py": "eda9125e5b9818eb024c2290cf4ddf436738b26081dc606d8880e3e77f82550d"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 364.92908990700016,
+      "total_seconds": 533.8161695070012,
+      "repairs": 0,
+      "recovery_sessions": 1,
+      "recovery_preserved_run_ids": true,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__planner__after",
+      "task": "planner",
+      "arm": "after",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__planner__after",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 357.14331203799884,
+          "tool_calls": 44,
+          "raw_usage": {
+            "input_tokens": 546589,
+            "output_tokens": 47302,
+            "thinking_tokens": 33945,
+            "cache_read_tokens": 1897169,
+            "total_tokens": 593891
+          },
+          "external_grading_seconds": 0.8407022870014771,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_cd7ffec3151b4c93aaffb2b8effbec3a",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "acceptance",
+              "resolution": {
+                "acceptance": {
+                  "authority": {
+                    "approval": {
+                      "declared_by": "internal evaluation setup",
+                      "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                    },
+                    "approval_status": "configured_not_authenticated",
+                    "authorship": {
+                      "criteria": "model",
+                      "tests": "model"
+                    },
+                    "change_authority": "operator_configuration_and_new_run",
+                    "same_user_tamper_protection": false,
+                    "selection": "operator_default",
+                    "source": "operator_configuration"
+                  },
+                  "binding_hash": "a374c7d9a9ce55b2e1c434f4ab2970121e465ddcb5ce802ff4f31a219cf515ca",
+                  "bundle_hash": "10e3b344f883e76ccc90765745dc4d08a155b5f4bac3ee879cb1b1ad3fe9e0c1",
+                  "bundle_pinned": true,
+                  "bundle_version": "study-1",
+                  "definition_hash": "37ae0d2d63b2191f7342b59a887d2f6eeff86b6270dc094524b37c58620b92bf",
+                  "goal_coverage": "declared_mapping_not_semantically_proven",
+                  "policy_id": "planner",
+                  "requirements": [
+                    {
+                      "check_ids": [
+                        "domain.entry0",
+                        "domain.entry1",
+                        "domain.behavior"
+                      ],
+                      "id": "written-task",
+                      "minimum_evidence": "command",
+                      "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                    }
+                  ],
+                  "revision": "1",
+                  "source": "operator_configuration",
+                  "unmapped_requirement_ids": []
+                },
+                "assessment_status": "not_assessed",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_scope": {
+                  "check_validity": "not_independently_established",
+                  "command_checks": 1,
+                  "completed_commands": 1,
+                  "execution_statuses": {
+                    "completed": 3
+                  },
+                  "file_checks": 2,
+                  "goal_satisfaction": "not_measured",
+                  "observations": [
+                    {
+                      "check_id": "domain.entry0",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_29ea7d130ed8461aa580ccd42c980731:3",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.entry1",
+                      "comparison_status": "passed",
+                      "environment_hash": "d20ec2eb755975633d37f6278fa23894de297c9993f060c8915fb66334add67f",
+                      "execution_status": "completed",
+                      "kind": "file",
+                      "observation_id": "observation:job_29ea7d130ed8461aa580ccd42c980731:4",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    },
+                    {
+                      "check_id": "domain.behavior",
+                      "comparison_status": "passed",
+                      "environment_hash": "58256a1033c9fab6749e7cc2e9bc1ab90201f97e57b44d797770de322662f52c",
+                      "execution_status": "completed",
+                      "kind": "command",
+                      "observation_id": "observation:job_29ea7d130ed8461aa580ccd42c980731:5",
+                      "role": "mandatory",
+                      "subject_role": "candidate"
+                    }
+                  ],
+                  "test_case_count": null,
+                  "test_case_scope": "not_collected_by_generic_command_exit_measurement"
+                },
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": "Fixed operator configuration; not authenticated human approval or third-party audit",
+                  "configured_approver": "internal evaluation setup",
+                  "status": "configured_not_authenticated"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "compared",
+              "required_behavior_improved": true,
+              "acceptance": {
+                "authority": {
+                  "approval": {
+                    "declared_by": "internal evaluation setup",
+                    "reference": "Fixed operator configuration; not authenticated human approval or third-party audit"
+                  },
+                  "approval_status": "configured_not_authenticated",
+                  "authorship": {
+                    "criteria": "model",
+                    "tests": "model"
+                  },
+                  "change_authority": "operator_configuration_and_new_run",
+                  "same_user_tamper_protection": false,
+                  "selection": "operator_default",
+                  "source": "operator_configuration"
+                },
+                "binding_hash": "a374c7d9a9ce55b2e1c434f4ab2970121e465ddcb5ce802ff4f31a219cf515ca",
+                "bundle_hash": "10e3b344f883e76ccc90765745dc4d08a155b5f4bac3ee879cb1b1ad3fe9e0c1",
+                "bundle_pinned": true,
+                "bundle_version": "study-1",
+                "definition_hash": "37ae0d2d63b2191f7342b59a887d2f6eeff86b6270dc094524b37c58620b92bf",
+                "goal_coverage": "declared_mapping_not_semantically_proven",
+                "policy_id": "planner",
+                "requirements": [
+                  {
+                    "check_ids": [
+                      "domain.entry0",
+                      "domain.entry1",
+                      "domain.behavior"
+                    ],
+                    "id": "written-task",
+                    "minimum_evidence": "command",
+                    "statement": "Preserve and implement the written task; supplied checks are partial coverage"
+                  }
+                ],
+                "revision": "1",
+                "source": "operator_configuration",
+                "unmapped_requirement_ids": []
+              },
+              "usage": {
+                "actions": 2,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 0,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 6,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "planner.py": "533fc787abeabf0fe046be7a7aa6157d2b62a608a018e27fb4993413ca5130d6",
+            "planner_cli.py": "56fddc8cec3dd9d0a8ff8d604d415f907159ea53f3f22dff24f63757990b29e5"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 357.14331203799884,
+      "total_seconds": 357.14331203799884,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__planner__before",
+      "task": "planner",
+      "arm": "before",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__planner__before",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 334.3043311909969,
+          "tool_calls": 47,
+          "raw_usage": {
+            "input_tokens": 646153,
+            "output_tokens": 55592,
+            "thinking_tokens": 39454,
+            "cache_read_tokens": 2072172,
+            "total_tokens": 701745
+          },
+          "external_grading_seconds": 0.8881960939979763,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [
+            {
+              "run_id": "run_6fbbef7e0fa942a89b5086e8f81e58cc",
+              "mandatory_scope_preserved": true,
+              "checks": {
+                "domain.entry0": true,
+                "domain.entry1": true,
+                "domain.behavior": true
+              },
+              "mode": "exploratory",
+              "resolution": {
+                "assessment_status": "satisfied",
+                "certification": "not_issued",
+                "display_status": "closed_checks_passed",
+                "gate_status": "passed",
+                "lifecycle": "closed",
+                "measurement_status": "passed",
+                "policy_approval": {
+                  "authenticated_by": null,
+                  "claimed_reference": null,
+                  "status": "not_provided"
+                },
+                "requested_outcome": "completed"
+              },
+              "current_command_passes": 1,
+              "workspace_matches": true,
+              "baseline_status": "not_requested",
+              "required_behavior_improved": false,
+              "acceptance": null,
+              "usage": {
+                "actions": 3,
+                "verification_attempts": 1
+              },
+              "history_counts": {
+                "activity": 0,
+                "assessments": 1,
+                "checks": 3,
+                "interpretations": 1,
+                "jobs": 1,
+                "measurements": 3,
+                "notes": 0,
+                "tasks": 0
+              }
+            }
+          ],
+          "implementation_hashes": {
+            "planner.py": "78e57313cae5da8f658bd46e4c7004b59618de2c70597663dbd1bf6042b63457",
+            "planner_cli.py": "2ea0039407b3d1b8b74579a9fb07003a5b7439cff17b50dfec0aad69689b042b"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 334.3043311909969,
+      "total_seconds": 334.3043311909969,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    },
+    {
+      "model": "agy",
+      "requested_profile": {
+        "model": "gemini-3.8-flash-high",
+        "effort": "model-high"
+      },
+      "id": "agy__planner__plain",
+      "task": "planner",
+      "arm": "plain",
+      "source_receipts": "external-local/harness-acceptance-evaluation-20261001/comparison-final/receipts/agy__planner__plain",
+      "reused": false,
+      "stages": [
+        {
+          "stage": "initial",
+          "artifact_passed": true,
+          "passed_checks": 22,
+          "total_checks": 22,
+          "grade_status": "completed",
+          "claim": "completed",
+          "process_exit_code": 0,
+          "timed_out": false,
+          "namespace_termination_confirmed": true,
+          "reuse_validation": null,
+          "consumed_seconds": 321.07315611800004,
+          "tool_calls": 24,
+          "raw_usage": {
+            "input_tokens": 255461,
+            "output_tokens": 55319,
+            "thinking_tokens": 43146,
+            "cache_read_tokens": 860235,
+            "total_tokens": 310780
+          },
+          "external_grading_seconds": 0.8452171160024591,
+          "false_completion": false,
+          "human_interventions": 0,
+          "harness_runs": [],
+          "implementation_hashes": {
+            "planner.py": "d7b20457bba7976056ce4567db246dcd4db60413505d1b95efe41a1e9a0762c6",
+            "planner_cli.py": "c23dfa48c71c204cab41b7951442960d61d351a2844ce07c39ab44ef5fde3b04"
+          }
+        }
+      ],
+      "initial_passed": true,
+      "final_passed": true,
+      "initial_seconds": 321.07315611800004,
+      "total_seconds": 321.07315611800004,
+      "repairs": 0,
+      "recovery_sessions": 0,
+      "recovery_preserved_run_ids": null,
+      "implementation_changed_during_followup": false
+    }
+  ],
+  "automatic_setup_seconds": {
+    "luna_study": 13.880018956999265,
+    "original_mixed_host_study": 21.8310195189988
+  },
+  "audit": {
+    "frozen_runtimes_and_definitions_match": true,
+    "controls_and_scope_qualification_passed": true,
+    "receipt_and_artifact_identities_match": true,
+    "complete_condition_matrix": true
+  },
+  "frozen_runtime_hashes": {
+    "before": "64f44670bfeddf0be1299ff980f9beb1fc09f11495fc2c53af2746aed01e5a7d",
+    "after": "3eeaade865a318f6f19b9808fed308b235363c4f635c2dd7a59b4f93c331ae87"
+  },
+  "limitations": [
+    "Only Luna and AGY are in this comparison; previous Astra experiments are retained separately, not relabeled.",
+    "Three tasks per cell and one repetition: internal pilot, not statistical superiority or general goal certification.",
+    "Timeout durations are consumed time at the budget, not successful completion latency. Missing usage is unknown, not zero.",
+    "Raw token accounting differs across providers; no cross-provider monetary conversion or savings claim.",
+    "Task/test authoring, actual human review time and subscription charges are unmeasured.",
+    "Three normally completed AGY settings conditions were explicitly reused; earlier termination-affected conditions were excluded and retained.",
+    "Frozen models compare the same runtime bytes. A later Core guard against malformed custom Domain mandatory-ID output is verified separately."
+  ]
+}

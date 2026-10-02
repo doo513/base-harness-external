@@ -43,13 +43,18 @@ def load_json(path: str):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="External Develop Harness — local advisory reports, never Ready attestations")
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
+    parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
     start.add_argument("--workspace", required=True)
     start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/test_commands/profile")
-    start.add_argument("--mode", choices=("strict", "exploratory"), default="strict")
+    start.add_argument("--mode", choices=("strict", "exploratory", "acceptance"), help="default: configured acceptance when present, otherwise legacy strict")
+    start.add_argument("--policy-id", help="registered acceptance profile; cannot override an operator Domain default")
+    start.add_argument("--predecessor-run-id", help="terminal Run replaced after an explicit policy change")
+    start.add_argument("--policy-change-reason", help="why a new policy/Run is needed; preserves predecessor history")
+    start.add_argument("--capture-baseline", action="store_true", help="capture the declared pre-edit input scope for optional paired verification")
     start.add_argument("--required-check", action="append", default=[], help="initial explicit gate check ID; exploratory mode only")
     start.add_argument("--deferred-check", action="append", default=[], help="explicitly required check to be defined later; exploratory mode only")
     start.add_argument("--provenance", help=JSON_HELP + "; declared_author and optional unverified approval_reference")
@@ -69,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--job-id")
             cmd.add_argument("--check-workspace", action="store_true")
             cmd.add_argument("--view", choices=("summary", "full"), default="summary", help="v2 defaults to bounded summary; request full history explicitly")
+        elif name == "verify":
+            cmd.add_argument("--compare-baseline", action="store_true", help="measure the pinned original and current Candidate with identical checks")
+            cmd.add_argument("--expected-candidate-hash", help="reject a concurrent or superseding submission")
         elif name == "cancel":
             cmd.add_argument("--job-id", required=True)
         elif name == "records":
@@ -90,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
-        api = Harness(args.state_dir)
+        api = Harness(args.state_dir, policy_root=args.policy_root)
         if args.command == "doctor":
             from .service import response
             result = response(**diagnostics.doctor(api.store, sandbox=args.sandbox))
@@ -111,7 +119,9 @@ def main(argv: list[str] | None = None) -> int:
                                parameters=load_json(args.parameters) if args.parameters else {}, budget=load_json(args.budget) if args.budget else None,
                                request_id=args.request_id, mode=args.mode, required_checks=args.required_check,
                                deferred_checks=args.deferred_check, provenance=load_json(args.provenance) if args.provenance else None,
-                               constraints=load_json(args.constraints) if args.constraints else None)
+                               constraints=load_json(args.constraints) if args.constraints else None,
+                               policy_id=args.policy_id, predecessor_run_id=args.predecessor_run_id, policy_change_reason=args.policy_change_reason,
+                               capture_baseline=args.capture_baseline)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
         elif args.command == "revise":
@@ -123,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "submit":
             result = api.submit(args.run_id, args.request_id)
         elif args.command == "verify":
-            result = api.verify(args.run_id, args.request_id)
+            result = api.verify(args.run_id, args.request_id, compare_baseline=args.compare_baseline,
+                                expected_candidate_hash=args.expected_candidate_hash)
         elif args.command == "status":
             result = api.status(args.run_id, args.job_id, check_workspace=args.check_workspace, view=args.view)
         else:

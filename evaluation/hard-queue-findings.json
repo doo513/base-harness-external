@@ -1,0 +1,73 @@
+{
+  "schema_version": "hard-queue-findings-v1",
+  "generated_at": "2026-10-02T00:28:11.873616+00:00",
+  "evaluation_complete": true,
+  "scope": "One difficult transactional queue task: Luna ordinary versus AGY with the current external Harness",
+  "budget": {
+    "initial_seconds_each": 900,
+    "fresh_followup_seconds_each": 300,
+    "extension_or_extra_model_retry": false
+  },
+  "luna": {
+    "profile": "gpt-6-luna / medium",
+    "initial_scenarios": "36/36",
+    "recovery_scenarios": "36/36",
+    "initial_seconds": 169.63958105299753,
+    "total_observed_seconds": 201.68146685899774,
+    "implementation_changed_during_recovery": false
+  },
+  "agy": {
+    "profile": "gemini-3.8-flash-high via AGY",
+    "initial_scenarios": "35/36",
+    "repaired_artifact_external_scenarios": "36/36",
+    "initial_seconds": 428.3565891010003,
+    "total_consumed_seconds": 728.4024918719988,
+    "failed_scenario": "defaults-equivalent-on-replay",
+    "defect": "Omitted/None dependencies and an explicit empty list were not normalized to the same effective idempotency arguments; equivalent replay incorrectly raised ValueError.",
+    "initial_model_claim": "completed with no stated uncertainty",
+    "initial_harness_status": "closed_checks_passed for its supplied partial acceptance scope, not proof of the hidden scenarios",
+    "repair_feedback": "Only the predeclared failed scenario name, not expected answers or a human-written fix.",
+    "repair_timed_out": true,
+    "repair_usage_counters": "unavailable; not zero",
+    "repaired_harness_workflow_complete": false,
+    "repaired_run_id": "run_d03e990f0c00455f8ee45d13656c670c",
+    "repaired_run_measurement": "not_run",
+    "original_run_id": "run_8a24984bef3944828d4090013b2be38c",
+    "original_run_workspace_matches_after_repair": false,
+    "observed_friction": {
+      "stage": "repair",
+      "steps": [
+        100,
+        102
+      ],
+      "error": "CLIENT_INPUT_OR_IO / Errno 30: Read-only file system when creating workspace/task-binding.json; touch also returned read-only.",
+      "root_cause": "Not established. The fresh non-model evaluation-scope probe below could write both workspace and trial, but does not reproduce the ended AGY terminal context.",
+      "do_not_infer": "The incomplete workflow cannot be attributed solely to model reasoning, solely to Harness Core, or to an intrinsic inability to finish without the 300-second bound."
+    }
+  },
+  "post_trial_probe": {
+    "kind": "post-trial controlled scope probe; no model invocation",
+    "exit_code": 0,
+    "stdout": "{\"probe\": {\"workspace\": {\"writable\": true}, \"trial\": {\"writable\": true}}, \"cwd\": \"external-local/harness-hard-queue-20261002/trials/agy__leasequeue__after/workspace\"}\n{\"type\": \"study.scope.exit\", \"termination_requested\": false, \"terminated_namespace_pids\": [], \"remaining_namespace_pids\": []}\n",
+    "stderr": "",
+    "limitation": "Fresh evaluation scope, not a reproduction inside the ended AGY run_command tool context."
+  },
+  "interpretation": [
+    "In this run Luna was faster and passed all fixed scenarios at first submission. No evidence that adding Harness exceeded the standalone model result.",
+    "Both model and workflow changed, so this is not a causal estimate of Harness benefit or a general ranking of Luna versus Gemini.",
+    "The observed missed behavior is a coverage/candidate-code problem: the six public tests omitted a case in the 36-scenario external suite. Harness accurately recorded its limited checks, while the model overclaimed full completion.",
+    "The original passing snapshot was not silently reused for changed files: workspace equality became false; the replacement Run remains visibly unmeasured.",
+    "Final repaired code passed external grading, but do not present that as completed Harness re-verification. The active Run was left intact, with no automatic finish or further provider call.",
+    "One task/repetition with internally authored reference outputs and defect controls is not proof of a model ceiling or universal correctness."
+  ],
+  "existing_goal_files_unchanged": 54,
+  "product_runtime_modified": false,
+  "committed": false,
+  "pushed": false,
+  "report": "evaluation/hard-queue-comparison.json",
+  "receipts": "external-local/harness-hard-queue-20261002/receipts",
+  "artifacts": {
+    "codex": "external-local/harness-hard-queue-20261002/receipts/codex__leasequeue__plain/recovery/artifacts",
+    "agy": "external-local/harness-hard-queue-20261002/receipts/agy__leasequeue__after/repair/artifacts"
+  }
+}

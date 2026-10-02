@@ -147,10 +147,10 @@ def test_capture_allows_another_run_to_checkpoint(case, monkeypatch):
     job = api.verify(other, "verify")["job_id"]
     entered, release = threading.Event(), threading.Event()
     original = service.capture
-    def blocked_capture(*args):
+    def blocked_capture(*args, **kwargs):
         entered.set()
         assert release.wait(8)
-        return original(*args)
+        return original(*args, **kwargs)
     monkeypatch.setattr(service, "capture", blocked_capture)
     with ThreadPoolExecutor(max_workers=2) as pool:
         submission = pool.submit(api.submit, slow, "submit")
@@ -170,8 +170,8 @@ def test_inflight_submit_cannot_overwrite_changed_run(case, monkeypatch, interfe
     run = start()
     initial = api.submit(run, "initial")["candidate"]
     original = service.capture
-    def changed_capture(*args):
-        result = original(*args)
+    def changed_capture(*args, **kwargs):
+        result = original(*args, **kwargs)
         if interference == "revise":
             api.revise(run, {"expected_revision": 1, "goal_summary": "Changed interpretation"}, "revise")
         elif interference == "finish":
@@ -198,8 +198,8 @@ def test_concurrent_submit_replays_one_candidate_and_one_action(case, monkeypatc
     run = start()
     barrier = threading.Barrier(2)
     original = service.capture
-    def concurrent_capture(*args):
-        result = original(*args)
+    def concurrent_capture(*args, **kwargs):
+        result = original(*args, **kwargs)
         barrier.wait(timeout=5)
         return result
     monkeypatch.setattr(service, "capture", concurrent_capture)

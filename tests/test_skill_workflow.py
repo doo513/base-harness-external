@@ -189,6 +189,127 @@ def test_large_json_uses_transport_files_without_single_argv_limit(caller):
     assert len(result["contract"]["checks"]) == 3
 
 
+def bound_run(caller, *, baseline=False):
+    client, workspace, config = caller
+    payload = start_request(workspace)
+    payload["arguments"]["capture_baseline"] = baseline
+    run = client.call(payload)["run_id"]
+    path = config.parent / "binding.json"
+    binding = client.bind(run, str(workspace), "develop", path)["binding"]
+    assert json.loads(path.read_text()) == binding
+    return binding
+
+
+def test_binding_reduces_context_input_but_rejects_changed_store_and_intent(caller):
+    client, _, config = caller
+    binding = bound_run(caller)
+    changed = copy.deepcopy(binding)
+    changed["config"]["state_dir"] += "-wrong"
+    with pytest.raises(helper.ClientError) as error:
+        client.validate_binding(changed)
+    assert error.value.code == "BINDING_CONFIG_MISMATCH"
+    changed = copy.deepcopy(binding)
+    changed["intent_ref"]["sha256"] = "0" * 64
+    with pytest.raises(helper.ClientError) as error:
+        client.validate_binding(changed)
+    assert error.value.code == "BINDING_IDENTITY_CHANGED"
+    assert helper.Client(client.config).validate_binding(binding)["ok"]
+
+
+def test_serialized_request_roundtrip_and_payload_conflict(caller, tmp_path):
+    client, _, _ = caller
+    binding = bound_run(caller)
+    result = client.make_request("observe", {"data": {"note": "decision"}}, action_id="note-1", binding=binding)
+    envelope = result["request"]
+    path = tmp_path / "exact-request.json"
+    helper.write_new_json(path, envelope)
+    first = client.call(helper.read_json(str(path)))
+    assert first["ok"] and client.call(helper.read_json(str(path))) == first
+    changed = client.make_request("observe", {"data": {"note": "another decision"}}, action_id="note-1", binding=binding)["request"]
+    assert changed["request_id"] == envelope["request_id"]
+    assert client.call(changed)["error"]["code"] == "REQUEST_CONFLICT"
+    with pytest.raises(FileExistsError):
+        helper.write_new_json(path, changed)
+
+
+def test_checkpoint_is_mechanical_idempotent_and_does_not_finish(caller):
+    client, workspace, _ = caller
+    binding = bound_run(caller, baseline=True)
+    (workspace / "payload.txt").write_text("ready")
+    first = client.checkpoint(binding, "change-1", compare_baseline=True, wait_seconds=15)
+    assert first["ok"] and first["wait_status"] == "terminal"
+    assert first["job"]["result"]["status"] == "passed"
+    assert first["job"]["result"]["baseline_comparison"]["changes"][0]["status"] == "improved"
+    (workspace / "payload.txt").write_text("later edit")
+    replay = client.checkpoint(binding, "change-1", compare_baseline=True, wait_seconds=15)
+    assert replay["job"]["job_id"] == first["job"]["job_id"]
+    state = client.validate_binding(binding)
+    assert state["history_counts"]["jobs"] == 1 and state["usage"]["verification_attempts"] == 1
+    assert state["run"]["status"] == "active" and state["assessment"]["status"] == "not_assessed"
+    assert state["history_counts"]["assessments"] == 0
+
+
+def test_checkpoint_response_loss_replays_original_submission(caller, monkeypatch):
+    client, workspace, _ = caller
+    binding = bound_run(caller)
+    original = client.execute
+    lost = []
+    def lose_after_submit(operation, *args, **kwargs):
+        result = original(operation, *args, **kwargs)
+        if operation == "submit" and not lost:
+            lost.append(result["candidate"]["candidate_hash"])
+            raise helper.ClientError("CALL_OUTCOME_UNKNOWN", "simulated lost response after commit")
+        return result
+    monkeypatch.setattr(client, "execute", lose_after_submit)
+    with pytest.raises(helper.ClientError, match="lost response"):
+        client.checkpoint(binding, "exact-action", wait_seconds=0)
+    (workspace / "payload.txt").write_text("ready")
+    result = client.checkpoint(binding, "exact-action", wait_seconds=15)
+    assert result["submitted_candidate_hash"] == lost[0]
+    assert result["job"]["result"]["status"] == "failed"
+    assert client.validate_binding(binding)["history_counts"]["jobs"] == 1
+
+
+def test_checkpoint_refuses_superseding_candidate(caller, monkeypatch):
+    client, workspace, _ = caller
+    binding = bound_run(caller)
+    original = client.execute
+    def interleave(operation, *args, **kwargs):
+        result = original(operation, *args, **kwargs)
+        if operation == "submit":
+            (workspace / "payload.txt").write_text("ready")
+            assert original("submit", {"run_id": binding["run_id"]}, "external-submit")["ok"]
+        return result
+    monkeypatch.setattr(client, "execute", interleave)
+    result = client.checkpoint(binding, "change", wait_seconds=0)
+    assert not result["ok"] and result["error"]["code"] == "CANDIDATE_SUPERSEDED"
+    assert client.validate_binding(binding)["history_counts"]["jobs"] == 0
+
+
+def test_wait_window_does_not_cancel_restart_or_call_a_model(caller, monkeypatch):
+    client, _, _ = caller
+    binding = bound_run(caller)
+    calls = []
+    def running(operation, arguments, *args):
+        calls.append(operation)
+        return {"ok": True, "job": {"status": "running", "job_id": "controlled-job"}}
+    monkeypatch.setattr(client, "execute", running)
+    result = client.wait(binding, "controlled-job", wait_seconds=0, validated=True)
+    assert result["wait_status"] == "pending" and calls == ["status"]
+
+
+def test_transport_lock_serializes_mutations_without_blocking_reads(caller):
+    client, workspace, _ = caller
+    binding = bound_run(caller)
+    other = helper.Client(client.config)
+    with client.serialized(binding["run_id"]):
+        with pytest.raises(helper.ClientError) as error:
+            other.call(request(workspace, binding["run_id"], "submit", "concurrent"))
+        assert error.value.code == "CALLER_BUSY"
+        assert other.validate_binding(binding)["ok"]
+    assert other.call(request(workspace, binding["run_id"], "submit", "concurrent"))["ok"]
+
+
 def test_discovery_never_selects_the_newest_run(caller):
     client, workspace, _ = caller
     first = client.call(start_request(workspace, "task-one"))["run_id"]

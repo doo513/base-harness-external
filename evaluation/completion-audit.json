@@ -1,0 +1,826 @@
+{
+  "schema_version": "implementation-completion-audit-v1",
+  "generated_at": "2026-10-01T16:12:47.756023+00:00",
+  "objective": "Complete the agreed Domain/Core/Verifier/Skill-helper/evaluation implementation tree",
+  "completed": true,
+  "required_items": 19,
+  "satisfied_items": 19,
+  "base_commit": "8dad67a475dfeaedd8e3653f82697be5165e20cf",
+  "tested_source_digest": "313287685af2e781c2f43da5cb8c4074a5780ba3af8794a352fc2287801d8cb7",
+  "source_digest_scope": "src/runtime/tests/scripts/skills/examples sources and skill docs, top-level usage/install/policy docs, harness-tool, CI workflows, scenario and implementation-requirement manifests, evaluation task definitions/positive controls and pyproject.toml; excludes generated reports",
+  "verification": {
+    "full_python": {
+      "path": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe/harness-goal-final-20261002.xml",
+      "sha256": "4468ddd778f29ecb6900910de3422576ad7c3a8d90c1ccdae5bfc9ac472abf7e",
+      "counts": {
+        "passed": 187,
+        "failed": 0,
+        "skipped": 5
+      }
+    },
+    "live_selection": {
+      "path": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe/harness-goal-final-live-20261002.xml",
+      "sha256": "df23ed09ec969a7aaf497e8279fd575cf81dade46c9bfafe206e872ada264525",
+      "counts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "test": "test_repeated_worker_delivery_does_not_rerun_checks",
+          "class": "tests.test_external_harness",
+          "status": "passed",
+          "seconds": 0.743
+        },
+        {
+          "test": "test_live_sandboxed_python_tests_without_host",
+          "class": "tests.test_external_harness",
+          "status": "passed",
+          "seconds": 1.837
+        },
+        {
+          "test": "test_live_skill_client_executes_existing_sandbox",
+          "class": "tests.test_skill_workflow",
+          "status": "passed",
+          "seconds": 8.268
+        },
+        {
+          "test": "test_live_acceptance_bundle_negative_and_positive_controls",
+          "class": "tests.test_acceptance_policy",
+          "status": "passed",
+          "seconds": 2.864
+        },
+        {
+          "test": "test_live_command_timeout_is_not_an_ordinary_exit_124",
+          "class": "tests.test_acceptance_policy",
+          "status": "passed",
+          "seconds": 1.413
+        },
+        {
+          "test": "test_live_scope_terminates_namespace_and_new_process_group",
+          "class": "tests.test_agent_study",
+          "status": "passed",
+          "seconds": 0.782
+        }
+      ],
+      "note": "Five actual Sandbox/namespace tests plus one repeated-worker-delivery regression matched by -k live. All five ordinary opt-in skips were exercised here."
+    },
+    "common_scenarios": {
+      "path": "evaluation/completion-conformance.json",
+      "counts": {
+        "passed": 99,
+        "failed": 0,
+        "skipped": 0,
+        "missing": 0
+      },
+      "source_unchanged": true
+    },
+    "mechanical_checks": [
+      {
+        "check": "bun-sandbox",
+        "argv": [
+          "bun",
+          "test",
+          "tests/sandbox.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe/bun-sandbox.log"
+      },
+      {
+        "check": "skill-format",
+        "argv": [
+          "python3",
+          "skill-creator/quick_validate.py",
+          "skills/harness-workflow"
+        ],
+        "exit_code": 0,
+        "log": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe/skill-format.log"
+      },
+      {
+        "check": "diff-check",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0,
+        "log": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe/diff-check.log"
+      }
+    ],
+    "bun_note": "3 passed, 3 Windows-only skipped; native Windows behavior is not verified."
+  },
+  "requirements": [
+    {
+      "id": "domain.profiles",
+      "implementation": [
+        "src/harness_external/domain.py",
+        "src/harness_external/acceptance.py"
+      ],
+      "tests": [
+        "test_configured_policy_compiles_mandatory_checks_and_separates_authority"
+      ],
+      "meaning": "Domain compiles explicitly registered profiles; metadata and semantics remain distinct",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_configured_policy_compiles_mandatory_checks_and_separates_authority",
+          "passing_cases": [
+            {
+              "test": "test_configured_policy_compiles_mandatory_checks_and_separates_authority",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "domain.requirement-links",
+      "implementation": [
+        "src/harness_external/domain.py"
+      ],
+      "tests": [
+        "test_file_only_mapping_cannot_claim_command_requirement"
+      ],
+      "meaning": "Requirement links reference named mandatory checks and declare the required evidence kind",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_file_only_mapping_cannot_claim_command_requirement",
+          "passing_cases": [
+            {
+              "test": "test_file_only_mapping_cannot_claim_command_requirement",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "domain.exploration",
+      "implementation": [
+        "src/harness_external/semantics.py"
+      ],
+      "tests": [
+        "test_exploratory_failure_does_not_change_acceptance_or_disappear"
+      ],
+      "meaning": "A failed exploratory probe remains a fact without changing acceptance",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_exploratory_failure_does_not_change_acceptance_or_disappear",
+          "passing_cases": [
+            {
+              "test": "test_exploratory_failure_does_not_change_acceptance_or_disappear",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "domain.limited-assurance",
+      "implementation": [
+        "src/harness_external/evidence.py",
+        "src/harness_external/acceptance.py"
+      ],
+      "tests": [
+        "test_weak_caller_check_is_not_presented_as_goal_or_command_verification"
+      ],
+      "meaning": "Weak caller criteria are identified as such, not promoted to goal proof",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_weak_caller_check_is_not_presented_as_goal_or_command_verification",
+          "passing_cases": [
+            {
+              "test": "test_weak_caller_check_is_not_presented_as_goal_or_command_verification",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.separate-policy-input",
+      "implementation": [
+        "src/harness_external/acceptance.py",
+        "src/harness_external/service.py"
+      ],
+      "tests": [
+        "test_caller_cannot_downgrade_operator_policy",
+        "test_domain_compiler_cannot_drop_configured_mandatory_references",
+        "test_revision_rejects_domain_mandatory_reference_drift"
+      ],
+      "meaning": "Configured references cannot be replaced by a caller mode or omitted by a Domain result",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_caller_cannot_downgrade_operator_policy",
+          "passing_cases": [
+            {
+              "test": "test_caller_cannot_downgrade_operator_policy[kwargs0-POLICY_MODE_CONFLICT]",
+              "suite": "full"
+            },
+            {
+              "test": "test_caller_cannot_downgrade_operator_policy[kwargs1-POLICY_MODE_CONFLICT]",
+              "suite": "full"
+            },
+            {
+              "test": "test_caller_cannot_downgrade_operator_policy[kwargs2-POLICY_SELECTION_PINNED]",
+              "suite": "full"
+            },
+            {
+              "test": "test_caller_cannot_downgrade_operator_policy[kwargs3-POLICY_MODE_CONFLICT]",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_domain_compiler_cannot_drop_configured_mandatory_references",
+          "passing_cases": [
+            {
+              "test": "test_domain_compiler_cannot_drop_configured_mandatory_references",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_revision_rejects_domain_mandatory_reference_drift",
+          "passing_cases": [
+            {
+              "test": "test_revision_rejects_domain_mandatory_reference_drift",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.authorship-and-approval",
+      "implementation": [
+        "src/harness_external/acceptance.py",
+        "src/harness_external/semantics.py"
+      ],
+      "tests": [
+        "test_configured_authorship_is_not_inferred_from_generator_or_approver"
+      ],
+      "meaning": "Criteria/test authors, Domain generator, configured approval and change authority are separate; none implies authenticated human approval",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_configured_authorship_is_not_inferred_from_generator_or_approver",
+          "passing_cases": [
+            {
+              "test": "test_configured_authorship_is_not_inferred_from_generator_or_approver",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.pinned-test-bundle",
+      "implementation": [
+        "src/harness_external/acceptance.py",
+        "src/harness_external/snapshots.py"
+      ],
+      "tests": [
+        "test_pinned_tests_ignore_changed_workspace_and_registry_copies",
+        "test_bundle_corruption_is_not_accepted"
+      ],
+      "meaning": "Submitted tests and fixtures come from captured policy bytes, not editable workspace copies",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_pinned_tests_ignore_changed_workspace_and_registry_copies",
+          "passing_cases": [
+            {
+              "test": "test_pinned_tests_ignore_changed_workspace_and_registry_copies",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_bundle_corruption_is_not_accepted",
+          "passing_cases": [
+            {
+              "test": "test_bundle_corruption_is_not_accepted",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.immutable-scope",
+      "implementation": [
+        "src/harness_external/domain.py",
+        "src/harness_external/service.py"
+      ],
+      "tests": [
+        "test_revise_cannot_replace_acceptance_and_can_extend_inputs"
+      ],
+      "meaning": "Mandatory command verification cannot be downgraded to file checks",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_revise_cannot_replace_acceptance_and_can_extend_inputs",
+          "passing_cases": [
+            {
+              "test": "test_revise_cannot_replace_acceptance_and_can_extend_inputs",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.linked-policy-change",
+      "implementation": [
+        "src/harness_external/service.py"
+      ],
+      "tests": [
+        "test_policy_replay_and_linked_revision_preserve_old_bundle"
+      ],
+      "meaning": "Replacement Runs retain predecessor/policy/reason references and old usage/history",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_policy_replay_and_linked_revision_preserve_old_bundle",
+          "passing_cases": [
+            {
+              "test": "test_policy_replay_and_linked_revision_preserve_old_bundle",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "core.concurrent-capture",
+      "implementation": [
+        "src/harness_external/service.py"
+      ],
+      "tests": [
+        "test_concurrent_start_publishes_one_policy_and_baseline",
+        "test_start_capture_does_not_block_another_run_measurement"
+      ],
+      "meaning": "Idempotent publication remains isolated without a global writer lock during file capture",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_concurrent_start_publishes_one_policy_and_baseline",
+          "passing_cases": [
+            {
+              "test": "test_concurrent_start_publishes_one_policy_and_baseline",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_start_capture_does_not_block_another_run_measurement",
+          "passing_cases": [
+            {
+              "test": "test_start_capture_does_not_block_another_run_measurement",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "verifier.scope-and-timeout",
+      "implementation": [
+        "src/harness_external/evidence.py",
+        "runtime/script/external-harness-sandbox.ts"
+      ],
+      "tests": [
+        "test_missing_baseline_and_unavailable_command_do_not_show_improvement",
+        "test_live_command_timeout_is_not_an_ordinary_exit_124"
+      ],
+      "meaning": "Completed command, unavailable execution, timeout and test-case coverage are not conflated",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_missing_baseline_and_unavailable_command_do_not_show_improvement",
+          "passing_cases": [
+            {
+              "test": "test_missing_baseline_and_unavailable_command_do_not_show_improvement",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_live_command_timeout_is_not_an_ordinary_exit_124",
+          "passing_cases": [
+            {
+              "test": "test_live_command_timeout_is_not_an_ordinary_exit_124",
+              "suite": "live"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "verifier.baseline",
+      "implementation": [
+        "src/harness_external/worker.py",
+        "src/harness_external/evidence.py"
+      ],
+      "tests": [
+        "test_baseline_pairing_does_not_gate_on_original_failure",
+        "test_baseline_failure_cannot_satisfy_current_candidate_gate",
+        "test_scope_change_does_not_claim_pinned_bundle_is_missing"
+      ],
+      "meaning": "Paired observations distinguish improvement/regression and explicit incomparability",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_baseline_pairing_does_not_gate_on_original_failure",
+          "passing_cases": [
+            {
+              "test": "test_baseline_pairing_does_not_gate_on_original_failure",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_baseline_failure_cannot_satisfy_current_candidate_gate",
+          "passing_cases": [
+            {
+              "test": "test_baseline_failure_cannot_satisfy_current_candidate_gate",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_scope_change_does_not_claim_pinned_bundle_is_missing",
+          "passing_cases": [
+            {
+              "test": "test_scope_change_does_not_claim_pinned_bundle_is_missing",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "verifier.controls-and-partial-facts",
+      "implementation": [
+        "src/harness_external/worker.py",
+        "src/harness_external/store.py"
+      ],
+      "tests": [
+        "test_live_acceptance_bundle_negative_and_positive_controls",
+        "test_interrupted_pair_preserves_baseline_without_satisfying_candidate",
+        "test_runtime_identity_cache_rehashes_a_changed_executable"
+      ],
+      "meaning": "Actual Sandbox positive/negative controls and interrupted measurements retain correct binding",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_live_acceptance_bundle_negative_and_positive_controls",
+          "passing_cases": [
+            {
+              "test": "test_live_acceptance_bundle_negative_and_positive_controls",
+              "suite": "live"
+            }
+          ]
+        },
+        {
+          "test": "test_interrupted_pair_preserves_baseline_without_satisfying_candidate",
+          "passing_cases": [
+            {
+              "test": "test_interrupted_pair_preserves_baseline_without_satisfying_candidate",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_runtime_identity_cache_rehashes_a_changed_executable",
+          "passing_cases": [
+            {
+              "test": "test_runtime_identity_cache_rehashes_a_changed_executable",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "caller.binding-and-replay",
+      "implementation": [
+        "skills/harness-workflow/scripts/harness_client.py"
+      ],
+      "tests": [
+        "test_binding_reduces_context_input_but_rejects_changed_store_and_intent",
+        "test_serialized_request_roundtrip_and_payload_conflict",
+        "test_transport_lock_serializes_mutations_without_blocking_reads"
+      ],
+      "meaning": "Explicit binding, saved requests and transport serialization reduce repeated protocol work without a second Run store",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_binding_reduces_context_input_but_rejects_changed_store_and_intent",
+          "passing_cases": [
+            {
+              "test": "test_binding_reduces_context_input_but_rejects_changed_store_and_intent",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_serialized_request_roundtrip_and_payload_conflict",
+          "passing_cases": [
+            {
+              "test": "test_serialized_request_roundtrip_and_payload_conflict",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_transport_lock_serializes_mutations_without_blocking_reads",
+          "passing_cases": [
+            {
+              "test": "test_transport_lock_serializes_mutations_without_blocking_reads",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "caller.mechanical-checkpoint",
+      "implementation": [
+        "skills/harness-workflow/scripts/harness_client.py"
+      ],
+      "tests": [
+        "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+        "test_checkpoint_response_loss_replays_original_submission",
+        "test_checkpoint_refuses_superseding_candidate",
+        "test_wait_window_does_not_cancel_restart_or_call_a_model"
+      ],
+      "meaning": "Submission/verification/wait mechanics do not decide assessment, repair or finish",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+          "passing_cases": [
+            {
+              "test": "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_checkpoint_response_loss_replays_original_submission",
+          "passing_cases": [
+            {
+              "test": "test_checkpoint_response_loss_replays_original_submission",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_checkpoint_refuses_superseding_candidate",
+          "passing_cases": [
+            {
+              "test": "test_checkpoint_refuses_superseding_candidate",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_wait_window_does_not_cancel_restart_or_call_a_model",
+          "passing_cases": [
+            {
+              "test": "test_wait_window_does_not_cancel_restart_or_call_a_model",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "skill.real-usage",
+      "implementation": [
+        "skills/harness-workflow/SKILL.md",
+        "skills/harness-workflow/references/protocol.md"
+      ],
+      "evidence": [
+        "evaluation/skill-forward-acceptance.json"
+      ],
+      "meaning": "A separate same-Host agent used the Skill and produced retained fail-to-pass measurements; this is not a third-party audit",
+      "status": "satisfied",
+      "test_evidence": [],
+      "record_evidence": [
+        {
+          "path": "evaluation/skill-forward-acceptance.json",
+          "sha256": "0cf69e07319446e07bcc508d99d1b819d7466e6dba7cecaf13b96fab919d20f4"
+        }
+      ]
+    },
+    {
+      "id": "evaluation.model-scope-and-cost",
+      "implementation": [
+        "scripts/agent_study.py",
+        "scripts/luna_study.py",
+        "scripts/report_agent_study.py"
+      ],
+      "evidence": [
+        "evaluation/luna-agy-comparison.json"
+      ],
+      "meaning": "18 Luna/AGY conditions, initial/final outcomes, recovery/repair, raw cost counters and policy consistency; unmeasured costs remain explicit",
+      "status": "satisfied",
+      "test_evidence": [],
+      "record_evidence": [
+        {
+          "path": "evaluation/luna-agy-comparison.json",
+          "sha256": "d3d39cdab257f6699c4979d25760fcac5d398ac4a3bac7e59e9bf2edca447e16"
+        }
+      ]
+    },
+    {
+      "id": "evaluation.integrity",
+      "implementation": [
+        "scripts/study_scope.py",
+        "scripts/study_subject_driver.py",
+        "scripts/report_agent_study.py"
+      ],
+      "tests": [
+        "test_driver_accepts_value_error_subclasses",
+        "test_live_scope_terminates_namespace_and_new_process_group",
+        "test_artifact_audit_detects_changes_and_added_importable_files",
+        "test_provider_rejection_is_not_an_artifact_repair_attempt",
+        "test_future_studies_use_only_luna_and_agy",
+        "test_base_runner_stops_preexecution_failure_for_either_host",
+        "test_report_requires_each_of_the_nine_conditions_once",
+        "test_report_rechecks_frozen_files_not_only_manifest_equality"
+      ],
+      "meaning": "Grader controls, exact artifact identity, provider availability and descendant lifecycle are checked independently",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_driver_accepts_value_error_subclasses",
+          "passing_cases": [
+            {
+              "test": "test_driver_accepts_value_error_subclasses",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_live_scope_terminates_namespace_and_new_process_group",
+          "passing_cases": [
+            {
+              "test": "test_live_scope_terminates_namespace_and_new_process_group",
+              "suite": "live"
+            }
+          ]
+        },
+        {
+          "test": "test_artifact_audit_detects_changes_and_added_importable_files",
+          "passing_cases": [
+            {
+              "test": "test_artifact_audit_detects_changes_and_added_importable_files",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_provider_rejection_is_not_an_artifact_repair_attempt",
+          "passing_cases": [
+            {
+              "test": "test_provider_rejection_is_not_an_artifact_repair_attempt",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_future_studies_use_only_luna_and_agy",
+          "passing_cases": [
+            {
+              "test": "test_future_studies_use_only_luna_and_agy",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_base_runner_stops_preexecution_failure_for_either_host",
+          "passing_cases": [
+            {
+              "test": "test_base_runner_stops_preexecution_failure_for_either_host",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_report_requires_each_of_the_nine_conditions_once",
+          "passing_cases": [
+            {
+              "test": "test_report_requires_each_of_the_nine_conditions_once",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_report_rechecks_frozen_files_not_only_manifest_equality",
+          "passing_cases": [
+            {
+              "test": "test_report_rechecks_frozen_files_not_only_manifest_equality",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    },
+    {
+      "id": "architecture.model-free",
+      "implementation": [
+        "src/harness_external",
+        "skills/harness-workflow/scripts/harness_client.py"
+      ],
+      "tests": [
+        "test_external_package_has_no_host_ui_or_provider_imports",
+        "test_checkpoint_is_mechanical_idempotent_and_does_not_finish"
+      ],
+      "meaning": "Production Harness remains model-free; only the opt-in evaluation runner launches model CLIs",
+      "status": "satisfied",
+      "test_evidence": [
+        {
+          "test": "test_external_package_has_no_host_ui_or_provider_imports",
+          "passing_cases": [
+            {
+              "test": "test_external_package_has_no_host_ui_or_provider_imports",
+              "suite": "full"
+            }
+          ]
+        },
+        {
+          "test": "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+          "passing_cases": [
+            {
+              "test": "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+              "suite": "full"
+            }
+          ]
+        }
+      ],
+      "record_evidence": []
+    }
+  ],
+  "model_evaluation": {
+    "path": "evaluation/luna-agy-comparison.json",
+    "sha256": "d3d39cdab257f6699c4979d25760fcac5d398ac4a3bac7e59e9bf2edca447e16",
+    "conditions": 18,
+    "initial_holdout_observations": 390,
+    "recovery_sessions": 6,
+    "recovery_holdout_observations": 120,
+    "models": [
+      "gpt-6-luna / medium",
+      "AGY gemini-3.8-flash-high"
+    ],
+    "updated_policy_scope_preserved_runs": 6,
+    "previous_scope_deviation_runs": 1,
+    "quality_conclusion": "All arms passed fixed checks; no demonstrated quality advantage on these three tasks.",
+    "cost_conclusion": "Updated versus previous total session time: Luna -15.6%, AGY -8.4%; both slower than ordinary workflow. No net cost-saving claim.",
+    "excluded": "Astra trials and termination-affected preliminary trials are retained and excluded; three normally completed AGY settings trials explicitly reused.",
+    "post_freeze_runtime_delta": "Current Core additionally rejects custom-Domain mandatory-check reference omission and revision drift. Verified by the current regressions, not retroactively attributed to the frozen model runtime."
+  },
+  "artifacts_directory": "external-local/harness-acceptance-evaluation-20261001/completion-20261002-dhkexe",
+  "nonclaims": [
+    "A passing check is not a proof that the original goal is fully satisfied.",
+    "Configured local approval is not authenticated human identity or same-user tamper resistance.",
+    "Results remain unsigned local-advisory with ready=false.",
+    "No claim of universal cost savings, statistical model superiority, native Windows validation or automatic Skill discovery."
+  ],
+  "remaining_in_agreed_scope": [],
+  "not_in_scope": [
+    "Authenticated approval and protected Ready attestation",
+    "Semantic proof of complete goal coverage or independent test authorship",
+    "Native Windows command sandbox validation",
+    "Automatic Skill discovery",
+    "Statistical superiority and measured provider billing"
+  ],
+  "publication": {
+    "committed": false,
+    "pushed": false
+  }
+}

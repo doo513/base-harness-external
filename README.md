@@ -10,6 +10,12 @@ configure durable state and install the Skill into an existing Host. The Skill
 guides the caller; Domain/Core remain the source of contract and lifecycle rules.
 There is no second agent loop or Run database in the helper.
 
+[Configured acceptance policies](POLICIES.md) separate operator-provided mandatory
+checks and pinned test/fixture bundles from model exploratory probes. Optional
+baseline comparison records check improvement or regression without claiming
+goal correctness. The helper supports explicit `bind`, mechanical `checkpoint`
+and bounded `wait`, without automatic assessment, repair or closeout.
+
 For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.

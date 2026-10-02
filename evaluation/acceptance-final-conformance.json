@@ -1,0 +1,605 @@
+{
+  "schema_version": "closeout-evaluation-report-v1",
+  "suite_version": "closeout-evaluation-suite-v1",
+  "scope": "Common semantic conformance with a scripted caller and actual measurement engine",
+  "generated_at": "2026-10-01T13:54:54.386249+00:00",
+  "model_quality_evaluated": false,
+  "source_digest": "1bdf2f4a5422e74b6b87ce66357a1b96bf6683c1743afd33f99802623889a052",
+  "base_commit": "8dad67a475dfeaedd8e3653f82697be5165e20cf",
+  "head_commit": "8dad67a475dfeaedd8e3653f82697be5165e20cf",
+  "dirty": true,
+  "tested_tree_digest": "1bdf2f4a5422e74b6b87ce66357a1b96bf6683c1743afd33f99802623889a052",
+  "source_digest_after": "1bdf2f4a5422e74b6b87ce66357a1b96bf6683c1743afd33f99802623889a052",
+  "digest_scope": "src/runtime/tests/scripts/skills/examples sources and skill docs, top-level usage/install/policy docs, harness-tool, CI workflows, scenario manifest and pyproject.toml; excludes generated reports",
+  "source_unchanged": true,
+  "passed": true,
+  "elapsed_seconds": 167.3400890869998,
+  "pytest_exit_code": 0,
+  "counts": {
+    "passed": 82,
+    "failed": 0,
+    "skipped": 0,
+    "missing": 0
+  },
+  "scenarios": [
+    {
+      "id": "measurement-assessment-gates",
+      "test": "test_advisory_failure_preserves_facts_and_does_not_become_gate",
+      "property": "A failed probe remains a fact while explicit gates and caller assessment stay independent",
+      "status": "passed",
+      "elapsed_seconds": 1.246
+    },
+    {
+      "id": "required-gate",
+      "test": "test_required_gate_cannot_be_overridden_by_model_assessment",
+      "property": "Caller satisfaction cannot override a failed required check",
+      "status": "passed",
+      "elapsed_seconds": 0.8
+    },
+    {
+      "id": "waiting-input",
+      "test": "test_unknown_parameters_have_durable_waiting_input_and_resume",
+      "property": "Incomplete domain preparation retains the Run and can be resumed",
+      "status": "passed",
+      "elapsed_seconds": 0.934
+    },
+    {
+      "id": "interpretation-history",
+      "test": "test_two_revisions_preserve_intent_policy_budget_and_history",
+      "property": "Two interpretation revisions preserve original intent and cumulative budget",
+      "status": "passed",
+      "elapsed_seconds": 0.663
+    },
+    {
+      "id": "immutable-gate",
+      "test": "test_pinned_gate_cannot_be_weakened_by_revision",
+      "property": "A revised interpretation cannot weaken a pinned gate",
+      "status": "passed",
+      "elapsed_seconds": 0.454
+    },
+    {
+      "id": "snapshot-binding",
+      "test": "test_new_snapshot_retains_old_measurements_without_reusing_gate_pass",
+      "property": "Old facts persist without passing gates for a new submitted subject",
+      "status": "passed",
+      "elapsed_seconds": 0.827
+    },
+    {
+      "id": "caller-provenance",
+      "test": "test_model_note_cannot_claim_measurement_provenance",
+      "property": "Caller notes and source labels cannot create verifier facts",
+      "status": "passed",
+      "elapsed_seconds": 0.405
+    },
+    {
+      "id": "host-reset",
+      "test": "test_structured_activity_and_logical_task_refs_survive_host_reset",
+      "property": "Activity, assumptions and task relationships survive a fresh caller instance",
+      "status": "passed",
+      "elapsed_seconds": 1.017
+    },
+    {
+      "id": "check-revision",
+      "test": "test_check_revision_keeps_old_facts_but_requires_new_measurement",
+      "property": "A new check revision cannot inherit the old revision's pass",
+      "status": "passed",
+      "elapsed_seconds": 1.564
+    },
+    {
+      "id": "partial-observation",
+      "test": "test_partial_measurements_survive_later_verifier_exception",
+      "property": "Earlier measurements survive a later adapter error",
+      "status": "passed",
+      "elapsed_seconds": 1.09
+    },
+    {
+      "id": "worker-kill",
+      "test": "test_real_worker_kill_retains_completed_measurement",
+      "property": "A real killed worker retains completed checkpoints without publishing final success",
+      "status": "passed",
+      "elapsed_seconds": 1.619
+    },
+    {
+      "id": "domain-port",
+      "test": "test_other_domain_module_can_be_injected_without_core_changes",
+      "property": "A trusted test module can replace Domain behavior without Core edits",
+      "status": "passed",
+      "elapsed_seconds": 0.741
+    },
+    {
+      "id": "strict-compatibility",
+      "test": "test_strict_policy_still_gates_registered_probes",
+      "property": "Explicit strict policy continues to require every registered check",
+      "status": "passed",
+      "elapsed_seconds": 0.985
+    },
+    {
+      "id": "budget-handoff",
+      "test": "test_budget_handoff_can_preserve_final_uncertainty",
+      "property": "A budget handoff can close with a final untrusted assessment and no invented evidence",
+      "status": "passed",
+      "elapsed_seconds": 0.405
+    },
+    {
+      "id": "v1-history",
+      "test": "test_v1_request_keys_and_records_remain_readable",
+      "property": "Old strict request fingerprints and stored records remain readable without automatic execution",
+      "status": "passed",
+      "elapsed_seconds": 0.389
+    },
+    {
+      "id": "run-reference-isolation",
+      "test": "test_foreign_measurement_cannot_be_cited_by_another_run",
+      "property": "One Run cannot cite another Run's verifier observations",
+      "status": "passed",
+      "elapsed_seconds": 1.194
+    },
+    {
+      "id": "cli-tool-roundtrip",
+      "test": "test_cli_tool_roundtrip_restores_exploration_and_closeout",
+      "property": "The existing agent-tool CLI can prepare, revise, measure, assess and close with separate meanings",
+      "status": "passed",
+      "elapsed_seconds": 7.164
+    },
+    {
+      "id": "activity-relationship",
+      "test": "test_hypothesis_decision_revision_and_reported_task_state_are_linked",
+      "property": "Hypotheses, observations, decisions, interpretation revisions and reported task states retain explicit relationships",
+      "status": "passed",
+      "elapsed_seconds": 0.967
+    },
+    {
+      "id": "measure-before-criteria",
+      "test": "test_exploratory_measurement_can_precede_final_criteria",
+      "property": "A known input scope can be measured while final criteria are unknown, then refined within the same Run",
+      "status": "passed",
+      "elapsed_seconds": 0.998
+    },
+    {
+      "id": "dynamic-timeout",
+      "test": "test_dynamic_check_timeout_covers_new_and_revised_commands",
+      "property": "Added and revised command timeouts contribute to the owned Job deadline",
+      "status": "passed",
+      "elapsed_seconds": 1.826
+    },
+    {
+      "id": "run-deadline-cap",
+      "test": "test_dynamic_timeout_remains_capped_by_run_deadline",
+      "property": "Dynamic check timeouts cannot extend the Run deadline",
+      "status": "passed",
+      "elapsed_seconds": 0.663
+    },
+    {
+      "id": "terminal-state-priority",
+      "test": "test_waiting_input_never_masks_blocked_or_closed_state",
+      "property": "Unanswered questions do not mask deadline or budget handoff and closure",
+      "status": "passed",
+      "elapsed_seconds": 0.764
+    },
+    {
+      "id": "active-measurement-state",
+      "test": "test_waiting_input_reports_active_verification",
+      "property": "Exploratory measurement state stays visible while Domain questions remain",
+      "status": "passed",
+      "elapsed_seconds": 0.855
+    },
+    {
+      "id": "question-patch",
+      "test": "test_question_patch_preserves_omitted_and_clears_explicit_questions",
+      "property": "Question omission preserves caller uncertainty and an explicit empty list resolves it",
+      "status": "passed",
+      "elapsed_seconds": 0.796
+    },
+    {
+      "id": "legacy-question-shape",
+      "test": "test_legacy_structured_domain_questions_do_not_break_revision",
+      "property": "Historical structured Domain questions remain readable and revisions separate caller questions",
+      "status": "passed",
+      "elapsed_seconds": 0.527
+    },
+    {
+      "id": "completion-snapshot-rule",
+      "test": "test_exploratory_completion_honors_snapshot_without_forcing_assessment",
+      "property": "Completion enforces the declared snapshot rule without creating mandatory assessment or advisory gates",
+      "status": "passed",
+      "elapsed_seconds": 0.569
+    },
+    {
+      "id": "capture-concurrency",
+      "test": "test_capture_allows_another_run_to_checkpoint",
+      "property": "Snapshot copying does not block a different Run from checkpointing measurements",
+      "status": "passed",
+      "elapsed_seconds": 1.264
+    },
+    {
+      "id": "submit-idempotency-race",
+      "test": "test_concurrent_submit_replays_one_candidate_and_one_action",
+      "property": "Concurrent identical submissions return one candidate and consume one action",
+      "status": "passed",
+      "elapsed_seconds": 0.431
+    },
+    {
+      "id": "submission-rollback",
+      "test": "test_failed_submission_commit_cleans_unpublished_snapshot",
+      "property": "Persistence failure rolls back the Run and cleans the uncommitted snapshot",
+      "status": "passed",
+      "elapsed_seconds": 0.394
+    },
+    {
+      "id": "scope-revalidation",
+      "test": "test_scope_revision_requires_retiring_incompatible_probe",
+      "property": "An input scope revision cannot silently retain an incompatible probe",
+      "status": "passed",
+      "elapsed_seconds": 1.148
+    },
+    {
+      "id": "profile-revalidation",
+      "test": "test_structural_revision_cannot_keep_command_probe",
+      "property": "Structural mode cannot retain an execution probe",
+      "status": "passed",
+      "elapsed_seconds": 1.263
+    },
+    {
+      "id": "domain-check-reactivation",
+      "test": "test_domain_check_reactivation_is_monotonic",
+      "property": "Domain-generated check reactivation preserves monotonic revisions",
+      "status": "passed",
+      "elapsed_seconds": 0.645
+    },
+    {
+      "id": "probe-reactivation",
+      "test": "test_retired_probe_reactivation_keeps_measurement_history",
+      "property": "Explicit probe retirement preserves facts and reactivation requires the current revision",
+      "status": "passed",
+      "elapsed_seconds": 1.084
+    },
+    {
+      "id": "gate-retirement-denied",
+      "test": "test_required_probe_cannot_be_retired_or_removed_by_scope",
+      "property": "Required gates survive attempted retirement and incompatible scope changes",
+      "status": "passed",
+      "elapsed_seconds": 0.609
+    },
+    {
+      "id": "late-spawn-closed",
+      "test": "test_late_spawn_failure_does_not_change_closed_run",
+      "property": "Late spawn failure cannot rewrite a closed Run",
+      "status": "passed",
+      "elapsed_seconds": 0.607
+    },
+    {
+      "id": "late-spawn-new-job",
+      "test": "test_cancel_and_late_spawn_failure_cannot_clear_new_job",
+      "property": "Late spawn failure cannot clear a newer Job owner",
+      "status": "passed",
+      "elapsed_seconds": 0.981
+    },
+    {
+      "id": "cancel-and-retry",
+      "test": "test_cancel_running_job_rejects_late_measurement_and_allows_retry",
+      "property": "Job cancellation preserves completed facts and rejects late measurements",
+      "status": "passed",
+      "elapsed_seconds": 1.2
+    },
+    {
+      "id": "paginated-recovery",
+      "test": "test_paginated_recovery_survives_run_updates_and_preserves_gates",
+      "property": "A new caller can discover Runs, recover summaries and page exact measurement history",
+      "status": "passed",
+      "elapsed_seconds": 1.282
+    },
+    {
+      "id": "summary-integrity",
+      "test": "test_summary_checks_completion_record_integrity",
+      "property": "Recovery summaries validate completion record integrity",
+      "status": "passed",
+      "elapsed_seconds": 0.401
+    },
+    {
+      "id": "capture-recovery",
+      "test": "test_cleanup_quarantines_only_unlocked_abandoned_staging",
+      "property": "Recovery retains abandoned captures without moving live captures or published Candidates",
+      "status": "passed",
+      "elapsed_seconds": 0.408
+    },
+    {
+      "id": "doctor-assurance",
+      "test": "test_doctor_does_not_claim_sandbox_without_probe",
+      "property": "Environment discovery alone does not claim Sandbox execution readiness",
+      "status": "passed",
+      "elapsed_seconds": 0.082
+    },
+    {
+      "id": "cli-recovery",
+      "test": "test_cli_recovery_tools_roundtrip",
+      "property": "The actual CLI supports discovery, recovery, history and closure",
+      "status": "passed",
+      "elapsed_seconds": 11.097
+    },
+    {
+      "id": "checkout-launcher",
+      "test": "test_checkout_launcher_works_from_other_directory",
+      "property": "The checkout launcher works from a foreign directory with Unicode and spaces in the state path",
+      "status": "passed",
+      "elapsed_seconds": 0.665
+    },
+    {
+      "id": "stable-domain-checks",
+      "test": "test_reordering_and_insertion_preserve_check_identity_and_gate",
+      "property": "Reordering and insertion preserve existing check references and gate identity",
+      "status": "passed",
+      "elapsed_seconds": 0.699
+    },
+    {
+      "id": "named-checks",
+      "test": "test_explicit_check_names_and_ambiguous_defaults",
+      "property": "Named checks resolve ambiguous criteria without weakening a gate",
+      "status": "passed",
+      "elapsed_seconds": 0.587
+    },
+    {
+      "id": "explicit-deferred-gates",
+      "test": "test_deferred_gate_is_explicit_and_typos_are_rejected",
+      "property": "Unknown gates are rejected unless their delayed definition is declared",
+      "status": "passed",
+      "elapsed_seconds": 1.453
+    },
+    {
+      "id": "provenance-and-approval",
+      "test": "test_policy_approval_claim_and_check_generator_stay_distinct",
+      "property": "Authorship, Domain generation and unverified approval claims stay separate",
+      "status": "passed",
+      "elapsed_seconds": 0.441
+    },
+    {
+      "id": "unverified-resolution",
+      "test": "test_unverified_closure_has_unambiguous_resolution",
+      "property": "Unverified closure is not presented as measurement success",
+      "status": "passed",
+      "elapsed_seconds": 0.568
+    },
+    {
+      "id": "bound-check-set",
+      "test": "test_dynamic_check_set_and_single_copy_measurements",
+      "property": "Dynamic checks change the execution set hash while reports are stored only once",
+      "status": "passed",
+      "elapsed_seconds": 1.734
+    },
+    {
+      "id": "measurement-reference-integrity",
+      "test": "test_missing_measurement_cannot_satisfy_result_reference",
+      "property": "Missing referenced facts invalidate a verifier result",
+      "status": "passed",
+      "elapsed_seconds": 0.945
+    },
+    {
+      "id": "domain-implementation-identity",
+      "test": "test_external_domain_changes_are_detected_with_same_revision",
+      "property": "Domain implementation or configuration drift is detected despite the same revision label",
+      "status": "passed",
+      "elapsed_seconds": 1.043
+    },
+    {
+      "id": "read-write-separation",
+      "test": "test_pure_reader_does_not_block_writer_and_sees_committed_snapshot",
+      "property": "Read-only recovery queries proceed during an uncommitted writer transaction",
+      "status": "passed",
+      "elapsed_seconds": 0.422
+    },
+    {
+      "id": "summary-size",
+      "test": "test_summary_size_does_not_scale_with_measurement_bodies",
+      "property": "Summary output stays small across repeated measurements with substantial content",
+      "status": "passed",
+      "elapsed_seconds": 6.383
+    },
+    {
+      "id": "legacy-job-history",
+      "test": "test_historical_aggregate_results_remain_readable",
+      "property": "Historical embedded observation results remain readable without rewriting",
+      "status": "passed",
+      "elapsed_seconds": 1.01
+    },
+    {
+      "id": "cli-json-input",
+      "test": "test_cli_json_sources_and_default_summary",
+      "property": "CLI stdin and explicit inline JSON work, source errors are actionable, and default status is compact",
+      "status": "passed",
+      "elapsed_seconds": 5.861
+    },
+    {
+      "id": "summary-reference-integrity",
+      "test": "test_default_job_summary_validates_observation_references",
+      "property": "The default agent-facing Job summary validates every referenced measurement",
+      "status": "passed",
+      "elapsed_seconds": 0.822
+    },
+    {
+      "id": "closed-reference-integrity",
+      "test": "test_closed_resume_validates_referenced_measurements",
+      "property": "A closed Run cannot summarize a passing result after canonical measurements are missing",
+      "status": "passed",
+      "elapsed_seconds": 1.104
+    },
+    {
+      "id": "assessment-citation-binding",
+      "test": "test_assessment_classifies_contextual_observation_bindings",
+      "property": "Assessment citations disclose whether they bind the current subject, interpretation and check set",
+      "status": "passed",
+      "elapsed_seconds": 0.841
+    },
+    {
+      "id": "terminal-request-idempotency",
+      "test": "test_persisted_budget_transition_replays_the_same_error",
+      "property": "A persisted budget transition replays the same error after caller restart",
+      "status": "passed",
+      "elapsed_seconds": 0.407
+    },
+    {
+      "id": "skill-copy-restart",
+      "test": "test_installed_copy_and_fresh_process_resume_the_same_state",
+      "property": "The copied Skill helper works outside the checkout and restores the same Core Run in a new process",
+      "status": "passed",
+      "elapsed_seconds": 2.561
+    },
+    {
+      "id": "skill-state-loss",
+      "test": "test_missing_state_is_not_reinitialized_for_resume_or_discovery",
+      "property": "Missing caller state is reported instead of silently creating an empty replacement store",
+      "status": "passed",
+      "elapsed_seconds": 0.013
+    },
+    {
+      "id": "skill-run-selection",
+      "test": "test_discovery_never_selects_the_newest_run",
+      "property": "Discovery retains multiple matching Runs without picking a task",
+      "status": "passed",
+      "elapsed_seconds": 3.12
+    },
+    {
+      "id": "skill-context-binding",
+      "test": "test_context_mismatch_never_applies_mutation",
+      "property": "The caller helper checks workspace and Domain before forwarding a Run mutation",
+      "status": "passed",
+      "elapsed_seconds": 3.294
+    },
+    {
+      "id": "skill-unknown-outcome",
+      "test": "test_timeout_does_not_automatically_retry_or_claim_verification_failed",
+      "property": "A lost CLI response is an unknown outcome rather than an automatic new attempt or failed measurement",
+      "status": "passed",
+      "elapsed_seconds": 0.025
+    },
+    {
+      "id": "skill-repair-history",
+      "test": "test_failure_repair_resubmission_and_closeout_are_preserved",
+      "property": "The real caller CLI preserves failed measurement, repaired Candidate, remeasurement and explicit closeout in one Run",
+      "status": "passed",
+      "elapsed_seconds": 15.904
+    },
+    {
+      "id": "configured-acceptance",
+      "test": "test_configured_policy_compiles_mandatory_checks_and_separates_authority",
+      "property": "Domain compiles configured acceptance separately from caller authorship and unproven approval",
+      "status": "passed",
+      "elapsed_seconds": 0.445
+    },
+    {
+      "id": "acceptance-bundle-pinning",
+      "test": "test_pinned_tests_ignore_changed_workspace_and_registry_copies",
+      "property": "Workspace and registry edits after start cannot replace captured acceptance tests",
+      "status": "passed",
+      "elapsed_seconds": 1.831
+    },
+    {
+      "id": "acceptance-exploration-separation",
+      "test": "test_exploratory_failure_does_not_change_acceptance_or_disappear",
+      "property": "Exploratory failures remain facts without altering mandatory acceptance",
+      "status": "passed",
+      "elapsed_seconds": 1.373
+    },
+    {
+      "id": "acceptance-scope-pinning",
+      "test": "test_revise_cannot_replace_acceptance_and_can_extend_inputs",
+      "property": "Exploration extends inputs without weakening configured command checks",
+      "status": "passed",
+      "elapsed_seconds": 0.769
+    },
+    {
+      "id": "linked-policy-revision",
+      "test": "test_policy_replay_and_linked_revision_preserve_old_bundle",
+      "property": "New policy Runs link their predecessor while retries retain the original policy",
+      "status": "passed",
+      "elapsed_seconds": 0.853
+    },
+    {
+      "id": "acceptance-corruption",
+      "test": "test_bundle_corruption_is_not_accepted",
+      "property": "Captured test corruption fails closed before submission",
+      "status": "passed",
+      "elapsed_seconds": 0.44
+    },
+    {
+      "id": "requirement-evidence-consistency",
+      "test": "test_file_only_mapping_cannot_claim_command_requirement",
+      "property": "A Domain command requirement cannot be represented by file-only evidence",
+      "status": "passed",
+      "elapsed_seconds": 0.171
+    },
+    {
+      "id": "baseline-improvement",
+      "test": "test_baseline_pairing_does_not_gate_on_original_failure",
+      "property": "Paired baseline failure and Candidate success are measured without gating the Candidate on its original",
+      "status": "passed",
+      "elapsed_seconds": 1.572
+    },
+    {
+      "id": "baseline-regression",
+      "test": "test_baseline_failure_cannot_satisfy_current_candidate_gate",
+      "property": "Original passes cannot satisfy a regressed Candidate's mandatory gate",
+      "status": "passed",
+      "elapsed_seconds": 1.345
+    },
+    {
+      "id": "baseline-unavailable",
+      "test": "test_missing_baseline_and_unavailable_command_do_not_show_improvement",
+      "property": "Missing originals and unavailable command measurements do not become improvement claims",
+      "status": "passed",
+      "elapsed_seconds": 1.901
+    },
+    {
+      "id": "bound-caller-identity",
+      "test": "test_binding_reduces_context_input_but_rejects_changed_store_and_intent",
+      "property": "Caller reference files validate the authoritative store, intent and policy",
+      "status": "passed",
+      "elapsed_seconds": 2.87
+    },
+    {
+      "id": "saved-request-replay",
+      "test": "test_serialized_request_roundtrip_and_payload_conflict",
+      "property": "Saved exact requests replay and different payloads with the same ID are rejected",
+      "status": "passed",
+      "elapsed_seconds": 6.068
+    },
+    {
+      "id": "mechanical-checkpoint",
+      "test": "test_checkpoint_is_mechanical_idempotent_and_does_not_finish",
+      "property": "One checkpoint submits and verifies without assessment, automatic repair or closeout",
+      "status": "passed",
+      "elapsed_seconds": 8.501
+    },
+    {
+      "id": "checkpoint-response-loss",
+      "test": "test_checkpoint_response_loss_replays_original_submission",
+      "property": "Response loss preserves the original snapshot despite later workspace edits",
+      "status": "passed",
+      "elapsed_seconds": 8.095
+    },
+    {
+      "id": "checkpoint-superseded",
+      "test": "test_checkpoint_refuses_superseding_candidate",
+      "property": "A concurrent submission cannot replace the subject of a checkpoint's verify request",
+      "status": "passed",
+      "elapsed_seconds": 4.75
+    },
+    {
+      "id": "bounded-wait",
+      "test": "test_wait_window_does_not_cancel_restart_or_call_a_model",
+      "property": "An observation deadline leaves the specific running job intact",
+      "status": "passed",
+      "elapsed_seconds": 1.703
+    },
+    {
+      "id": "caller-serialization",
+      "test": "test_transport_lock_serializes_mutations_without_blocking_reads",
+      "property": "Helper mutations serialize per Run while recovery reads remain available",
+      "status": "passed",
+      "elapsed_seconds": 3.314
+    }
+  ],
+  "limitations": [
+    "Scripted caller conformance is not model task quality or comparative performance.",
+    "Worker-kill uses a controlled blocking adapter for the second stage.",
+    "The real namespace command test is a separate opt-in test."
+  ]
+}

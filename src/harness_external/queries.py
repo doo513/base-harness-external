@@ -11,7 +11,7 @@ def page_bounds(offset, limit):
 def job_view(job):
     return {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
             "deadline_at", "completed_checks", "total_checks", "error", "check_set_hash", "candidate_hash")},
-            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash")} if job.get("result") else None}
+            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison")} if job.get("result") else None}
 
 
 def job_summary(api, run_id, job_id):
@@ -72,8 +72,11 @@ def resume(api, run_id):
                 "domain_questions": run["domain_questions"], "domain_preparation": run["domain_preparation"],
                 "limits": run["limits"], "usage": {"actions": run["actions"], "verification_attempts": run["verification_attempts"]},
                 "candidate": {key: run["candidate"][key] for key in ("candidate_id", "candidate_hash", "subject")} if run["candidate"] else None,
+                "baseline": {key: run["baseline"][key] for key in ("candidate_id", "candidate_hash", "subject")} if run.get("baseline") else None,
+                "predecessor": run.get("predecessor"),
                 "checks": [{"check_id": c["check_id"], "ref": c["ref"], "kind": c["spec"]["parameters"]["kind"],
-                            "gated": c["check_id"] in run["gate_bindings"]} for c in checks],
+                            "gated": c["check_id"] in run["gate_bindings"],
+                            "role": "mandatory" if c["check_id"] in run["gate_bindings"] else "exploratory"} for c in checks],
                 "measurement": run["verification"], "assessment": semantics.assessment_view(run),
                 "gates": gate_results,
                 "unresolved_work": [t["task_id"] for t in run["logical_tasks"] if t["state"] != "settled"],

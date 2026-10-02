@@ -33,7 +33,9 @@ def read_file(root: Path, relative: str) -> tuple[bytes, bool]:
     return data, bool(before.st_mode & 0o111)
 
 
-def capture(workspace: Path, inputs: list[str], directory: Path) -> dict:
+def capture(workspace: Path, inputs: list[str], directory: Path, *, overlays: dict[str, Path] | None = None) -> dict:
+    overlays = overlays or {}
+    require(set(overlays) <= set(inputs), "SNAPSHOT_SCOPE", "Pinned overlay files must be declared inputs")
     candidate_id = "candidate_" + uuid.uuid4().hex
     temporary = directory / (".capture_" + uuid.uuid4().hex)
     payload = temporary / "payload"
@@ -42,7 +44,7 @@ def capture(workspace: Path, inputs: list[str], directory: Path) -> dict:
     total = 0
     try:
         for relative in inputs:
-            data, execute = read_file(workspace, relative)
+            data, execute = read_file(overlays.get(relative, workspace), relative)
             total += len(data)
             require(total <= MAX_BYTES, "SNAPSHOT_TOO_LARGE", "Combined input exceeds the v5 10 MiB limit")
             target = payload / relative
@@ -57,7 +59,7 @@ def capture(workspace: Path, inputs: list[str], directory: Path) -> dict:
         # Detect ordinary concurrent editor changes before sealing the copied set.
         # This is not a filesystem-wide atomic snapshot or a hostile-user barrier.
         for entry in entries:
-            current, mode = read_file(workspace, entry["path"])
+            current, mode = read_file(overlays.get(entry["path"], workspace), entry["path"])
             require(hashlib.sha256(current).hexdigest() == entry["sha256"] and mode == executable[entry["path"]],
                     "INPUT_CHANGED", "Workspace changed during snapshot capture; submit again with a new request ID")
         manifest = {"kind": "candidate", "files": entries, "dependencies": []}
