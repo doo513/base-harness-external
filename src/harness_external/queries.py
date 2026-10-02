@@ -4,6 +4,9 @@ from .errors import integer, require
 from harness.common import canonical_hash
 
 
+RECENT_JOB_LIMIT = 5
+
+
 def page_bounds(offset, limit):
     return integer(offset, 0, 2**31 - 1, "offset"), integer(limit, 1, 100, "limit")
 
@@ -57,11 +60,11 @@ def resume(api, run_id):
         latest = run["interpretations"][-1]
         checks = semantics.current_checks(run)
         jobs = []
-        for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid DESC", (run_id,)):
+        for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid DESC LIMIT ?",
+                                      (run_id, RECENT_JOB_LIMIT)):
             job = api.store.job(connection, row[0])
             api.store.validate_result(connection, job)
-            if len(jobs) < 5:
-                jobs.append(job_view(job))
+            jobs.append(job_view(job))
         counts = {name: len(run[key]) for name, key in COLLECTIONS.items()}
         counts["measurements"] = connection.execute("SELECT count(*) FROM measurements WHERE run_id=?", (run_id,)).fetchone()[0]
         counts["jobs"] = connection.execute("SELECT count(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]

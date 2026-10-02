@@ -436,10 +436,11 @@ class Harness:
             require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate checks cannot be revised")
             require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
             parameters = self._module(run).normalize_check(copy.deepcopy(proposal["parameters"]), run["contract"])
-            author = semantics.provenance(proposal.get("provenance"))["declared_author"]
+            source_provenance = semantics.provenance(proposal.get("provenance"))
             created = semantics.check_record(run_id, key, semantics.next_check_revision(run, key), parameters, latest,
                                              role="mandatory" if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"] else "exploratory",
-                                             author=author, generator={"kind": "domain_normalization", "module": run["domain_module"]})
+                                             author=source_provenance["declared_author"], approval_claim=source_provenance["approval"],
+                                             generator={"kind": "domain_normalization", "module": run["domain_module"]})
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]

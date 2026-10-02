@@ -46,7 +46,8 @@ def provenance(value=None):
 
 
 def check_record(run_id: str, check_id: str, revision: int, parameters: dict, interpretation_ref: dict, *,
-                 origin="caller_proposal", author="unknown", generator=None, role="exploratory", authority=None) -> dict:
+                 origin="caller_proposal", author="unknown", generator=None, role="exploratory", authority=None,
+                 approval_claim=None) -> dict:
     named(check_id)
     definition_key = parameters.get("check_key") if origin == "domain_preparation" else None
     parameters = parameters_only(parameters)
@@ -59,6 +60,8 @@ def check_record(run_id: str, check_id: str, revision: int, parameters: dict, in
     return record("check:" + run_id + ":" + check_id, revision,
                   {"check_id": check_id, "active": True, "origin": origin, "trust": "untrusted", "interpretation_ref": interpretation_ref,
                    "role": role, "authority": authority or {"source": "caller_proposal", "approval_status": "not_established"},
+                   "approval_claim": copy.deepcopy(approval_claim if approval_claim is not None else
+                                                    {"status": "not_provided", "claimed_reference": None, "authenticated_by": None}),
                    "definition_key": definition_key, "authored_by": {"declared_kind": author,
                        "trust": "configuration_claim" if authority and authority.get("source") == "operator_configuration" else "caller_claim"},
                    "generated_by": generator or {"kind": "domain_normalization"}, "spec": spec})
@@ -96,6 +99,7 @@ def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=No
                                    author=acceptance_binding["authority"]["authorship"]["criteria"] if configured else sources["declared_author"],
                                    role="mandatory" if mandatory else "exploratory",
                                    authority=acceptance_binding["authority"] if configured else None,
+                                   approval_claim=None if configured else sources["approval"],
                                    generator={"kind": "domain", "module": module}))
     require(len({c["check_id"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS", "Duplicate check IDs")
     gate_ids = [item["check_id"] for item in checks] if mode == "strict" else list(required_checks or []) + list(deferred_checks or [])
@@ -205,9 +209,11 @@ def sync_checks(run, compiled_checks: list, interpretation_ref: dict):
             continue
         require(key not in run["gate_bindings"], "GATE_POLICY_CHANGED", "Pinned gate check cannot be weakened or changed by interpretation revision")
         require(len(run["check_records"]) < 256, "CHECK_LIMIT", "Check revision limit reached")
+        proposal_provenance = run["policy"].get("caller_proposal_provenance", run["policy"].get("provenance", {}))
         created = check_record(run["run_id"], key, next_check_revision(run, key), {**item, "check_key": definition}, interpretation_ref,
-                               origin="domain_preparation", author=run["policy"].get("caller_proposal_provenance", run["policy"].get("provenance", {})).get("declared_author", "unknown"),
+                               origin="domain_preparation", author=proposal_provenance.get("declared_author", "unknown"),
                                role="mandatory" if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks" else "exploratory",
+                               approval_claim=proposal_provenance.get("approval"),
                                generator={"kind": "domain", "module": run["domain_module"]})
         run["check_records"].append(created)
         if key in run["policy"]["required_check_ids"] or run["policy"]["rule"] == "all_registered_checks":

@@ -50,6 +50,14 @@ class DomainRegistry:
 
     def identity(self, domain_id):
         module = self.resolve(domain_id)
+        identity_files = tuple(getattr(module, "identity_files", ()))
+        identity_file_ids = getattr(module, "identity_file_ids", None)
+        if identity_file_ids is None:
+            identity_file_ids = tuple(str(index) for index in range(len(identity_files)))
+        require(isinstance(identity_file_ids, (list, tuple)) and len(identity_file_ids) == len(identity_files)
+                and all(isinstance(value, str) and 0 < len(value) <= 128 for value in identity_file_ids)
+                and len(set(identity_file_ids)) == len(identity_file_ids),
+                "DOMAIN_IDENTITY_UNAVAILABLE", "identity_file_ids must uniquely name each Domain identity file")
         functions = [module.prepare, module.normalize_check]
         if callable(getattr(module, "prepare_acceptance", None)):
             functions.append(module.prepare_acceptance)
@@ -57,17 +65,22 @@ class DomainRegistry:
         for function in functions:
             target = getattr(function, "__func__", function)
             require(hasattr(target, "__code__"), "DOMAIN_IDENTITY_UNAVAILABLE", "Domain methods must expose Python implementation identity")
-            code[target.__name__] = canonical_hash(code_identity(target.__code__))
+            method_id = module.domain_id + ":" + target.__qualname__
+            code[method_id] = canonical_hash(code_identity(target.__code__))
             filename = inspect.getsourcefile(target)
             if filename and Path(filename).is_file():
-                sources[str(Path(filename).resolve())] = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
-        for filename in getattr(module, "identity_files", ()):
+                sources["domain-method:" + method_id] = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+        for logical_id, filename in zip(identity_file_ids, identity_files):
             path = Path(filename).resolve(strict=True)
-            sources[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+            sources["identity-file:" + logical_id] = hashlib.sha256(path.read_bytes()).hexdigest()
         config = getattr(module, "identity_config", None)
         if config is None:
-            config = {"instance": vars(module), "class": {key: value for key, value in vars(type(module)).items()
-                       if not key.startswith("__") and not callable(value) and not isinstance(value, (property, classmethod, staticmethod))}}
+            config = {"instance": {key: value for key, value in vars(module).items()
+                                    if key not in {"identity_files", "identity_file_ids"}},
+                      "class": {key: value for key, value in vars(type(module)).items()
+                                if key not in {"identity_files", "identity_file_ids"} and not key.startswith("__") and not callable(value)
+                                and not isinstance(value, (property, classmethod, staticmethod))},
+                      "identity_file_ids": list(identity_file_ids)}
         try:
             configuration_hash = canonical_hash(config)
         except (TypeError, ValueError) as error:
