@@ -49,7 +49,7 @@ class DomainQualityFixes(unittest.TestCase):
             original = api.store.job
             visited = []
 
-                def counted(connection, job_id):
+            def counted(connection, job_id):
                 visited.append(job_id)
                 return original(connection, job_id)
 
