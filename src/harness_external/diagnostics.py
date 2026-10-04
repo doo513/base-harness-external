@@ -11,11 +11,14 @@ from .worker import execute_sandbox
 
 
 def doctor(store, *, sandbox=False):
+    from .identity import deployment_identity
     bridge = Path(__file__).resolve().parents[2] / "runtime/script/external-harness-sandbox.ts"
     bun = shutil.which(os.environ.get("BUN", "bun"))
     with store.transaction() as connection:
         json_available = connection.execute("SELECT json_extract('{\"ok\":1}', '$.ok')").fetchone()[0] == 1
-    result = {"python": sys.version.split()[0], "executable": sys.executable, "platform": platform.platform(),
+    result = {"capabilities": {"invoke": True, "context": "harness-context-v1", "storage": "run-store-v2"},
+              "deployment": deployment_identity(),
+              "python": sys.version.split()[0], "executable": sys.executable, "platform": platform.platform(),
               "state_directory": str(store.root), "state_store": "available", "sqlite_json": json_available,
               "structural_available": json_available, "bun": bun, "sandbox_adapter": str(bridge) if bridge.is_file() else None,
               "command_prerequisites_present": bool(bun and bridge.is_file()), "sandbox_probe": "not_requested",

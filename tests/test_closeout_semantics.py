@@ -298,7 +298,11 @@ def test_v1_request_keys_and_records_remain_readable(setup):
                     "check_records", "assessments", "activity", "logical_tasks", "gate_bindings", "domain_questions"):
             saved.pop(key)
         saved.pop("domain_preparation")
-        connection.execute("UPDATE runs SET data=? WHERE run_id=?", (canonical_bytes(saved).decode(), run_id))
+        saved.pop("storage_schema", None)
+        # Seed a genuine legacy row; newly-created Runs use the v2 journal.
+        for table in ("run_heads", "run_records", "run_events"):
+            connection.execute("DELETE FROM " + table + " WHERE run_id=?", (run_id,))
+        connection.execute("INSERT INTO runs VALUES(?,?)", (run_id, canonical_bytes(saved).decode()))
     assert api.start(domain_id="develop", goal="Original goal", workspace=str(workspace), parameters=params, request_id="legacy") == result
     restored = Harness(api.store.root).status(run_id)["run"]
     assert restored["semantic_projection_origin"] == "legacy_strict_projection"

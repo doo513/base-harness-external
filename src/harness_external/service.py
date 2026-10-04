@@ -8,8 +8,8 @@ import time
 import uuid
 import copy
 import tempfile
+from contextlib import contextmanager
 
-from harness import measurement_v5, common
 from harness.common import canonical_bytes, canonical_hash, redact
 from . import API_VERSION, ASSURANCE
 from .errors import HarnessError, fields, integer, limits, require
@@ -19,24 +19,10 @@ from . import semantics
 from .registry import builtin_registry
 from . import queries, maintenance
 from . import acceptance, evidence
+from .identity import verifier_identity
 
 
 LEASE_SECONDS = 20
-
-
-def verifier_identity() -> dict:
-    paths = [Path(measurement_v5.__file__), Path(common.__file__), Path(__file__).with_name("domain.py"), Path(__file__),
-             Path(__file__).with_name("worker.py"), Path(__file__).with_name("snapshots.py"), Path(__file__).with_name("store.py"),
-             Path(__file__).with_name("develop_manifest.json"), Path(__file__).with_name("errors.py"),
-             Path(__file__).with_name("semantics.py"), Path(__file__).with_name("registry.py")]
-    paths += [Path(queries.__file__), Path(maintenance.__file__), Path(acceptance.__file__), Path(evidence.__file__)]
-    bridge = Path(__file__).resolve().parents[2] / "runtime" / "script" / "external-harness-sandbox.ts"
-    sandbox = bridge.parent.parent / "packages" / "security" / "src" / "sandbox.ts"
-    sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
-    for name, path in (("sandbox_bridge", bridge), ("sandbox", sandbox)):
-        sources[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "unavailable"
-    return {"id": "external-develop-measurement", "revision": "1", "measurement_protocol": 5,
-            "implementation_hash": canonical_hash(sources), "sources": sources}
 
 
 def response(**data) -> dict:
@@ -127,13 +113,36 @@ class Harness:
                 raise HarnessError("CHECK_SCOPE_CONFLICT", "Check " + item["check_id"] +
                                    " is incompatible with this interpretation; revise or retire the advisory check first (" + error.code + ")") from error
 
+    @contextmanager
+    def _read_run(self, run_id):
+        with self.store.transaction(write=False) as connection:
+            run = self.store.current(connection, run_id)
+            now = time.time()
+            expired = run["status"] == "active" and now >= run["deadline_at"]
+            if run.get("active_job"):
+                job = self.store.job(connection, run["active_job"])
+                expired = expired or (job["status"] in {"queued", "running"} and
+                                      (now > job["deadline_at"] or now - job["heartbeat_at"] > LEASE_SECONDS))
+            if not expired:
+                yield connection, run
+                return
+        with self.store.transaction() as connection:
+            self._refresh(connection, self.store.run(connection, run_id))
+        with self.store.transaction(write=False) as connection:
+            yield connection, self.store.current(connection, run_id)
+
     def start(self, *, domain_id: str, goal: str, workspace: str, parameters: dict, request_id: str, budget: dict | None = None,
               mode: str | None = None, required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
               constraints: list[str] | None = None, provenance: dict | None = None, policy_id: str | None = None,
-              predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False):
+              predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False,
+              continuation_reason: str | None = None):
         # Request identity does not depend on mutable registry contents. A replay
         # returns the originally selected policy, even after operator revision.
         requested_mode = mode
+        require(not (continuation_reason is not None and policy_change_reason is not None), "TRANSITION_REASON", "Choose one transition reason")
+        transition_kind = "runtime_transition" if continuation_reason is not None else "policy_change"
+        if continuation_reason is not None:
+            policy_change_reason = continuation_reason
         require(type(capture_baseline) is bool, "INVALID_PARAMETERS", "capture_baseline must be boolean")
         require(mode is None or isinstance(mode, str) and mode in {"strict", "exploratory", "acceptance"},
                 "MODE_UNSUPPORTED", "Mode is strict, exploratory or configured acceptance")
@@ -169,6 +178,8 @@ class Harness:
             require(predecessor_run_id is not None and isinstance(policy_change_reason, str) and 0 < len(policy_change_reason) <= 2000,
                     "POLICY_CHANGE_LINK", "A policy-change Run needs its predecessor ID and a bounded reason")
             request.update(predecessor_run_id=predecessor_run_id, policy_change_reason=policy_change_reason)
+            if continuation_reason is not None:
+                request["continuation_reason"] = continuation_reason
         fingerprint = canonical_hash(request)
         with self.store.transaction(write=False) as connection:
             prior = self.store.replay(connection, "start", request_id, fingerprint)
@@ -218,7 +229,7 @@ class Harness:
                 overlays = {path: acceptance.bundle_payload(binding, staging) for path in binding["definition"]["bundle"]["files"]} if binding else {}
                 baseline = capture(source, contract["inputs"], staging, overlays=overlays)
             now = time.time()
-            run = {"schema_version": API_VERSION, "run_id": run_id, "workspace": str(source), "goal": goal,
+            run = {"schema_version": API_VERSION, "storage_schema": "run-store-v2", "run_id": run_id, "workspace": str(source), "goal": goal,
                    "contract": contract, "revision": 0, "status": "active", "phase": "awaiting_submission",
                    "created_at": now, "deadline_at": now + bound["timeout_seconds"], "limits": bound,
                    "actions": 0, "verification_attempts": 0, "generation": 0, "candidate": None,
@@ -229,6 +240,7 @@ class Harness:
                 run["baseline"] = baseline
             if predecessor:
                 run["predecessor"] = {"run_id": predecessor_run_id, "policy_ref": predecessor["policy"]["ref"],
+                                      "kind": transition_kind,
                                       "reason": policy_change_reason, "previous_usage": {"actions": predecessor["actions"],
                                       "verification_attempts": predecessor["verification_attempts"]},
                                       "approval": binding["authority"] if binding else {"status": "not_established"}}
@@ -331,9 +343,13 @@ class Harness:
             return result
 
     def _observations_exist(self, connection, run_id, ids):
-        require(isinstance(ids, list) and len(ids) <= 128 and len(set(ids)) == len(ids)
-                and all(isinstance(i, str) for i in ids), "OBSERVATION_REFERENCE", "Invalid observation references")
-        known = {item["observation_id"]: item for item in self.store.measurements(connection, run_id)}
+        require(isinstance(ids, list) and len(ids) <= 128 and all(isinstance(i, str) for i in ids)
+                and len(set(ids)) == len(ids), "OBSERVATION_REFERENCE", "Invalid observation references")
+        if not ids:
+            return []
+        rows = connection.execute("SELECT data FROM measurements WHERE run_id=? AND observation_id IN (" +
+                                  ",".join("?" for _ in ids) + ")", [run_id, *ids])
+        known = {item["observation_id"]: item for item in self.store._measurement_rows(rows, run_id)}
         require(set(ids) <= set(known), "OBSERVATION_REFERENCE", "Observation is not a verifier measurement owned by this Run")
         return [known[item] for item in ids]
 
@@ -659,6 +675,10 @@ class Harness:
     def resume(self, run_id):
         return response(**queries.resume(self, run_id))
 
+    def context(self, run_id, *, after=None, page=None, limit=20):
+        from .context import read
+        return response(**read(self, run_id, after=after, page=page, limit=limit))
+
     def records(self, run_id, kind, *, offset=0, limit=20, job_id=None):
         return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id))
 
@@ -667,7 +687,6 @@ class Harness:
 
     def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False, view="full"):
         require(view in {"summary", "full"}, "INVALID_VIEW", "Status view is summary or full")
-        self._refresh_for_read(run_id)
         if view == "summary":
             result = self.resume(run_id) if not job_id else response(**queries.job_summary(self, run_id, job_id))
             if check_workspace:
@@ -677,6 +696,7 @@ class Harness:
                     run = self.store.run(connection, run_id)
                     result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])
             return result
+        self._refresh_for_read(run_id)
         with self.store.transaction(write=False) as connection:
             run = self.store.run(connection, run_id)
             jobs = [decode_job[0] for decode_job in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))]

@@ -232,6 +232,33 @@ def test_serialized_request_roundtrip_and_payload_conflict(caller, tmp_path):
         helper.write_new_json(path, changed)
 
 
+def test_request_creation_is_local_and_execution_uses_one_guarded_process(caller, monkeypatch):
+    client, _, _ = caller
+    binding = bound_run(caller)
+    original = client.execute
+    calls = []
+    def counted(*args, **kwargs):
+        calls.append(args[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(client, "execute", counted)
+    envelope = client.make_request("status", {}, binding=binding)["request"]
+    assert calls == []
+    assert envelope["context"]["intent_ref"] == binding["intent_ref"]
+    assert client.call(envelope)["ok"] and calls == ["invoke"]
+
+
+def test_helper_context_first_restore_then_empty_delta(caller):
+    client, _, _ = caller
+    binding = bound_run(caller)
+    response = client.context(binding)
+    assert response["delivery"] == "full"
+    while response["next_page"]:
+        response = client.context(binding, page=response["next_page"])
+    delta = client.context(binding, after=response["next_cursor"])
+    assert delta["delivery"] == "delta" and delta["items"] == []
+    assert "next_cursor" not in binding
+
+
 def test_checkpoint_is_mechanical_idempotent_and_does_not_finish(caller):
     client, workspace, _ = caller
     binding = bound_run(caller, baseline=True)
@@ -256,8 +283,8 @@ def test_checkpoint_response_loss_replays_original_submission(caller, monkeypatc
     lost = []
     def lose_after_submit(operation, *args, **kwargs):
         result = original(operation, *args, **kwargs)
-        if operation == "submit" and not lost:
-            lost.append(result["candidate"]["candidate_hash"])
+        if operation == "invoke" and args[0]["request"]["operation"] == "checkpoint" and not lost:
+            lost.append(result["submitted_candidate_hash"])
             raise helper.ClientError("CALL_OUTCOME_UNKNOWN", "simulated lost response after commit")
         return result
     monkeypatch.setattr(client, "execute", lose_after_submit)
@@ -271,15 +298,27 @@ def test_checkpoint_response_loss_replays_original_submission(caller, monkeypatc
 
 
 def test_checkpoint_refuses_superseding_candidate(caller, monkeypatch):
+    from harness_external.dispatch import invoke
+    from harness_external.service import Harness
+    from harness_external.errors import HarnessError
     client, workspace, _ = caller
     binding = bound_run(caller)
     original = client.execute
+    api = Harness(client.config["state_dir"])
+    original_submit = api.submit
+    def supersede(*args, **kwargs):
+        submitted = original_submit(*args, **kwargs)
+        (workspace / "payload.txt").write_text("ready")
+        Harness(client.config["state_dir"]).submit(binding["run_id"], "external-submit")
+        return submitted
+    monkeypatch.setattr(api, "submit", supersede)
     def interleave(operation, *args, **kwargs):
-        result = original(operation, *args, **kwargs)
-        if operation == "submit":
-            (workspace / "payload.txt").write_text("ready")
-            assert original("submit", {"run_id": binding["run_id"]}, "external-submit")["ok"]
-        return result
+        if operation == "invoke" and args[0]["request"]["operation"] == "checkpoint":
+            try:
+                return {"ok": True, **invoke(api, args[0]["request"])}
+            except HarnessError as error:
+                return {"ok": False, "error": {"code": error.code}}
+        return original(operation, *args, **kwargs)
     monkeypatch.setattr(client, "execute", interleave)
     result = client.checkpoint(binding, "change", wait_seconds=0)
     assert not result["ok"] and result["error"]["code"] == "CANDIDATE_SUPERSEDED"
@@ -287,15 +326,22 @@ def test_checkpoint_refuses_superseding_candidate(caller, monkeypatch):
 
 
 def test_wait_window_does_not_cancel_restart_or_call_a_model(caller, monkeypatch):
+    from harness_external.dispatch import waiting
     client, _, _ = caller
     binding = bound_run(caller)
     calls = []
+    core_calls = []
+    class RunningAPI:
+        def status(self, *args, **kwargs):
+            core_calls.append("status")
+            return {"job": {"status": "running", "job_id": "controlled-job"}}
     def running(operation, arguments, *args):
         calls.append(operation)
-        return {"ok": True, "job": {"status": "running", "job_id": "controlled-job"}}
+        assert arguments["request"]["operation"] == "wait"
+        return {"ok": True, **waiting(RunningAPI(), binding["run_id"], "controlled-job", 0)}
     monkeypatch.setattr(client, "execute", running)
     result = client.wait(binding, "controlled-job", wait_seconds=0, validated=True)
-    assert result["wait_status"] == "pending" and calls == ["status"]
+    assert result["wait_status"] == "pending" and calls == ["invoke"] and core_calls == ["status"]
 
 
 def test_transport_lock_serializes_mutations_without_blocking_reads(caller):
@@ -349,14 +395,30 @@ def test_installed_copy_and_fresh_process_resume_the_same_state(caller, tmp_path
 def test_timeout_does_not_automatically_retry_or_claim_verification_failed(caller, monkeypatch):
     client, workspace, _ = caller
     calls = []
+    envelopes = []
     def timeout(argv, **options):
         calls.append(argv)
+        source = next(item.split("=", 1)[1] for item in argv if item.startswith("--request="))
+        envelopes.append(json.loads(Path(source).read_text()))
         raise subprocess.TimeoutExpired(argv, 1)
     monkeypatch.setattr(helper.subprocess, "run", timeout)
     with pytest.raises(helper.ClientError) as error:
         client.call(start_request(workspace, "keep-this-id"))
     assert error.value.code == "CALL_OUTCOME_UNKNOWN"
-    assert len(calls) == 1 and "--request-id=keep-this-id" in calls[0]
+    assert len(calls) == 1 and envelopes[0]["request_id"] == "keep-this-id"
+
+
+def test_older_core_is_reported_without_unguarded_fallback(caller, monkeypatch):
+    client, workspace, _ = caller
+    calls = []
+    def unsupported(argv, **options):
+        calls.append(argv)
+        options["stderr"].write(b"argument command: invalid choice: 'invoke' (choose from 'start', 'resume')")
+        return subprocess.CompletedProcess(argv, 2)
+    monkeypatch.setattr(helper.subprocess, "run", unsupported)
+    with pytest.raises(helper.ClientError) as error:
+        client.call(start_request(workspace))
+    assert error.value.code == "CORE_UPGRADE_REQUIRED" and len(calls) == 1
 
 
 def test_failure_repair_resubmission_and_closeout_are_preserved(caller):
@@ -404,9 +466,15 @@ def test_live_skill_client_executes_existing_sandbox(caller):
         "expectations": [{"id": "test-file", "path": "test_behavior.py", "operator": "contains", "expected": "unittest"}],
         "test_commands": [{"id": "behavior", "argv": ["python3", "-m", "unittest", "discover", "-v"], "timeout_seconds": 30}]}
     run = client.call(payload)["run_id"]
-    client.call(request(workspace, run, "submit", "submit-live"))
-    job = client.call(request(workspace, run, "verify", "verify-live"))["job_id"]
-    assert wait_job(client, workspace, run, job)["result"]["status"] == "passed"
+    binding = client.bind(run, str(workspace), "develop", workspace.parent / "live-binding.json")["binding"]
+    context = client.context(binding)
+    while context["next_page"]:
+        context = client.context(binding, page=context["next_page"])
+    verified = client.checkpoint(binding, "live-checkpoint", wait_seconds=30)
+    assert verified["wait_status"] == "terminal" and verified["job"]["result"]["status"] == "passed"
+    job = verified["job"]["job_id"]
+    delta = client.context(binding, after=context["next_cursor"])
+    assert delta["critical"]["measurement_status"] == "passed" and delta["critical"]["gate_status"] == "passed"
     facts = client.call(request(workspace, run, "records", kind="measurements", job_id=job, limit=10))["items"]
     command = next(row for row in facts if row["check_id"] == "domain.behavior")
     assert command["report"]["sandbox"]["backend"] == "namespace"

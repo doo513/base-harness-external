@@ -176,6 +176,19 @@ same-user tampering. Modules are responsible for declaring all relevant configur
 and dependencies. Historical Runs without this binding can be read and closed as
 partial/abandoned; use a new Run for continued mutation/verification.
 
+Domain identity v2 includes effective inherited JSON configuration in Python MRO
+order, with instance overrides. Computed properties are not evaluated implicitly;
+declare dynamic values in `identity_config`. The verifier execution manifest is
+separate from the diagnostic deployment source hash: presentation edits alone do
+not rebind measurements, while execution/invariant changes still require a new
+Run. `doctor` reports transport/storage capabilities and deployment identity.
+
+New Runs use `run_heads`, immutable `run_records` and ordered `run_events` in the
+same SQLite database. Current reads do not hydrate historical collections, and
+unchanged bodies are not rewritten. Measurements still have one canonical body.
+Legacy `runs.data` rows remain readable without rewriting their contracts or
+evidence. No protected certification or same-user tamper barrier is introduced.
+
 Assessment records retain the caller's cited observation IDs and add kernel-derived
 `citation_bindings`. Each binding reports whether the observation belongs to the
 current subject, interpretation and check set. A citation is `current` only when
@@ -293,6 +306,21 @@ superseded captures are cleaned up. Abrupt process/OS termination can leave stag
 files; the explicit `cleanup` command can quarantine eligible abandoned captures.
 
 ### Agent recovery tools
+
+For lossless first-session recovery and small follow-ups, use `context --run-id ID`.
+Read its `next_page` tokens to completion, then supply `--after NEXT_CURSOR` on
+later queries. Full pages and deltas reconstruct the same document; text
+substitution references remove repeated long strings without summarizing them.
+The [caller protocol](skills/harness-workflow/references/protocol.md) describes
+the decoder, pinned pagination and current critical-status banner. Omit the
+cursor after Host context loss. Old `resume`/`status` response shapes remain valid.
+
+After an execution-version change, keep using a pinned old checkout or explicitly
+close the old Run as partial/abandoned and start a new one with
+`--predecessor-run-id ID --continuation-reason TEXT`. The task identity and history
+link remain visible; passing results and baselines are not silently imported.
+Existing `--policy-change-reason` is preserved and is mutually exclusive with
+the runtime continuation reason. Never upgrade an actively executing checkout.
 
 `doctor` checks the selected state store and local prerequisites. `doctor --sandbox`
 also executes a controlled command through the real strict adapter; it exits with

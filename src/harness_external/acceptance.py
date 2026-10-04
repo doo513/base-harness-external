@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 
 from harness.common import canonical_hash
-from harness.measurement_v5 import decode
+from harness.json_codec import decode
 from .errors import fields, relative_path, require
 from .snapshots import capture, no_links, validate_candidate
 

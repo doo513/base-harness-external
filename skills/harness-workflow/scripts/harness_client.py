@@ -17,13 +17,17 @@ import time
 MAX_INPUT = 256 * 1024
 MAX_OUTPUT = 8 * 1024 * 1024
 API_VERSION = "external-harness-v2"
-MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "finish"}
+MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "finish", "checkpoint"}
 # Only CLI syntax lives here. Domain payloads and policy semantics belong to Harness.
 OPTIONS = {
     "start": {"domain": "str", "goal": "str", "workspace": "str", "mode": "str",
               "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json",
               "required_check": "repeat", "deferred_check": "repeat", "policy_id": "str",
-              "predecessor_run_id": "str", "policy_change_reason": "str", "capture_baseline": "bool"},
+              "predecessor_run_id": "str", "policy_change_reason": "str", "continuation_reason": "str", "capture_baseline": "bool"},
+    "invoke": {"request": "json"},
+    "context": {"run_id": "str", "after": "str", "page": "str", "limit": "int"},
+    "checkpoint": {"run_id": "str", "compare_baseline": "bool", "wait_seconds": "number"},
+    "wait": {"run_id": "str", "job_id": "str", "wait_seconds": "number"},
     "doctor": {"sandbox": "bool"},
     "list-runs": {"offset": "int", "limit": "int"},
     **{name: {"run_id": "str", "data": "json"} for name in ("observe", "revise", "check", "retire-check", "assess")},
@@ -36,6 +40,7 @@ OPTIONS = {
     "finish": {"run_id": "str", "outcome": "str", "summary": "str", "assessment": "json"},
 }
 REQUIRED = {
+    "invoke": {"request"}, "wait": {"run_id", "job_id"},
     "start": {"domain", "goal", "workspace", "mode", "provenance"},
     **{name: {"run_id", "data"} for name in ("observe", "revise", "check", "retire-check", "assess")},
     "cancel": {"run_id", "job_id"}, "records": {"run_id", "kind"}, "finish": {"run_id", "outcome"},
@@ -163,6 +168,9 @@ def cli_arguments(operation, arguments, json_directory=None):
         elif kind == "repeat":
             require(isinstance(value, list) and all(isinstance(item, str) for item in value), "ARGUMENTS_INVALID", f"{key} must be a string array.")
             result.extend(flag + "=" + item for item in value)
+        elif kind == "number":
+            validate_wait(value)
+            result.append(flag + "=" + str(value))
         else:
             require(type(value) is (int if kind == "int" else str), "ARGUMENTS_INVALID", f"{key} must be {kind}.")
             result.append(flag + "=" + str(value))
@@ -176,7 +184,8 @@ class Client:
         self.timeout = timeout
 
     def execute(self, operation, arguments, request_id=None):
-        if operation not in {"start", "doctor"}:
+        effective = arguments["request"]["operation"] if operation == "invoke" else operation
+        if effective not in {"start", "doctor"}:
             require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
                     "Configured state is missing; check storage/configuration. Do not silently start a replacement Run.")
         # No shell, no model calls, no worker loop, no automatic retry/cancellation.
@@ -193,6 +202,11 @@ class Client:
                 raise ClientError("CALL_OUTCOME_UNKNOWN", "CLI response timed out. A mutation may have committed and a verification worker may still run. Query status or replay the IDENTICAL request ID and payload; do not issue a new request automatically.") from error
             stdout.seek(0)
             raw = stdout.read(MAX_OUTPUT + 1)
+            if operation == "invoke" and not raw and completed.returncode == 2:
+                stderr.seek(0)
+                diagnostic = stderr.read(8192)
+                if b"invalid choice: 'invoke'" in diagnostic:
+                    raise ClientError("CORE_UPGRADE_REQUIRED", "Selected Core lacks guarded invoke. Use a matching Core version; no legacy fallback was sent.")
             require(len(raw) <= MAX_OUTPUT, "RESPONSE_TOO_LARGE", "Use status summary or smaller records pages; mutation outcome may be unknown.")
             try:
                 response = decode(raw.decode("utf-8"))
@@ -249,20 +263,18 @@ class Client:
             arguments = {**arguments, "workspace": str(absolute_path(arguments["workspace"]))}
         if "run_id" in OPTIONS[operation]:
             context = request.get("context")
-            require(isinstance(context, dict) and set(context) == {"workspace", "domain"}
+            require(isinstance(context, dict) and {"workspace", "domain"} <= context.keys()
+                    and context.keys() <= {"workspace", "domain", "intent_ref", "policy_ref"}
                     and isinstance(context["domain"], str), "CONTEXT_REQUIRED", "Run operations require context: {workspace: absolute path, domain: ID}.")
             workspace = str(absolute_path(context["workspace"]))
-            resumed = self.execute("resume", {"run_id": arguments["run_id"]})
-            if not resumed["ok"]:
-                return resumed
-            identity = resumed.get("run", {})
-            require(identity.get("workspace") == workspace and identity.get("domain_id") == context["domain"],
-                    "RUN_CONTEXT_MISMATCH", "Run belongs to another workspace/domain. Select the correct Run explicitly.")
-            if operation == "resume":
-                return resumed
+            request = {**request, "context": {**context, "workspace": workspace}}
         else:
             require("context" not in request, "REQUEST_INVALID", "Context is only for an existing Run.")
-        return self.execute(operation, arguments, request_id)
+        request = {**request, "arguments": arguments}
+        result = self.execute("invoke", {"request": request})
+        if not result["ok"] and result.get("error", {}).get("code") in {"RUN_CONTEXT_MISMATCH", "BINDING_IDENTITY_CHANGED"}:
+            raise ClientError(result["error"]["code"], result["error"]["message"])
+        return result
 
     def bind(self, run_id, workspace, domain, output):
         resumed = self.call({"operation": "resume", "arguments": {"run_id": run_id},
@@ -276,12 +288,17 @@ class Client:
         return {"ok": True, "binding_file": str(output), "binding": binding,
                 "note": "A pinned reference, not a Run database; Harness is always revalidated."}
 
-    def validate_binding(self, binding):
+    def binding_context(self, binding):
         require(isinstance(binding, dict) and set(binding) == {"schema_version", "config", "run_id", "workspace", "domain", "intent_ref", "policy_ref"}
                 and binding["schema_version"] == "harness-caller-binding-v1", "BINDING_INVALID", "Invalid caller binding.")
         require(binding["config"] == self.config, "BINDING_CONFIG_MISMATCH", "Binding belongs to another Harness/store configuration.")
+        return {"workspace": str(absolute_path(binding["workspace"])), "domain": binding["domain"],
+                "intent_ref": binding["intent_ref"], "policy_ref": binding["policy_ref"]}
+
+    def validate_binding(self, binding):
+        context = self.binding_context(binding)
         result = self._call({"operation": "resume", "arguments": {"run_id": binding["run_id"]},
-                             "context": {"workspace": binding["workspace"], "domain": binding["domain"]}})
+                             "context": context})
         if result["ok"]:
             require(result["intent"]["ref"] == binding["intent_ref"] and result["policy"]["ref"] == binding["policy_ref"],
                     "BINDING_IDENTITY_CHANGED", "Run intent or policy differs from the selected binding.")
@@ -291,12 +308,10 @@ class Client:
         require(isinstance(arguments, dict), "ARGUMENTS_INVALID", "Arguments must be an object.")
         value = {"operation": operation, "arguments": dict(arguments)}
         if binding is not None:
-            result = self.validate_binding(binding)
-            if not result["ok"]:
-                return result
+            context = self.binding_context(binding)
             require("run_id" not in arguments, "BINDING_ARGUMENT_CONFLICT", "The binding supplies run_id.")
             value["arguments"]["run_id"] = binding["run_id"]
-            value["context"] = {"workspace": binding["workspace"], "domain": binding["domain"]}
+            value["context"] = context
         cli_arguments(operation, value["arguments"])
         if operation in MUTATIONS:
             value["request_id"] = action_key(binding, action_id)
@@ -308,42 +323,22 @@ class Client:
         require(isinstance(binding, dict), "BINDING_INVALID", "Checkpoint requires an explicit Run binding.")
         require(type(compare_baseline) is bool, "ARGUMENTS_INVALID", "compare_baseline must be boolean.")
         validate_wait(wait_seconds)
-        base = action_key(binding, action_id)
-        # No model decision: exactly one idempotent submit and one verify.
-        # A later new action must use a new ID; resending this action preserves
-        # the original snapshot even when editable workspace files changed.
-        with self.serialized(binding["run_id"]):
-            resumed = self.validate_binding(binding)
-            if not resumed["ok"]:
-                return resumed
-            submitted = self.execute("submit", {"run_id": binding["run_id"]}, base + "-submit")
-            if not submitted["ok"]:
-                return submitted
-            verified = self.execute("verify", {"run_id": binding["run_id"], "compare_baseline": compare_baseline,
-                                    "expected_candidate_hash": submitted["candidate"]["candidate_hash"]}, base + "-verify")
-            if not verified["ok"]:
-                return {**verified, "submitted_candidate_hash": submitted["candidate"]["candidate_hash"]}
-        result = self.wait(binding, verified["job_id"], wait_seconds=wait_seconds, validated=True)
-        return {**result, "request_ids": {"submit": base + "-submit", "verify": base + "-verify"},
-                "submitted_candidate_hash": submitted["candidate"]["candidate_hash"]}
+        request = self.make_request("checkpoint", {"compare_baseline": compare_baseline, "wait_seconds": wait_seconds},
+                                    action_id=action_id, binding=binding)["request"]
+        return self.call(request)
 
     def wait(self, binding, job_id, *, wait_seconds=30, validated=False):
         validate_wait(wait_seconds)
-        if not validated:
-            resumed = self.validate_binding(binding)
-            if not resumed["ok"]:
-                return resumed
-        deadline = time.monotonic() + wait_seconds
-        while True:
-            result = self.execute("status", {"run_id": binding["run_id"], "job_id": job_id, "view": "summary"})
-            if not result["ok"]:
-                return result
-            if result["job"]["status"] not in {"queued", "running"}:
-                return {**result, "wait_status": "terminal"}
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return {**result, "wait_status": "pending", "note": "Observation window ended; job was not cancelled or reissued."}
-            time.sleep(min(1, remaining))
+        request = self.make_request("wait", {"job_id": job_id, "wait_seconds": wait_seconds}, binding=binding)["request"]
+        return self.call(request)
+
+    def context(self, binding, *, after=None, page=None, limit=20):
+        args = {"limit": limit}
+        if after is not None:
+            args["after"] = after
+        if page is not None:
+            args["page"] = page
+        return self.call(self.make_request("context", args, binding=binding)["request"])
 
     def find(self, workspace, domain, goal=None, max_pages=10):
         workspace = str(absolute_path(workspace))
@@ -427,6 +422,11 @@ def main(argv=None):
         wait.add_argument("--binding", type=Path, required=True)
         wait.add_argument("--job-id", required=True)
         wait.add_argument("--wait-seconds", type=float, default=30)
+        context = commands.add_parser("context", help="first restore without a cursor; then request explicit deltas")
+        context.add_argument("--binding", type=Path, required=True)
+        context.add_argument("--after")
+        context.add_argument("--page")
+        context.add_argument("--limit", type=int, default=20)
         commands.add_parser("preflight", help="measure actual strict Sandbox availability; no task run is created")
         args = parser.parse_args(argv)
         if args.command == "configure":
@@ -450,6 +450,8 @@ def main(argv=None):
                                            compare_baseline=args.compare_baseline, wait_seconds=args.wait_seconds)
             elif args.command == "wait":
                 result = client.wait(read_json(str(args.binding)), args.job_id, wait_seconds=args.wait_seconds)
+            elif args.command == "context":
+                result = client.context(read_json(str(args.binding)), after=args.after, page=args.page, limit=args.limit)
             else:
                 result = client.call({"operation": "doctor", "arguments": {"sandbox": True}})
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))

@@ -17,6 +17,11 @@ bundled `scripts/harness_client.py` with the persistent installation config. Use
 `preflight` when execution capability is unknown, `bind` once for an explicitly
 selected Run, and `checkpoint` for submit/verify/wait. These helpers make no task,
 assessment or closeout decisions. Use saved `request` envelopes for other actions.
+On a new session, use `context --binding ...` without a cursor and read every
+`next_page`. Afterwards, use the returned `next_cursor` with `--after` for changes.
+If the Host loses context, request a full transfer again; a saved binding is not
+evidence that the model remembers earlier pages. Inspect `critical` even when the
+delta is empty. The protocol explains lossless text references and snapshot pages.
 If configuration/runtime is absent, report the missing setup. Do not guess another
 checkout, create a temporary production state store, or silently bypass Harness.
 
@@ -76,7 +81,9 @@ mandatory-policy change requires explicit operator configuration and a new Run
 linked to its terminal predecessor and reason; do not quietly reset the task.
 On a budget/deadline boundary, explain the remaining work and preserve the Run for
 inspection; do not continue by silently resetting the policy. On interruption,
-record a concise decision/next step when possible and use `resume` next time.
+record a concise decision/next step when possible and restore `context` next time.
+Legacy `resume` remains available. A runtime-version change needs the old runtime
+or an explicitly linked new Run; never transfer old passing evidence as new proof.
 
 The final user report needs the deliverable, actual measurements and skips, remaining
 uncertainty and the Run ID (or a linked report containing it). Distinguish measured

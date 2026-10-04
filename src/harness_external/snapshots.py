@@ -8,7 +8,7 @@ import shutil
 import stat
 import uuid
 
-from harness.measurement_v5 import MAX_BYTES, _snapshot_bytes
+from harness.json_codec import MAX_BYTES
 from harness.common import atomic_json, canonical_bytes, canonical_hash
 from .errors import HarnessError, relative_path, require
 
@@ -22,6 +22,7 @@ def no_links(path: Path) -> None:
 
 
 def read_file(root: Path, relative: str) -> tuple[bytes, bool]:
+    from harness.measurement_v5 import _snapshot_bytes
     relative_path(relative)
     target = root / relative
     no_links(target)

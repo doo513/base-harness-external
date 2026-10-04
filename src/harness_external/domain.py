@@ -5,7 +5,7 @@ import copy
 import re
 from importlib.resources import files
 
-from harness.measurement_v5 import decode
+from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, require, fields, relative_path, integer, limits, validate_contract
 
@@ -198,6 +198,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
 
 
 class DevelopModule:
+    identity_files = (str(files("harness_external").joinpath("develop_manifest.json")),)
+    identity_file_ids = ("develop-manifest",)
     domain_id = "develop"
     revision = "develop-external-4"
 

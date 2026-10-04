@@ -15,13 +15,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from .json_codec import MAX_BYTES, MeasurementProtocolError, decode, _pairs
 
 PROTOCOL_VERSION = 5
-MAX_BYTES = 10 * 1024 * 1024
-
-
-class MeasurementProtocolError(ValueError):
-    pass
 
 
 def _object(value: Any, fields: set[str]) -> dict[str, Any]:
@@ -71,21 +67,6 @@ def _timestamp(value: Any) -> datetime:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result or key in {"__proto__", "constructor", "prototype"}:
-            raise MeasurementProtocolError("duplicate or reserved key")
-        result[key] = value
-    return result
-
-
-def decode(value: str) -> Any:
-    def reject_constant(value: str) -> None:
-        raise MeasurementProtocolError("nonfinite JSON number")
-    return json.loads(value, object_pairs_hook=_pairs, parse_constant=reject_constant)
 
 
 def _safe_parts(relative: str) -> list[str]:

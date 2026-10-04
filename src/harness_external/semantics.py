@@ -133,7 +133,7 @@ def ensure(run: dict, *, mode="strict", required_checks=None, deferred_checks=No
                                  "available_operations": [] if questions else ["submit", "verify", "finish_completed"]}
 
 
-def validate_run(run):
+def validate_run(run, *, current=False):
     validate(run["intent"])
     validate(run["policy"])
     if run.get("acceptance"):
@@ -150,7 +150,7 @@ def validate_run(run):
     for collection in ("interpretations", "check_records", "assessments", "activity"):
         for item in run[collection]:
             validate(item)
-    require([item["ref"]["revision"] for item in run["interpretations"]] == list(range(1, len(run["interpretations"]) + 1)),
+    require(current or [item["ref"]["revision"] for item in run["interpretations"]] == list(range(1, len(run["interpretations"]) + 1)),
             "INTERPRETATION_CORRUPT", "Interpretation revision history is not consecutive")
     for key, ref in run["gate_bindings"].items():
         require(any(item["check_id"] == key and item["ref"] == ref for item in run["check_records"]), "GATE_BINDING_CORRUPT", "Gate references unknown check revision")

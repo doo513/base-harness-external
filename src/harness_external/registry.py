@@ -75,17 +75,23 @@ class DomainRegistry:
             sources["identity-file:" + logical_id] = hashlib.sha256(path.read_bytes()).hexdigest()
         config = getattr(module, "identity_config", None)
         if config is None:
-            config = {"instance": {key: value for key, value in vars(module).items()
-                                    if key not in {"identity_files", "identity_file_ids"}},
-                      "class": {key: value for key, value in vars(type(module)).items()
-                                if key not in {"identity_files", "identity_file_ids"} and not key.startswith("__") and not callable(value)
-                                and not isinstance(value, (property, classmethod, staticmethod))},
+            # Merge before filtering: an overriding descriptor/callable must not
+            # accidentally reveal a shadowed parent's data attribute. Never run
+            # descriptors to infer configuration; dynamic values need identity_config.
+            effective = {}
+            for cls in reversed(type(module).__mro__):
+                effective.update(vars(cls))
+            effective.update(vars(module))
+            config = {"effective": {key: value for key, value in effective.items()
+                                    if key not in {"identity_files", "identity_file_ids", "identity_config"}
+                                    and not key.startswith("__") and not callable(value)
+                                    and not isinstance(value, (property, classmethod, staticmethod))},
                       "identity_file_ids": list(identity_file_ids)}
         try:
             configuration_hash = canonical_hash(config)
         except (TypeError, ValueError) as error:
             raise ValueError("Domain configuration must be JSON data or expose identity_config") from error
-        body = {"id": module.domain_id, "revision": module.revision,
+        body = {"schema_version": "domain-identity-v2", "id": module.domain_id, "revision": module.revision,
                 "implementation_hash": canonical_hash({"files": sources, "methods": code}),
                 "configuration_hash": configuration_hash}
         return {**body, "identity_hash": canonical_hash(body)}

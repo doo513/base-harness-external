@@ -165,7 +165,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             try:
                 with store.transaction() as connection:
                     current = store.job(connection, job_id)
-                    active = store.run(connection, job["run_id"])
+                    active = store.current(connection, job["run_id"])
                     if current["status"] != "running" or current.get("owner") != owner or active["status"] != "active" or active["active_job"] != job_id or time.time() >= job["deadline_at"]:
                         abort.set()
                         return

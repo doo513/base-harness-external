@@ -6,12 +6,10 @@ from pathlib import Path
 import sys
 import sqlite3
 
-from harness.measurement_v5 import MeasurementProtocolError, decode
+from harness.json_codec import MeasurementProtocolError, decode
 from harness.common import canonical_bytes
 from . import API_VERSION, ASSURANCE
 from .errors import HarnessError
-from .service import Harness
-from . import diagnostics, queries
 
 
 JSON_HELP = "JSON file path, '-' for stdin, or 'json:{...}' for inline JSON"
@@ -45,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
     parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
     commands = parser.add_subparsers(dest="command", required=True)
+    invoked = commands.add_parser("invoke", help="one guarded caller envelope; no separate resume preflight")
+    invoked.add_argument("--request", required=True, help=JSON_HELP)
     start = commands.add_parser("start")
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--policy-id", help="registered acceptance profile; cannot override an operator Domain default")
     start.add_argument("--predecessor-run-id", help="terminal Run replaced after an explicit policy change")
     start.add_argument("--policy-change-reason", help="why a new policy/Run is needed; preserves predecessor history")
+    start.add_argument("--continuation-reason", help="explicit runtime transition from a terminal predecessor; does not inherit passing evidence")
     start.add_argument("--capture-baseline", action="store_true", help="capture the declared pre-edit input scope for optional paired verification")
     start.add_argument("--required-check", action="append", default=[], help="initial explicit gate check ID; exploratory mode only")
     start.add_argument("--deferred-check", action="append", default=[], help="explicitly required check to be defined later; exploratory mode only")
@@ -65,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     listing = commands.add_parser("list-runs")
     listing.add_argument("--offset", type=int, default=0)
     listing.add_argument("--limit", type=int, default=20)
-    for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish"):
+    for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish", "context"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--run-id", required=True)
         if name in {"observe", "revise", "check", "retire-check", "assess"}:
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "cancel":
             cmd.add_argument("--job-id", required=True)
         elif name == "records":
-            cmd.add_argument("--kind", choices=(*queries.COLLECTIONS, "jobs", "measurements"), required=True)
+            cmd.add_argument("--kind", choices=("checks", "interpretations", "activity", "assessments", "tasks", "notes", "jobs", "measurements"), required=True)
             cmd.add_argument("--job-id")
             cmd.add_argument("--offset", type=int, default=0)
             cmd.add_argument("--limit", type=int, default=20)
@@ -91,17 +92,28 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--outcome", choices=("completed", "partial", "abandoned"), required=True)
             cmd.add_argument("--summary", default="")
             cmd.add_argument("--assessment", help=JSON_HELP + "; final caller assessment")
-        if name not in {"status", "resume", "records", "cleanup"}:
+        elif name == "context":
+            cmd.add_argument("--after", help="opaque cursor from the last complete context transfer")
+            cmd.add_argument("--page", help="opaque continuation for the same immutable snapshot")
+            cmd.add_argument("--limit", type=int, default=20)
+        if name not in {"status", "resume", "records", "cleanup", "context"}:
             cmd.add_argument("--request-id", required=True, help="stable idempotency key; do not reuse for a different action")
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
         if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
+        from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
         if args.command == "doctor":
+            from . import diagnostics
             from .service import response
             result = response(**diagnostics.doctor(api.store, sandbox=args.sandbox))
+        elif args.command == "invoke":
+            from .dispatch import invoke
+            result = invoke(api, load_json(args.request))
+        elif args.command == "context":
+            result = api.context(args.run_id, after=args.after, page=args.page, limit=args.limit)
         elif args.command == "list-runs":
             result = api.list_runs(offset=args.offset, limit=args.limit)
         elif args.command == "resume":
@@ -121,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                                deferred_checks=args.deferred_check, provenance=load_json(args.provenance) if args.provenance else None,
                                constraints=load_json(args.constraints) if args.constraints else None,
                                policy_id=args.policy_id, predecessor_run_id=args.predecessor_run_id, policy_change_reason=args.policy_change_reason,
-                               capture_baseline=args.capture_baseline)
+                               capture_baseline=args.capture_baseline, continuation_reason=args.continuation_reason)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
         elif args.command == "revise":

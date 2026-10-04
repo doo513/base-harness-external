@@ -111,6 +111,17 @@ bash "$HARNESS_REPO/scripts/harness-tool" observe --run-id RUN_ID --data 'json:{
 
 ## 4. 문맥 복원과 검사 변경
 
+새 세션에서는 `context --run-id RUN_ID`로 첫 페이지를 받고 `next_page`가 없어질
+때까지 `--page TOKEN`으로 이어 읽습니다. 마지막의 `next_cursor`를 다음
+`context --run-id RUN_ID --after CURSOR`에 넘기면 변경분만 받습니다. 세션에서
+맥락을 잃었다면 커서를 생략하고 다시 복원하세요. `critical`의 현재 실패·미검증·
+불확실성 상태는 변경분이 비어 있어도 확인해야 합니다. 이력 원문은 삭제하지 않습니다.
+텍스트 참조 및 복원 형식은 [호출 프로토콜](skills/harness-workflow/references/protocol.md)에
+있으며, 기존 `resume` 및 `status --view full`도 계속 사용할 수 있습니다.
+
+새 호출 도우미는 요청 생성 시 조회하지 않고, 실행할 때 `invoke` 한 번으로 Core의
+문맥 확인과 작업을 처리합니다. 검사를 생략하는 것이 아니며, 예전 요청 봉투도 지원합니다.
+
 ```sh
 bash scripts/harness-tool list-runs --limit 10
 bash scripts/harness-tool resume --run-id RUN_ID

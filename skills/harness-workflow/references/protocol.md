@@ -10,7 +10,7 @@ The helper config pins `harness_repo`, `state_dir`, `state_lifetime` and schema 
 Production uses a durable state directory outside every workspace. `--ephemeral`
 is an explicit disposable-test setting, not a recovery strategy. Setup is documented
 in the repository's `INSTALL.md`; the helper's `configure --help` is self-contained.
-The helper calls the existing CLI, not a second service. Optional `policy_root`
+The helper sends one `invoke --request` envelope to the existing CLI, not a second service. Optional `policy_root`
 selects an operator-configured acceptance registry. It is configuration, not a
 field the caller can replace in a task request. Configured Domain defaults cannot
 be overridden by selecting a weaker policy.
@@ -43,9 +43,46 @@ For other operations, `request --binding ... --operation observe --arguments
 'json:{"data":{"note":"Decision and next step"}}' --action-id note-1 --output
 /absolute/note-1.json` saves the exact envelope. Send it with `call --request` and
 reuse that file after response loss. Existing files are never overwritten. Bindings
-are references only, not a second Run ledger; every use checks the authoritative
-workspace, Domain, intent and policy in Harness. The helper never picks a Run,
+are references only, not a second Run ledger. Request construction is local; actual
+execution checks workspace, Domain, intent and policy inside Core, before replay
+or mutation. The helper never picks a Run,
 generates an assessment, or changes an initial policy for you.
+
+## Lossless context and lower-cost follow-up
+
+```sh
+python3 <skill>/scripts/harness_client.py context --binding /absolute/task-binding.json
+python3 <skill>/scripts/harness_client.py context --binding /absolute/task-binding.json --page PAGE_TOKEN
+python3 <skill>/scripts/harness_client.py context --binding /absolute/task-binding.json --after CURSOR
+```
+
+Omit the cursor on a new Host session or after context loss. Follow `next_page`
+until it is null; only the last page issues `next_cursor`. Pages share one immutable
+`snapshot` even if new work arrives. `critical` always describes current blocking,
+measurement and uncertainty status; `snapshot_critical` identifies an older page's
+state when relevant. Afterwards, `--after` returns changed records, not another
+copy of the original goal and history. An invalid/foreign cursor requests a full
+transfer of the explicitly selected Run with `reset_reason`; corruption is an error.
+
+Each item has a stable `key`, record `ref`, restored-body `digest`, `data` and
+`text_refs`. Long strings are sent once per page in `texts`, indexed by their
+digest. Each `text_refs` entry gives a list-valued path into `data` (empty means
+the whole value) and its text digest; replace the null at that path with that
+string. This is lossless substitution, not a natural-language summary. Apply full
+page zero to an empty document and subsequent pages/deltas by replacing each
+item's key. The Python API exports `harness_external.context.apply_page` as a
+reference decoder. Caller decisions remain claims; only measurements are facts.
+
+Cursors are explicit read positions, not approval, authority or proof the Host
+retained the text. The helper does not persist them in bindings. Legacy Run JSON
+is returned as `legacy_full_only`, without converting old records to the new
+storage or issuing a delta cursor. `resume`, `status --view full` and `records`
+remain available. Do not count response bytes as billed tokens or model quality.
+
+`checkpoint` now executes its submit/verify sequence in one CLI process and keeps
+their independent replay IDs. Bounded `wait` polls inside that same process;
+ending the wait never cancels, resubmits or assesses the job. Unknown process
+outcomes still require the identical request/action ID, not an automatic retry.
 
 ## Envelope and initial request
 

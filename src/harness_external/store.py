@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 import os
 from pathlib import Path
 import re
 import sqlite3
 
-from harness.measurement_v5 import decode
+from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, require, validate_contract
 from . import semantics
 from .snapshots import no_links
+from . import journal
 
 
 class StopRun(HarnessError):
@@ -38,6 +40,37 @@ class Store:
         self.root = raw.resolve()
         self.database = self.root / "runs.sqlite3"
         self._initialized = False
+        self._expected = ContextVar("harness_expected_context", default=None)
+        self._current_cache = ContextVar("harness_transaction_cache", default=None)
+
+    @contextmanager
+    def expecting(self, context):
+        token = self._expected.set(context)
+        try:
+            yield
+        finally:
+            self._expected.reset(token)
+
+    def current(self, connection, run_id):
+        cache = self._current_cache.get()
+        key = (id(connection), run_id)
+        if cache is not None and key in cache and cache[key][0] == connection.total_changes:
+            return cache[key][1]
+        run = self.run(connection, run_id, current=True)
+        if cache is not None:
+            cache[key] = (connection.total_changes, run)
+        return run
+
+    def _guard(self, connection):
+        expected = self._expected.get()
+        if expected is None:
+            return
+        run = self.current(connection, expected["run_id"])
+        require(run["workspace"] == expected["workspace"] and run["contract"]["domain_id"] == expected["domain"],
+                "RUN_CONTEXT_MISMATCH", "Run belongs to another workspace/Domain")
+        for name in ("intent", "policy"):
+            if name + "_ref" in expected:
+                require(run[name]["ref"] == expected[name + "_ref"], "BINDING_IDENTITY_CHANGED", "Pinned intent or policy changed")
 
     def _initialize(self):
         if self._initialized:
@@ -50,7 +83,7 @@ class Store:
         if db.is_file():
             with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as existing:
                 names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master")}
-                if {"runs", "jobs", "requests", "measurements", "measurements_job"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                if {"runs", "jobs", "requests", "measurements", "measurements_job", "run_heads", "run_records", "run_events"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
                     self._initialized = True
                     return
         with sqlite3.connect(db) as connection:
@@ -66,6 +99,7 @@ class Store:
                 CREATE INDEX IF NOT EXISTS measurements_run ON measurements(run_id);
                 CREATE INDEX IF NOT EXISTS measurements_job ON measurements(run_id,job_id);
             """)
+            connection.executescript(journal.DDL)
         db.chmod(0o600)
         self._initialized = True
 
@@ -75,11 +109,13 @@ class Store:
         no_links(self.database)
         connection = sqlite3.connect(self.database if write else self.database.as_uri() + "?mode=ro",
                                      uri=not write, timeout=10, isolation_level=None)
+        token = self._current_cache.set({})
         try:
             connection.execute("PRAGMA busy_timeout=10000")
             if not write:
                 connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            self._guard(connection)
             yield connection
             connection.commit()
         except StopRun:
@@ -89,6 +125,7 @@ class Store:
             connection.rollback()
             raise
         finally:
+            self._current_cache.reset(token)
             connection.close()
 
     def directory(self, run_id: str) -> Path:
@@ -97,8 +134,17 @@ class Store:
         return path
 
     @staticmethod
-    def run(connection, run_id: str) -> dict:
+    def run(connection, run_id: str, *, current=False) -> dict:
         identifier(run_id, "run")
+        snapshot = journal.head(connection, run_id)
+        if snapshot is not None:
+            require(connection.execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,)).fetchone() is None,
+                    "STATE_CORRUPT", "Run has conflicting legacy and current authorities")
+            value = journal.load(connection, snapshot, current=current)
+            require(value.get("run_id") == run_id, "STATE_CORRUPT", "Run identity mismatch")
+            validate_contract(value["contract"])
+            semantics.validate_run(value, current=current)
+            return value
         row = connection.execute("SELECT data FROM runs WHERE run_id=?", (run_id,)).fetchone()
         require(row is not None, "RUN_NOT_FOUND", "Run does not exist in this state store")
         value = decode(row[0])
@@ -125,6 +171,9 @@ class Store:
     @staticmethod
     def save_run(connection, run: dict):
         run["revision"] += 1
+        if run.get("storage_schema") == journal.SCHEMA:
+            journal.save(connection, run)
+            return
         connection.execute("INSERT INTO runs VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET data=excluded.data",
                            (run["run_id"], canonical_bytes(run).decode()))
 
@@ -132,6 +181,7 @@ class Store:
     def save_job(connection, job: dict):
         connection.execute("INSERT INTO jobs VALUES(?,?,?) ON CONFLICT(job_id) DO UPDATE SET data=excluded.data",
                            (job["job_id"], job["run_id"], canonical_bytes(job).decode()))
+        journal.save_job(connection, job)
 
     @staticmethod
     def replay(connection, scope: str, request_id: str, fingerprint: str):
@@ -217,7 +267,7 @@ class Store:
     def checkpoint(self, connection, job_id, owner, item):
         import time
         job = self.job(connection, job_id)
-        run = self.run(connection, job["run_id"])
+        run = self.current(connection, job["run_id"])
         require(job["status"] == "running" and job.get("owner") == owner and run["status"] == "active"
                 and run["active_job"] == job_id and run["generation"] == job["generation"] and time.time() < job["deadline_at"],
                 "STALE_CHECKPOINT", "Worker no longer owns this measurement")
@@ -232,5 +282,6 @@ class Store:
                 and observation["checkRef"] == item["check_ref"] and observation["observationId"] == item["observation_id"],
                 "CHECKPOINT_BINDING", "Verifier response identity mismatch")
         connection.execute("INSERT INTO measurements VALUES(?,?,?,?)", (item["observation_id"], item["run_id"], job_id, canonical_bytes(item).decode()))
+        journal.measurement(connection, item)
         job["completed_checks"] = job.get("completed_checks", 0) + 1
         self.save_job(connection, job)
