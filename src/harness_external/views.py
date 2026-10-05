@@ -4,8 +4,8 @@ from . import semantics
 
 def job_view(job):
     return {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
-            "deadline_at", "completed_checks", "total_checks", "error", "check_set_hash", "candidate_hash")},
-            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison")} if job.get("result") else None}
+            "deadline_at", "completed_checks", "total_checks", "observed_cases", "completed_cases", "error", "check_set_hash", "candidate_hash")},
+            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison", "requirement_observations")} if job.get("result") else None}
 
 
 def run_view(run):

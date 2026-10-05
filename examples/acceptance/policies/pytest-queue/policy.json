@@ -1,0 +1,33 @@
+{
+  "schema_version": "acceptance-policy-v1",
+  "policy_id": "pytest-queue",
+  "revision": "1",
+  "domain_id": "develop",
+  "parameters": {
+    "profile": "execution",
+    "validation_profile": "concurrent-queue",
+    "inputs": ["leasequeue.py", "acceptance_tests/test_queue.py"],
+    "artifacts": ["leasequeue.py"],
+    "expectations": [{"id": "entry", "path": "leasequeue.py", "operator": "contains", "expected": "class Queue"}],
+    "pytest_checks": [{"id": "behavior", "paths": ["acceptance_tests/test_queue.py"], "timeout_seconds": 30}]
+  },
+  "required_check_ids": ["domain.entry", "domain.behavior"],
+  "requirements": [{"id": "replay", "statement": "Replay treats omitted, None and empty dependencies equivalently and does not duplicate an event.", "check_ids": ["domain.entry", "domain.behavior"], "minimum_evidence": "testcase"}],
+  "coverage": {
+    "schema_version": "develop-coverage-v2",
+    "profile_id": "queue-replay",
+    "profile_revision": "1",
+    "scenarios": [
+      {"id": "defaults-none", "requirement_id": "replay", "check_id": "domain.behavior", "kind": "boundary", "required": true,
+       "test_ref": {"framework": "pytest", "path": "acceptance_tests/test_queue.py", "case_id": "acceptance_tests/test_queue.py::test_defaults_equivalent[none]"}},
+      {"id": "defaults-empty", "requirement_id": "replay", "check_id": "domain.behavior", "kind": "boundary", "required": true,
+       "test_ref": {"framework": "pytest", "path": "acceptance_tests/test_queue.py", "case_id": "acceptance_tests/test_queue.py::test_defaults_equivalent[empty]"}},
+      {"id": "replay-once", "requirement_id": "replay", "check_id": "domain.behavior", "kind": "state_transition", "required": true,
+       "test_ref": {"framework": "pytest", "path": "acceptance_tests/test_queue.py", "case_id": "acceptance_tests/test_queue.py::test_replay_has_one_event"}}
+    ],
+    "known_gaps": [{"id": "concurrency-not-measured", "requirement_id": "replay", "reason": "This small example does not exercise concurrent workers, crash recovery or the complete queue specification."}]
+  },
+  "bundle": {"version": "queue-replay-pytest-1", "files": ["acceptance_tests/test_queue.py"]},
+  "authorship": {"criteria": "model", "tests": "model"},
+  "approval": {"declared_by": "example configuration", "reference": "Review applicability before operator installation; this example is not authenticated approval."}
+}

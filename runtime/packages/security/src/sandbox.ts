@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { promises as fs } from "node:fs"
+import { promises as fs, constants as fsConstants } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -50,6 +50,10 @@ export interface SandboxRequest {
   /** Return an immutable diff of the throwaway workspace. The caller still has
    * to admit every write and import it through its Candidate overlay. */
   captureChanges?: boolean
+  /** Application-owned runtime files mounted read-only; never a Candidate overlay. */
+  readonlyResource?: string
+  /** Bounded structured telemetry from a new file in the throwaway workspace. */
+  observationArtifact?: { path: string; maxBytes: number; onLine: (line: string) => void }
 }
 
 export interface SandboxFileChange {
@@ -196,6 +200,7 @@ memory=$5
 processes=$6
 filesize=$7
 command=$8
+resource=$9
 mount -t tmpfs -o mode=755 tmpfs "$root"
 mkdir -p "$root/bin" "$root/usr" "$root/lib" "$root/lib64" "$root/etc" "$root/dev" "$root/proc" "$root/sys" "$root/tmp" "$root/workspace"
 for source in /bin /usr /lib /lib64 /etc /dev /sys; do
@@ -205,6 +210,11 @@ for source in /bin /usr /lib /lib64 /etc /dev /sys; do
 done
 mount --bind "$workspace" "$root/workspace"
 mount -o remount,rw,bind "$root/workspace"
+if [ -n "$resource" ]; then
+  mkdir -p "$root/opt/harness-runtime"
+  mount --bind "$resource" "$root/opt/harness-runtime"
+  mount -o remount,ro,bind "$root/opt/harness-runtime"
+fi
 mount -t proc proc "$root/proc"
 mount -t tmpfs -o mode=1777 tmpfs "$root/tmp"
 mkdir -p "$root/tmp/home"
@@ -214,6 +224,56 @@ exec chroot "$root" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/
 
 const safeId = () => randomUUID().replaceAll("-", "")
 const fileDigest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+
+function watchArtifact(workspace: string, artifact: SandboxRequest["observationArtifact"]) {
+  if (!artifact) return async () => {}
+  if (!/^[A-Za-z0-9_.-]{1,160}$/.test(artifact.path) || artifact.path === "." || artifact.path === ".." ||
+      !Number.isSafeInteger(artifact.maxBytes) || artifact.maxBytes < 1 || artifact.maxBytes > 8 * 1024 * 1024) {
+    throw new SandboxError("SANDBOX_POLICY_DENIED", "Invalid observation artifact")
+  }
+  let position = 0
+  let pending = ""
+  let failure: unknown
+  let identity: string | undefined
+  const decoder = new TextDecoder("utf-8", { fatal: true })
+  const drain = async () => {
+    let file
+    try {
+      file = await fs.open(path.join(workspace, artifact.path), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return
+      throw error
+    }
+    try {
+      const info = await file.stat()
+      const current = `${info.dev}:${info.ino}`
+      if (!info.isFile() || info.nlink !== 1 || (identity && current !== identity) || info.size < position || info.size > artifact.maxBytes) {
+        throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Observation artifact changed identity or exceeded bounds")
+      }
+      identity = current
+      const bytes = Buffer.alloc(info.size - position)
+      const read = await file.read(bytes, 0, bytes.length, position)
+      position += read.bytesRead
+      pending += decoder.decode(bytes.subarray(0, read.bytesRead), { stream: true })
+      let end
+      while ((end = pending.indexOf("\n")) >= 0) {
+        artifact.onLine(pending.slice(0, end))
+        pending = pending.slice(end + 1)
+      }
+    } finally {
+      await file.close()
+    }
+  }
+  let chain = Promise.resolve()
+  const timer = setInterval(() => { chain = chain.then(drain).catch(error => { failure = error }) }, 100)
+  return async () => {
+    clearInterval(timer)
+    await chain
+    await drain()
+    if (failure) throw failure
+    // An interrupted final line is not a complete observation.
+  }
+}
 
 async function captureWorkspaceChanges(beforeRoot: string, afterRoot: string, maxBytes: number): Promise<SandboxFileChange[]> {
   type Entry = { hash: string; bytes: Buffer }
@@ -305,6 +365,7 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
         String(policy.maxProcesses),
         String(512 * 1024 * 1024),
         request.command,
+        "",
       ],
       { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
     )
@@ -354,6 +415,7 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
   await fs.mkdir(mountRoot, { recursive: true })
   await fs.cp(root, workspace, { recursive: true, dereference: false, verbatimSymlinks: true })
   const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
+  const stopObserving = watchArtifact(workspace, request.observationArtifact)
   try {
     const result = await execute(
       [
@@ -378,6 +440,7 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
         String(policy.maxProcesses),
         String(512 * 1024 * 1024),
         request.command,
+        request.readonlyResource ?? "",
       ],
       { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
     )
@@ -403,7 +466,9 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
       ...(changes ? { changes } : {}),
     }
   } finally {
+    try { await stopObserving() } finally {
     await fs.rm(base, { recursive: true, force: true })
+    }
   }
 }
 
@@ -415,8 +480,13 @@ export class SandboxManager {
     request.signal?.throwIfAborted()
     const backend = policy.strictBackend === "auto" ? (process.platform === "win32" ? "wsl2" : "namespace") : policy.strictBackend
     if (backend === "wsl2") {
+      if (request.readonlyResource || request.observationArtifact) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
       if (process.platform !== "win32") throw new SandboxError("SANDBOX_UNAVAILABLE", "WSL2 backend requires Windows")
       return wslRun(request, policy, input.root, input.bytes)
+    }
+    if (request.readonlyResource) {
+      const resource = await validateSandboxWorkspace(request.readonlyResource, policy.maxInputBytes)
+      request = { ...request, readonlyResource: resource.root }
     }
     return namespaceRun(request, policy, input.root, input.bytes)
   }

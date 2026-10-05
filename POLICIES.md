@@ -28,7 +28,7 @@ It contains:
 - `policy_id`, `revision`, `domain_id`, `schema_version: acceptance-policy-v1`;
 - Domain `parameters`, including explicit named checks;
 - `required_check_ids` and `requirements` (`id`, `statement`, `check_ids`, optional
-  `minimum_evidence: file|command`); dangling/duplicate mappings are errors;
+  `minimum_evidence: file|command|testcase`); dangling/duplicate mappings are errors;
 - optional Domain-owned `coverage` inventory with a profile revision, scenario-to-
   requirement/check references into the pinned test bundle, and explicit known gaps;
 - `bundle.version` and explicit `bundle.files`, relative to the bundle directory;
@@ -56,6 +56,91 @@ the Domain does not parse test code or claim per-case execution. The generic ver
 still measures the configured command as a whole and reports no test-case count.
 All existing required check IDs, gates, baselines and strict Sandbox behavior remain
 unchanged by this inventory.
+
+## Pytest case observations
+
+Develop can opt into `parameters.pytest_checks` alongside ordinary `test_commands`:
+
+```json
+{"id":"behavior", "paths":["acceptance_tests/test_queue.py"],
+ "args":[], "required_cases":["acceptance_tests/test_queue.py::test_replay_has_one_event"],
+ "allowed_outcomes":["passed"], "timeout_seconds":30}
+```
+
+Collection paths are explicit input files. Supported selection options are `-k`,
+`-m`, `-x`, `--maxfail`, `-q`, `-v`, `--strict-markers` and `--collect-only`.
+Collection and execution are observed in the same session. Collection-only
+results never satisfy the default execution condition. Project `conftest.py`
+and configuration files must be included in the declared input scope when needed.
+
+Use `coverage.schema_version: develop-coverage-v2` for exact pytest bindings.
+Each scenario has `test_ref: {framework: "pytest", path: "...", case_id: "...::..."}`
+and may set `required: true`. Parameter IDs, including brackets and Unicode, are
+preserved. The declared file and node-ID prefix must agree. Required scenarios
+are compiled into immutable Check rules; ordinary v1 inventory remains advisory.
+Case-aware acceptance test files must belong to the pinned operator bundle.
+See the [pytest queue example](examples/acceptance/policies/pytest-queue/policy.json).
+
+Each case records discovery, selection, protocol start, call-phase execution,
+completion, phase outcomes and duration. `missing` is a derived mapping result
+only after complete collection. A collection error yields `unconfirmed`;
+selection filters yield `not_selected`; an early stop can leave `not_run` or
+`incomplete`. Setup skips have `executed: false`. Teardown failures override a
+passing body. `xfail` and `xpass` remain distinct and are rejected by default.
+Optional allowed outcomes do not remove the explicit required-case execution
+condition. Empty selection is not a vacuous success.
+
+Case observations are checkpointed separately from completed Checks. Their IDs
+bind Run, Job/attempt, Candidate or baseline, Check revision, bundle, adapter and
+runtime identities. They are available through `records --kind cases --job-id ID`,
+lossless context pages, and assessment citations. Old Candidate citations are
+contextual and do not satisfy current gates. Case IDs/paths are retained exactly
+for binding; use non-secret parameter IDs. Diagnostic messages are redacted.
+`runtime_environment_hash` identifies the pinned runtime known when the case is
+checkpointed. `execution_observation_id` links to its Check receipt, which carries
+the final Sandbox provenance and complete recorded environment. That parent can
+remain unrecorded after interruption; a completed case alone does not complete a Check.
+
+Job `result.requirement_observations` links requirements/scenarios to observations
+and reports `declared_scenarios_observed`, `linked_cases_passed`,
+`linked_checks_passed`, missing/unconfirmed cases and known gaps. It includes its
+execution scope. One case can support several links without counting as several
+executions. A passing linked suite still does not establish goal completeness.
+`measurement_scope.test_case_count` counts observed call-phase executions in
+case-aware checks; `test_case_count_complete` and `test_case_scope` describe its
+limits. Generic command checks keep unknown case counts. Baseline case runs are
+not included in the Candidate's count.
+
+`parameters.validation_profile` may explicitly select `stateful-cli`,
+`concurrent-queue` or `pure-function`. These profiles supply advisory verification
+perspectives. The Host selects a suitable profile; no natural-language keyword
+matcher, automatic test generation or extra mandatory test is introduced.
+
+## Optional pytest runtime
+
+The Core remains standard-library-only. Install the optional adapter dependencies
+in the interpreter selected by the Harness launcher, for example:
+
+```sh
+.venv/bin/python -m pip install -e '.[pytest-adapter]'
+.venv/bin/python scripts/prepare-pytest-runtime.py --state-dir /absolute/state
+```
+
+The first case-aware verification can prepare this snapshot automatically.
+Preparation only reads installed packages; it does not access the network or
+import Candidate code. Prewarming avoids package preparation in a task's time
+budget. Runtime package bytes and the reporter are hashed, cached outside the
+workspace and copied into a per-execution read-only mount. A Run keeps its selected
+runtime even when Host packages change. `--refresh` prepares a new snapshot for
+future Runs without rewriting existing observations. Missing optional packages
+produce an unavailable adapter, never an unsandboxed fallback.
+
+This adapter supports the namespace backend on Linux/WSL. Windows-native adapter
+execution is not implemented. Global third-party pytest plugin autoload is
+disabled; additional project dependencies are not automatically installed. The
+reporter and tests share a Python process: these are locally reported observations,
+not tamper-resistant certification or proof of test validity. The record retains
+the distinction from caller-submitted claims.
 
 Start through the existing CLI:
 

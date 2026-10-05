@@ -8,6 +8,7 @@ from importlib.resources import files
 from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, require, fields, relative_path, integer, limits, validate_contract
+from . import develop_cases
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
@@ -59,8 +60,10 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
     profile_id = profile_revision = None
     status = "not_provided"
     if coverage is not None:
-        coverage = fields(coverage, {"profile_id", "profile_revision", "scenarios", "known_gaps"},
+        coverage = fields(coverage, {"schema_version", "profile_id", "profile_revision", "scenarios", "known_gaps"},
                           {"profile_id", "profile_revision", "scenarios", "known_gaps"})
+        version2 = coverage.get("schema_version") == "develop-coverage-v2"
+        require(coverage.get("schema_version") in (None, "develop-coverage-v1", "develop-coverage-v2"), "COVERAGE_SCHEMA", "Unknown coverage version")
         profile_id = coverage["profile_id"]
         profile_revision = coverage["profile_revision"]
         require(isinstance(profile_id, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", profile_id)),
@@ -74,7 +77,7 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
                 "COVERAGE_GAPS_INVALID", "A coverage profile may declare at most 128 known gaps")
         status = "declared"
         for item in source_scenarios:
-            fields(item, {"id", "requirement_id", "check_id", "kind", "test_ref"},
+            fields(item, {"id", "requirement_id", "check_id", "kind", "test_ref"} | ({"required"} if version2 else set()),
                    {"id", "requirement_id", "check_id", "kind", "test_ref"})
             scenario_id = item["id"]
             require(isinstance(scenario_id, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", scenario_id))
@@ -88,14 +91,24 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
                     "COVERAGE_CHECK", "Coverage scenario check must be mandatory and mapped to its requirement")
             require(isinstance(kind, str) and kind in COVERAGE_KINDS,
                     "COVERAGE_KIND", "Unknown Develop coverage scenario kind")
-            reference = fields(item["test_ref"], {"path", "case_id"}, {"path", "case_id"})
+            reference = fields(item["test_ref"], {"path", "case_id"} | ({"framework"} if version2 else set()), {"path", "case_id"})
             path = relative_path(reference["path"])
             case_id = reference["case_id"]
             require(path in bundle_paths, "COVERAGE_TEST_REFERENCE", "Coverage test reference must point into the pinned bundle")
-            require(isinstance(case_id, str) and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:-]{0,199}", case_id)),
-                    "COVERAGE_TEST_REFERENCE", "Coverage test reference needs a bounded logical case ID")
+            if version2:
+                develop_cases.node_id(case_id)
+                require(reference.get("framework") == "pytest" and case_id.split("::", 1)[0] == path
+                        and check_index[check_id].get("adapter", {}).get("id") == "pytest-cases-v1"
+                        and path in check_index[check_id]["adapter"]["paths"], "COVERAGE_TEST_REFERENCE", "Pytest reference must match its declared collection file/check")
+                require(type(item.get("required", False)) is bool, "COVERAGE_TEST_REFERENCE", "required must be boolean")
+            else:
+                require(isinstance(case_id, str) and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:-]{0,199}", case_id)),
+                        "COVERAGE_TEST_REFERENCE", "Coverage test reference needs a bounded logical case ID")
             scenarios.append({"id": scenario_id, "requirement_id": requirement_id, "check_id": check_id,
                               "kind": kind, "test_ref": {"path": path, "case_id": case_id}})
+            if version2:
+                scenarios[-1].update(required=item.get("required", False))
+                scenarios[-1]["test_ref"]["framework"] = "pytest"
             entries[requirement_id]["scenario_ids"].append(scenario_id)
         for item in source_gaps:
             fields(item, {"id", "requirement_id", "reason"}, {"id", "requirement_id", "reason"})
@@ -126,7 +139,7 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
                                      "check_ids": copy.deepcopy(requirement["check_ids"]),
                                      **copy.deepcopy(declared), "inventory_status": inventory_status})
     assurance = "declared_inventory_not_semantically_verified"
-    report = {"schema_version": "develop-coverage-inventory-v1", "status": status,
+    report = {"schema_version": "develop-coverage-inventory-v2" if coverage and coverage.get("schema_version") == "develop-coverage-v2" else "develop-coverage-inventory-v1", "status": status,
               "profile": {"id": profile_id, "revision": profile_revision} if coverage is not None else None,
               "scenarios": scenarios, "known_gaps": gaps, "requirements": requirement_inventory,
               "unlisted_requirement_ids": unlisted, "assurance": assurance,
@@ -135,6 +148,9 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
                               "Declared scenarios and known gaps are not proof of test validity, independence or goal completeness."]}
     if coverage is not None:
         report["source_hash"] = canonical_hash(coverage)
+        if coverage.get("schema_version") == "develop-coverage-v2":
+            report["limitations"][0] = "Exact node IDs are declared here; discovered/selected/executed cases are measured only during verification."
+            report["limitations"][1] = "Only explicit required scenarios become normalized Gate conditions; other links remain advisory."
     summary = {"schema_version": report["schema_version"], "status": status, "profile": report["profile"],
                "scenario_count": len(scenarios), "known_gap_count": len(gaps),
                "requirements": requirement_inventory, "unlisted_requirement_ids": unlisted,
@@ -153,7 +169,7 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
     require(source_domain["id"] == domain_id and {"artifact", "command_exit", "behavior"} <= set(source_domain["verification"]["criterionTemplates"]),
             "DOMAIN_POLICY_MISMATCH", "Unsupported source domain criteria")
     require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-    fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "profile"}, {"inputs", "artifacts", "expectations"})
+    fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"}, {"inputs", "artifacts", "expectations"})
     inputs = parameters["inputs"]
     artifacts = parameters["artifacts"]
     require(isinstance(inputs, list) and 1 <= len(inputs) <= 128, "INPUTS_REQUIRED", "List 1..128 input files, including tests/fixtures")
@@ -175,11 +191,15 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
         checks.append(check)
     require(set(artifacts) <= covered, "NEEDS_INPUT", "Every artifact needs at least one explicit expectation")
     commands = parameters.get("test_commands", [])
+    pytest_checks = parameters.get("pytest_checks", [])
+    require(isinstance(pytest_checks, list) and len(pytest_checks) <= 8, "INVALID_PARAMETERS", "At most eight pytest checks are supported")
     require(isinstance(commands, list) and len(commands) <= 8, "INVALID_PARAMETERS", "At most eight test commands are supported")
-    require((profile == "execution" and bool(commands)) or (profile == "structural" and not commands),
+    require((profile == "execution" and bool(commands or pytest_checks)) or (profile == "structural" and not commands and not pytest_checks),
             "NEEDS_INPUT", "Execution requires test_commands; structural explicitly excludes command execution")
     for command in commands:
         checks.append(normalize_command(command))
+    for item in pytest_checks:
+        checks.append(develop_cases.normalize(item, inputs))
     require(len({c["check_key"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS",
             "Checks with the same target/operator or command need distinct explicit id values")
     body = {
@@ -198,10 +218,10 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
 
 
 class DevelopModule:
-    identity_files = (str(files("harness_external").joinpath("develop_manifest.json")),)
-    identity_file_ids = ("develop-manifest",)
+    identity_files = (str(files("harness_external").joinpath("develop_manifest.json")), str(files("harness_external").joinpath("develop_cases.py")))
+    identity_file_ids = ("develop-manifest", "develop-case-semantics")
     domain_id = "develop"
-    revision = "develop-external-4"
+    revision = "develop-external-5"
 
     def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
         """Compile configured acceptance plus revisable caller exploration.
@@ -220,6 +240,9 @@ class DevelopModule:
         indexed = {c.get("check_id"): c for c in checks}
         require(set(required) <= indexed.keys(), "ACCEPTANCE_CHECKS_REQUIRED", "Acceptance checks require explicit Domain check IDs")
         bundle_paths = set(policy["bundle"]["files"])
+        for key in required:
+            if indexed[key].get("adapter"):
+                require(set(indexed[key]["adapter"]["paths"]) <= bundle_paths, "ACCEPTANCE_SCOPE", "Case-aware acceptance test files must belong to the pinned bundle")
         require(bundle_paths <= set(base["inputs"]) and not bundle_paths.intersection(base["artifacts"]),
                 "ACCEPTANCE_SCOPE", "Test bundle files must be inputs, not implementation artifacts")
         require(not any(indexed[key]["kind"] == "command" for key in required) or bool(bundle_paths),
@@ -241,14 +264,18 @@ class DevelopModule:
                     and len(set(references)) == len(references) and set(references) <= set(required),
                     "REQUIREMENT_REFERENCE", "Requirements may refer only to defined mandatory checks")
             minimum = requirement.get("minimum_evidence", "file")
-            require(isinstance(minimum, str) and minimum in {"file", "command"}, "REQUIREMENT_INVALID", "minimum_evidence is file or command")
-            require(minimum != "command" or any(indexed[x]["kind"] == "command" for x in references),
+            require(isinstance(minimum, str) and minimum in {"file", "command", "testcase"}, "REQUIREMENT_INVALID", "minimum_evidence is file, command or testcase")
+            require(minimum not in {"command", "testcase"} or any(indexed[x]["kind"] == "command" for x in references),
                     "REQUIREMENT_EVIDENCE", "A command requirement cannot be represented by file-only checks")
+            require(minimum != "testcase" or any(indexed[x].get("adapter") for x in references), "REQUIREMENT_EVIDENCE", "A testcase requirement needs a case-aware check")
             mapped.update(references)
         require(mapped == set(required), "REQUIREMENT_REFERENCE", "Every mandatory check must map to a requirement")
         coverage_inventory, coverage_summary = compile_coverage_inventory(
             policy.get("coverage"), requirements, set(required), indexed, bundle_paths)
-        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "profile"})
+        base = develop_cases.apply_required_scenarios(base, policy.get("coverage"))
+        if policy.get("coverage", {}).get("schema_version") == "develop-coverage-v2":
+            checks = self.prepare(goal, base, verifier, exploratory=False, intent=intent)["contract"]["checks"]
+        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"})
         require(not (base["profile"] == "execution" and parameters.get("profile") == "structural"),
                 "ACCEPTANCE_SCOPE", "Configured command acceptance cannot be downgraded to structural checks")
         merged = copy.deepcopy(base)
@@ -258,12 +285,12 @@ class DevelopModule:
             for path in extra:
                 relative_path(path)
             merged[key] = list(dict.fromkeys(base[key] + extra))
-        for key in ("expectations", "test_commands"):
+        for key in ("expectations", "test_commands", "pytest_checks"):
             extra = parameters.get(key, [])
             require(isinstance(extra, list), "INVALID_PARAMETERS", key + " must be a list")
             originals = list(base.get(key, []))
             for proposal in extra:
-                normalized = normalize_file(proposal, merged["inputs"]) if key == "expectations" else normalize_command(proposal)
+                normalized = normalize_file(proposal, merged["inputs"]) if key == "expectations" else develop_cases.normalize(proposal, merged["inputs"]) if key == "pytest_checks" else normalize_command(proposal)
                 old = next((c for c in checks if c["check_key"] == normalized["check_key"]), None)
                 require(old is None or old == normalized, "ACCEPTANCE_CHECK_CHANGED", "Configured checks cannot be replaced by caller proposals")
                 if old is None:
@@ -271,6 +298,8 @@ class DevelopModule:
             merged[key] = originals
         if parameters.get("profile") == "execution":
             merged["profile"] = "execution"
+        if "validation_profile" in parameters:
+            merged["validation_profile"] = parameters["validation_profile"]
         result = self.prepare(goal, merged, verifier, exploratory=True, intent=intent)
         result["acceptance_check_ids"] = list(required)
         result["coverage_inventory_summary"] = coverage_summary
@@ -284,10 +313,12 @@ class DevelopModule:
         if intent is not None:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "profile"})
+        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"})
+        perspective = parameters.get("validation_profile")
+        require(perspective is None or isinstance(perspective, str) and perspective in develop_cases.PERSPECTIVES, "VALIDATION_PROFILE", "Unknown Develop perspective profile")
         profile = parameters.get("profile", "execution")
         require(isinstance(profile, str) and profile in {"structural", "execution"}, "INVALID_PARAMETERS", "Unknown Develop profile")
-        for key in ("inputs", "artifacts", "expectations", "test_commands"):
+        for key in ("inputs", "artifacts", "expectations", "test_commands", "pytest_checks"):
             if key in parameters:
                 require(isinstance(parameters[key], list), "INVALID_PARAMETERS", "Develop parameter must be a list: " + key)
         for item in parameters.get("inputs", []) + parameters.get("artifacts", []):
@@ -296,11 +327,14 @@ class DevelopModule:
         require(len(inputs) <= 128 and len({p.casefold() for p in inputs}) == len(inputs)
                 and not any(b.startswith(a + "/") for a in inputs for b in inputs if a != b), "INVALID_PATH", "Invalid partial input file scope")
         missing = [key for key in ("inputs", "artifacts", "expectations") if not parameters.get(key)]
-        if profile == "execution" and not parameters.get("test_commands"):
+        if profile == "execution" and not (parameters.get("test_commands") or parameters.get("pytest_checks")):
             missing.append("test_commands")
         if not exploratory or not missing:
             contract = build_contract(self.domain_id, goal, parameters, verifier)
-            return {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"]}
+            result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"]}
+            if perspective:
+                result["validation_perspectives"] = {"profile_id": perspective, "revision": "1", "perspectives": develop_cases.PERSPECTIVES[perspective], "meaning": "advisory_not_mandatory_tests"}
+            return result
         # Missing domain data is a durable clarification state, never invented criteria.
         questions = [{"id": "develop:" + key, "parameter": key, "reason": "missing_domain_parameter"} for key in missing]
         source = decode(files("harness_external").joinpath("develop_manifest.json").read_text())
@@ -317,7 +351,7 @@ class DevelopModule:
                 "available_operations": ["submit", "verify"] if inputs else []}
 
     def normalize_check(self, parameters, contract):
-        fields(parameters, {"kind", "path", "operator", "expected", "argv", "cwd", "timeout_seconds", "expectedExitCode"}, {"kind"})
+        fields(parameters, {"kind", "path", "operator", "expected", "argv", "cwd", "timeout_seconds", "expectedExitCode", "adapter"}, {"kind"})
         if parameters["kind"] == "file":
             fields(parameters, {"kind", "path", "operator", "expected"}, {"kind", "path", "operator", "expected"})
             return normalize_file({key: value for key, value in parameters.items() if key != "kind"}, contract["inputs"])
@@ -325,4 +359,15 @@ class DevelopModule:
         require(bool(contract["inputs"]), "NEEDS_INPUT", "Declare input scope before command measurements")
         require(type(parameters.get("expectedExitCode", 0)) is int and parameters.get("expectedExitCode", 0) == 0,
                 "CHECK_UNSUPPORTED", "Develop command checks expect exit zero")
+        if "adapter" in parameters:
+            adapter = fields(parameters["adapter"], {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
+            require(adapter["id"] == "pytest-cases-v1", "CHECK_UNSUPPORTED", "Unknown case adapter")
+            rules = fields(adapter["rules"], {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"},
+                           {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"})
+            result = develop_cases.normalize({"id": "normalized", "paths": adapter["paths"], "args": adapter["args"],
+                         "required_cases": rules["required_case_ids"], "allowed_outcomes": rules["allowed_outcomes"],
+                         "timeout_seconds": parameters.get("timeout_seconds", 30)}, contract["inputs"])
+            require(result["argv"] == parameters["argv"] and result["cwd"] == parameters["cwd"] and result["adapter"] == adapter,
+                    "CHECK_SCOPE_CONFLICT", "Case-aware command changed")
+            return result
         return normalize_command({key: value for key, value in parameters.items() if key not in {"kind", "expectedExitCode"}})

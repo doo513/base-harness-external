@@ -79,6 +79,15 @@ is returned as `legacy_full_only`, without converting old records to the new
 storage or issuing a delta cursor. `resume`, `status --view full` and `records`
 remain available. Do not count response bytes as billed tokens or model quality.
 
+For configured pytest checks, read `records` with `kind: "cases"` and the Job ID.
+Job results include `requirement_observations`. Check whether declared cases were
+discovered, selected and executed; preserve missing, skipped, errored and incomplete
+states. A collection failure does not establish that a case is absent. Only
+explicit required scenarios affect gates. Case observation IDs can be cited in
+`assess`; original/baseline/older Candidate facts remain contextual when appropriate.
+For the policy format and optional runtime setup, use the Harness checkout's
+`POLICIES.md`. Prepare does not execute collection; measurement follows submission.
+
 `checkpoint` now executes its submit/verify sequence in one CLI process and keeps
 their independent replay IDs. Bounded `wait` polls inside that same process;
 ending the wait never cancels, resubmits or assesses the job. Unknown process

@@ -156,3 +156,14 @@ def measurement(connection, item):
         {"observation_id": item["observation_id"], "job_id": item["job_id"], "record_hash": item["record_hash"]})
     snapshot["measurement_count"] += 1
     publish(connection, snapshot)
+
+
+def case_observation(connection, item):
+    snapshot = head(connection, item["run_id"])
+    if snapshot is None:
+        return
+    snapshot["seq"] += 1
+    put(connection, item["run_id"], snapshot["seq"], "cases", snapshot.get("case_count", 0),
+        {"observation_id": item["observation_id"], "job_id": item["job_id"], "record_hash": item["record_hash"]})
+    snapshot["case_count"] = snapshot.get("case_count", 0) + 1
+    publish(connection, snapshot)

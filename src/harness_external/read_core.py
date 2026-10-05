@@ -30,13 +30,14 @@ def summary(api, connection, run):
     counts = {name: snapshot["collections"][key]["count"] if snapshot else len(run[key]) for name, key in COLLECTIONS.items()}
     for name in ("measurements", "jobs"):
         counts[name] = connection.execute("SELECT count(*) FROM " + name + " WHERE run_id=?", (run_id,)).fetchone()[0]
+    counts["cases"] = connection.execute("SELECT count(*) FROM case_observations WHERE run_id=?", (run_id,)).fetchone()[0]
     return jobs, counts, semantics.gates(run, api.store.gate_measurements(connection, run))
 
 
 def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
     offset, limit = page_bounds(offset, limit)
-    require(isinstance(kind, str) and kind in {*COLLECTIONS, "measurements", "jobs"}, "INVALID_PARAMETERS", "Unknown history kind")
-    require(job_id is None or kind == "measurements", "INVALID_PARAMETERS", "job_id only filters measurements")
+    require(isinstance(kind, str) and kind in {*COLLECTIONS, "measurements", "jobs", "cases"}, "INVALID_PARAMETERS", "Unknown history kind")
+    require(job_id is None or kind in {"measurements", "cases"}, "INVALID_PARAMETERS", "job_id only filters observations")
     with api._read_run(run_id) as (connection, run):
         if job_id:
             checked_job(api, connection, run_id, job_id)
@@ -62,7 +63,8 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
             if job_id:
                 where += " AND job_id=?"
                 args.append(job_id)
-            total = connection.execute("SELECT count(*) FROM measurements WHERE " + where, args).fetchone()[0]
-            items = api.store.measurements(connection, run_id, job_id, limit=limit, offset=offset)
+            table = "case_observations" if kind == "cases" else "measurements"
+            total = connection.execute("SELECT count(*) FROM " + table + " WHERE " + where, args).fetchone()[0]
+            items = api.store.cases(connection, run_id, job_id, limit=limit, offset=offset) if kind == "cases" else api.store.measurements(connection, run_id, job_id, limit=limit, offset=offset)
     return {"run_id": run_id, "kind": kind, "items": items, "total": total,
             "next_offset": offset + len(items) if offset + len(items) < total else None}

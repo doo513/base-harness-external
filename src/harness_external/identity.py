@@ -16,6 +16,8 @@ EXECUTION_FILES = (
     "harness_external/registry.py", "harness_external/identity.py",
     "harness_external/acceptance.py", "harness_external/evidence.py",
     "harness_external/maintenance.py", "harness_external/dispatch.py",
+    "harness_external/observation_rules.py", "harness_external/adapter_execution.py",
+    "harness_external/pytest_adapter.py", "harness_external/pytest_runner.py",
 )
 
 

@@ -83,7 +83,7 @@ class Store:
         if db.is_file():
             with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as existing:
                 names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master")}
-                if {"runs", "jobs", "requests", "measurements", "measurements_job", "run_heads", "run_records", "run_events"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                if {"runs", "jobs", "requests", "measurements", "measurements_job", "run_heads", "run_records", "run_events", "case_observations"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
                     self._initialized = True
                     return
         with sqlite3.connect(db) as connection:
@@ -98,6 +98,9 @@ class Store:
                     run_id TEXT NOT NULL, job_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS measurements_run ON measurements(run_id);
                 CREATE INDEX IF NOT EXISTS measurements_job ON measurements(run_id,job_id);
+                CREATE TABLE IF NOT EXISTS case_observations(observation_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL, job_id TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS case_observations_run_job ON case_observations(run_id,job_id);
             """)
             connection.executescript(journal.DDL)
         db.chmod(0o600)
@@ -249,6 +252,68 @@ class Store:
             items = Store._measurement_rows(rows, job["run_id"])
             require(len(items) == 1 and items[0]["record_hash"] == ref["record_hash"]
                     and items[0].get("check_set_hash") == job["check_set_hash"], "RESULT_BINDING", "Referenced measurement changed or is missing")
+        for ref in value.get("case_observation_refs", []):
+            items = Store._case_rows(connection.execute("SELECT data FROM case_observations WHERE observation_id=? AND run_id=? AND job_id=?",
+                                     (ref["observation_id"], job["run_id"], job["job_id"])), job["run_id"])
+            require(len(items) == 1 and items[0]["record_hash"] == ref["record_hash"] and items[0]["check_set_hash"] == job["check_set_hash"],
+                    "RESULT_BINDING", "Referenced case observation is missing or changed")
+            Store.validate_case_binding(items[0], job)
+
+    @staticmethod
+    def _case_rows(rows, run_id):
+        result = []
+        for row in rows:
+            item = decode(row[0])
+            require(item.get("record_type") == "case-observation-v1" and item.get("run_id") == run_id and item.get("origin") == "verifier"
+                    and item.get("record_hash") == canonical_hash({k: v for k, v in item.items() if k != "record_hash"}),
+                    "CASE_OBSERVATION_CORRUPT", "Case observation identity/digest mismatch")
+            result.append(item)
+        return result
+
+    @staticmethod
+    def validate_case_binding(item, job):
+        subject = job.get("baseline") if item["subject_role"] == "baseline" else job["candidate"] if item["subject_role"] == "candidate" else None
+        require(subject is not None and item["subject"] == subject["subject"] and item["candidate_hash"] == subject["candidate_hash"]
+                and item["run_id"] == job["run_id"] and item["job_id"] == job["job_id"] and item["contract_hash"] == job["contract_hash"]
+                and item["check_set_hash"] == job["check_set_hash"] and item["attempt"] == job.get("attempt")
+                and item["policy_ref"] == job["policy_ref"] and item["interpretation_ref"] == job["interpretation_ref"]
+                and item.get("acceptance_binding_hash") == job.get("acceptance_binding_hash") and item["domain_identity"] == job["domain_identity"]
+                and any(c["ref"] == item["check_ref"] and c["check_id"] == item["check_id"] for c in job["checks"])
+                and item["adapter_identity"] == job["adapter_bindings"].get(item["check_id"]),
+                "CASE_OBSERVATION_BINDING", "Case observation does not belong to its execution")
+
+    @staticmethod
+    def cases(connection, run_id, job_id=None, *, limit=None, offset=0):
+        sql, args = "SELECT data FROM case_observations WHERE run_id=?", [run_id]
+        if job_id:
+            sql += " AND job_id=?"
+            args.append(job_id)
+        sql += " ORDER BY rowid"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            args.extend([limit, offset])
+        result = Store._case_rows(connection.execute(sql, args), run_id)
+        for item in result:
+            Store.validate_case_binding(item, Store.job(connection, item["job_id"]))
+        return result
+
+    def checkpoint_case(self, connection, job_id, owner, item):
+        import time
+        job = self.job(connection, job_id)
+        run = self.current(connection, job["run_id"])
+        require(job["status"] == "running" and job.get("owner") == owner and run["status"] == "active" and run["active_job"] == job_id
+                and run["generation"] == job["generation"] and time.time() < job["deadline_at"], "STALE_CHECKPOINT", "Worker no longer owns this observation")
+        self.validate_case_binding(item, job)
+        self._case_rows([(canonical_bytes(item).decode(),)], job["run_id"])
+        prior = connection.execute("SELECT data FROM case_observations WHERE observation_id=?", (item["observation_id"],)).fetchone()
+        if prior:
+            require(decode(prior[0]) == item, "CASE_OBSERVATION_CONFLICT", "Case observation already has another result")
+            return
+        connection.execute("INSERT INTO case_observations VALUES(?,?,?,?)", (item["observation_id"], item["run_id"], job_id, canonical_bytes(item).decode()))
+        journal.case_observation(connection, item)
+        job["observed_cases"] = job.get("observed_cases", 0) + 1
+        job["completed_cases"] = job.get("completed_cases", 0) + int(item["case"]["finished"])
+        self.save_job(connection, job)
 
     @staticmethod
     def _measurement_rows(rows, run_id):
@@ -281,6 +346,13 @@ class Store:
         require(observation["runId"] == run["run_id"] and observation["taskId"] == job_id and observation["subject"] == item["subject"]
                 and observation["checkRef"] == item["check_ref"] and observation["observationId"] == item["observation_id"],
                 "CHECKPOINT_BINDING", "Verifier response identity mismatch")
+        for ref in item.get("case_observation_refs", []):
+            cases = self._case_rows(connection.execute("SELECT data FROM case_observations WHERE observation_id=? AND run_id=? AND job_id=?",
+                                    (ref["observation_id"], run["run_id"], job_id)), run["run_id"])
+            require(len(cases) == 1 and cases[0]["record_hash"] == ref["record_hash"]
+                    and cases[0]["execution_observation_id"] == item["observation_id"]
+                    and cases[0]["check_ref"] == item["check_ref"] and cases[0]["subject"] == item["subject"],
+                    "CASE_OBSERVATION_BINDING", "Case does not belong to the finalized Check observation")
         connection.execute("INSERT INTO measurements VALUES(?,?,?,?)", (item["observation_id"], item["run_id"], job_id, canonical_bytes(item).decode()))
         journal.measurement(connection, item)
         job["completed_checks"] = job.get("completed_checks", 0) + 1

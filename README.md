@@ -17,6 +17,9 @@ goal correctness. The helper supports explicit `bind`, mechanical `checkpoint`
 and bounded `wait`, without automatic assessment, repair or closeout.
 
 For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
+Develop also supports [pytest case observations](POLICIES.md#pytest-case-observations):
+exact scenario bindings, selected/executed/outcome facts and scoped requirement
+reports. The optional pytest runtime is isolated in the existing Sandbox.
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.
 

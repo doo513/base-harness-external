@@ -180,6 +180,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
     result = None
     failure = None
     reports = []
+    case_reports = []
+    case_items = []
+    check_items = []
     comparisons = []
     measured_scope = []
     environment = {}
@@ -216,10 +219,35 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             measurement = {"subject": candidate["subject"], "manifestJson": canonical_bytes(candidate["manifest"]).decode(),
                            "environmentHash": canonical_hash(environment)}
             provenance = None
+            case_summary = None
             if check["kind"] == "command":
                 check["timeout_seconds"] = max(1, spec["timeoutMs"] // 1000)
                 environment["top_level_runtime"] = runtime_identity(check)
-                capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())
+                if check.get("adapter"):
+                    from .adapter_execution import execute as execute_adapter
+                    binding = job["adapter_bindings"][check_record["check_id"]]
+                    environment["adapter_identity"] = binding
+                    def checkpoint_case(case, adapter_identity):
+                        identity = {"job": job_id, "subject": candidate["subject"], "check": check_record["ref"], "case": case["case_id"]}
+                        item = {"record_type": "case-observation-v1", "observation_id": "case:" + canonical_hash(identity),
+                                "run_id": run["run_id"], "job_id": job_id, "attempt": run["verification_attempts"],
+                                "check_id": check_record["check_id"], "check_ref": check_record["ref"], "subject": candidate["subject"],
+                                "candidate_hash": candidate["candidate_hash"], "contract_hash": job["contract_hash"],
+                                "check_set_hash": job["check_set_hash"], "interpretation_ref": job["interpretation_ref"],
+                                "policy_ref": job["policy_ref"], "subject_role": subject_role, "adapter_identity": adapter_identity,
+                                "domain_identity": job["domain_identity"],
+                                "acceptance_binding_hash": job.get("acceptance_binding_hash"), "runtime_environment_hash": canonical_hash(environment),
+                                "execution_observation_id": "observation:" + job_id + ":" + str(index),
+                                "origin": "verifier", "trust": "locally_reported", "case": {**case, "phases": redact(case["phases"])}}
+                        item["record_hash"] = canonical_hash(item)
+                        with store.transaction() as connection:
+                            store.checkpoint_case(connection, job_id, owner, item)
+                        case_reports.append({"observation_id": item["observation_id"], "record_hash": item["record_hash"]})
+                        case_items.append(item)
+                    capture, case_summary = execute_adapter(check, payload, store.root, abort, job["deadline_at"] - time.time(), binding, checkpoint_case)
+                else:
+                    environment.pop("adapter_identity", None)
+                    capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())
                 require(environment["top_level_runtime"] == runtime_identity(check), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
                 measured_runtime = capture.get("provenance") or {}
                 environment["sandbox"] = {key: measured_runtime[key] for key in ("backend", "containment", "network", "kernel", "distro") if key in measured_runtime}
@@ -235,9 +263,16 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             else:
                 parameters, capabilities, timeout = check, ["read"], 1000
             spec = {**spec, "parameters": parameters, "ref": check_record["ref"]}
+            require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier changed during execution")
             measurement["environmentHash"] = canonical_hash(environment)
             measurement["check"] = spec
             report = engine.handle(envelope("measure", job_id + ":" + str(index), measurement))
+            if case_summary is not None:
+                from .observation_rules import evaluate
+                report["result"].setdefault("findings", []).extend(evaluate(case_summary, check["adapter"]["rules"]))
+                if not case_summary["collection_complete"] or not case_summary["session_complete"] or case_summary.get("protocol_error"):
+                    report["result"]["execution"] = "error"
+                    report["result"].setdefault("error", {"code": case_summary.get("protocol_error") or "CASE_SESSION_INCOMPLETE", "message": "Case discovery or execution did not finish completely"})
             validate_candidate(candidate, payload)
             item = {"check_index": index, "observation": redact(report), "sandbox": provenance}
             checkpoint = {"observation_id": report["observationId"], "run_id": run["run_id"], "job_id": job_id,
@@ -250,16 +285,27 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             checkpoint.update(measurement_kind=check["kind"], execution_status=evidence.execution_status(report, provenance),
                               role=check_record.get("role", "mandatory" if check_record["check_id"] in run["gate_bindings"] else "exploratory"),
                               acceptance_binding_hash=job.get("acceptance_binding_hash"), subject_role=subject_role)
+            if case_summary is not None:
+                from collections import Counter
+                checkpoint["case_summary"] = {key: value for key, value in case_summary.items() if key != "cases"}
+                checkpoint["case_summary"].update(discovered_count=len(case_summary["cases"]),
+                        selected_count=sum(c["selected"] is True for c in case_summary["cases"]),
+                        executed_count=sum(c["executed"] for c in case_summary["cases"]),
+                        outcomes=dict(Counter(c["outcome"] for c in case_summary["cases"])))
+                checkpoint["case_observation_refs"] = [ref for ref, item in zip(case_reports, case_items)
+                        if item["check_ref"] == check_record["ref"] and item["subject"] == candidate["subject"]]
             checkpoint["record_hash"] = canonical_hash(checkpoint)
             with store.transaction() as connection:
                 store.checkpoint(connection, job_id, owner, checkpoint)
             reports.append({"observation_id": checkpoint["observation_id"], "record_hash": checkpoint["record_hash"]})
+            check_items.append(checkpoint)
             if subject_role == "candidate":
                 comparisons.append(checkpoint["comparison_status"])
             measured_scope.append({"observation_id": checkpoint["observation_id"], "check_id": checkpoint["check_id"],
                                    "kind": check["kind"], "role": checkpoint["role"],
                                    "subject_role": subject_role, "environment_hash": canonical_hash(environment),
-                                   "execution_status": checkpoint["execution_status"], "comparison_status": checkpoint["comparison_status"]})
+                                   "execution_status": checkpoint["execution_status"], "comparison_status": checkpoint["comparison_status"],
+                                   "case_summary": checkpoint.get("case_summary")})
         validate_candidate(candidate, payload)
         status = "passed" if all(s == "passed" for s in comparisons) else "failed"
         if "incomplete" in comparisons:
@@ -270,6 +316,12 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                   "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
                   "baseline_comparison": evidence.compare(measured_scope, job, run),
                   "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
+        from .develop_cases import requirement_report
+        result.update(case_observation_refs=case_reports,
+                      requirement_observations=requirement_report(run["contract"], check_items, case_items))
+        if result["requirement_observations"] is not None:
+            result["requirement_observations"]["scope"] = {"run_id": run["run_id"], "job_id": job_id, "candidate_hash": job["candidate_hash"],
+                        "check_set_hash": job["check_set_hash"], "contract_hash": job["contract_hash"], "acceptance_binding_hash": job.get("acceptance_binding_hash")}
         result["result_hash"] = canonical_hash(result)
     except Exception as error:
         failure = {"code": getattr(error, "code", "VERIFICATION_ERROR"), "message": str(redact(str(error)))[:2000]}
@@ -280,6 +332,12 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                       "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
                       "baseline_comparison": evidence.compare(measured_scope, job, run),
                       "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
+            from .develop_cases import requirement_report
+            result.update(case_observation_refs=case_reports,
+                          requirement_observations=requirement_report(run["contract"], check_items, case_items))
+            if result["requirement_observations"] is not None:
+                result["requirement_observations"]["scope"] = {"run_id": run["run_id"], "job_id": job_id, "candidate_hash": job["candidate_hash"],
+                            "check_set_hash": job["check_set_hash"], "contract_hash": job["contract_hash"], "acceptance_binding_hash": job.get("acceptance_binding_hash")}
             result["result_hash"] = canonical_hash(result)
     finally:
         done.set()
@@ -302,6 +360,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             store.save_run(connection, active)
         elif current["status"] == "running":
             current.update(status="interrupted", error={"code": "LATE_RESULT_DISCARDED", "message": "Result arrived after ownership or deadline changed"})
+            if failure:
+                current["error"]["cause"] = failure
             if active["active_job"] == job_id:
                 active.update(active_job=None, phase="review", verification={"status": "interrupted", "job_id": job_id})
                 store.save_run(connection, active)

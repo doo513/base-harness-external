@@ -82,7 +82,7 @@ def inventory(connection, snapshot, base):
     for key, ref in snapshot["fields"].items():
         if base is None or base["fields"].get(key) != ref:
             items.append(("field:" + key, ref))
-    for kind in (*journal.COLLECTIONS, "measurements"):
+    for kind in (*journal.COLLECTIONS, "measurements", "cases"):
         if base is not None and snapshot["seq"] == base["seq"]:
             continue
         if base is None:
@@ -175,6 +175,13 @@ def read(api, run_id, *, after=None, page=None, limit=20):
                                           (run_id, value["observation_id"], value["job_id"]))
                 measured = api.store._measurement_rows(rows, run_id)
                 require(len(measured) == 1 and measured[0]["record_hash"] == value["record_hash"], "RESULT_BINDING", "Context measurement changed")
+                value = measured[0]
+            elif key.startswith("cases:"):
+                rows = connection.execute("SELECT data FROM case_observations WHERE run_id=? AND observation_id=? AND job_id=?",
+                                          (run_id, value["observation_id"], value["job_id"]))
+                measured = api.store._case_rows(rows, run_id)
+                require(len(measured) == 1 and measured[0]["record_hash"] == value["record_hash"], "RESULT_BINDING", "Context case observation changed")
+                api.store.validate_case_binding(measured[0], api.store.job(connection, measured[0]["job_id"]))
                 value = measured[0]
             items.append({"key": key, "ref": ref, "digest": canonical_hash(value), **pack(value, texts)})
         end = offset + len(items)

@@ -41,6 +41,8 @@ class Harness:
         if "coverage_inventory_summary" in preparation:
             # Forward-only metadata. It never grants an operation or changes a gate.
             result["coverage_inventory"] = copy.deepcopy(preparation["coverage_inventory_summary"])
+        if "validation_perspectives" in preparation:
+            result["validation_perspectives"] = copy.deepcopy(preparation["validation_perspectives"])
         return result
 
     def _reconcile(self, connection, run):
@@ -350,6 +352,11 @@ class Harness:
         rows = connection.execute("SELECT data FROM measurements WHERE run_id=? AND observation_id IN (" +
                                   ",".join("?" for _ in ids) + ")", [run_id, *ids])
         known = {item["observation_id"]: item for item in self.store._measurement_rows(rows, run_id)}
+        rows = connection.execute("SELECT data FROM case_observations WHERE run_id=? AND observation_id IN (" +
+                                  ",".join("?" for _ in ids) + ")", [run_id, *ids])
+        for item in self.store._case_rows(rows, run_id):
+            self.store.validate_case_binding(item, self.store.job(connection, item["job_id"]))
+            known[item["observation_id"]] = item
         require(set(ids) <= set(known), "OBSERVATION_REFERENCE", "Observation is not a verifier measurement owned by this Run")
         return [known[item] for item in ids]
 
@@ -592,6 +599,17 @@ class Harness:
                     and all(c in "0123456789abcdef" for c in expected_candidate_hash), "INVALID_PARAMETERS", "Invalid expected Candidate hash")
             request["expected_candidate_hash"] = expected_candidate_hash
         fingerprint = canonical_hash(request)
+        # Optional runtime packaging can perform substantial file I/O. Keep it
+        # outside the writer transaction so other Runs can checkpoint/heartbeat.
+        with self.store.transaction(write=False) as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior
+            initial = self.store.run(connection, run_id)
+            initial_checks = copy.deepcopy(semantics.current_checks(initial))
+            initial_check_hash = semantics.check_set_hash(initial_checks)
+        from .adapter_execution import bind as bind_adapters
+        prepared_bindings = bind_adapters(initial_checks, self.store.root, initial.get("adapter_bindings"))
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -609,12 +627,18 @@ class Harness:
             now = time.time()
             checks = copy.deepcopy(semantics.current_checks(run))
             self._validate_checks(run, run["contract"])
+            require(semantics.check_set_hash(checks) == initial_check_hash, "VERIFICATION_CONFLICT", "Checks changed while preparing adapter runtimes")
+            require(all(old.get("status") == "unavailable" or prepared_bindings.get(key) == old
+                        for key, old in run.get("adapter_bindings", {}).items()), "ADAPTER_RUNTIME_CHANGED", "Another request pinned a different runtime")
+            run["adapter_bindings"] = prepared_bindings
             timeout = 45 + (2 if compare_baseline else 1) * sum(check["spec"]["timeoutMs"] / 1000 + 10 for check in checks)
             job = {"job_id": job_id, "run_id": run_id, "status": "queued", "heartbeat_at": now,
+                   "attempt": run["verification_attempts"] + 1,
                    "deadline_at": min(run["deadline_at"], now + timeout), "generation": run["generation"],
                    "contract_hash": run["contract"]["contract_hash"], "candidate_hash": run["candidate"]["candidate_hash"],
                    "cleanup": "not_started", "result": None}
             job.update(checks=checks, candidate=copy.deepcopy(run["candidate"]),
+                       adapter_bindings=copy.deepcopy(run["adapter_bindings"]),
                        interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
                        completed_checks=0, total_checks=len(checks) * (2 if compare_baseline else 1))
             if compare_baseline:

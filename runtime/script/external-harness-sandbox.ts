@@ -11,10 +11,14 @@ try {
   const raw = await Bun.stdin.text()
   if (Buffer.byteLength(raw) > 128 * 1024) throw new Error("SANDBOX_REQUEST_LIMIT")
   const input = JSON.parse(raw)
-  if (Object.keys(input).sort().join(",") !== "argv,cwd,timeoutMs,workspace" ||
+  const required = ["argv", "cwd", "timeoutMs", "workspace"]
+  if (!required.every(key => key in input) || Object.keys(input).some(key => ![...required, "readonlyResource", "observationArtifact"].includes(key)) ||
       typeof input.workspace !== "string" || typeof input.cwd !== "string" ||
       !Array.isArray(input.argv) || !input.argv.length || !input.argv.every((v: unknown) => typeof v === "string" && !v.includes("\0")) ||
       !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > 120_000) throw new Error("SANDBOX_REQUEST_INVALID")
+  if (input.readonlyResource !== undefined && typeof input.readonlyResource !== "string") throw new Error("SANDBOX_REQUEST_INVALID")
+  if (input.observationArtifact !== undefined && (Object.keys(input.observationArtifact).sort().join(",") !== "maxBytes,path" ||
+      typeof input.observationArtifact.path !== "string" || !Number.isSafeInteger(input.observationArtifact.maxBytes))) throw new Error("SANDBOX_REQUEST_INVALID")
   const marker = "external-harness-start-" + randomUUID()
   const endMarker = "external-harness-end-" + randomUUID()
   const startedAt = new Date().toISOString()
@@ -26,6 +30,10 @@ try {
       "; command_status=$?; printf '\\n%s:%s\\n' " + quote(endMarker) + " \"$command_status\"; exit \"$command_status\"",
     signal: controller.signal,
     captureChanges: true,
+    readonlyResource: input.readonlyResource,
+    observationArtifact: input.observationArtifact ? { ...input.observationArtifact, onLine: (line: string) => {
+      process.stdout.write(JSON.stringify({ type: "adapter_event", line }) + "\n")
+    } } : undefined,
     config: { timeoutMs: input.timeoutMs, maxInputBytes: 10 * 1024 * 1024, maxOutputBytes: 256 * 1024, memoryMiB: 1024, maxProcesses: 64 },
   })
   // Namespace/bootstrap failures must not masquerade as an executed test.

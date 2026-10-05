@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "cancel":
             cmd.add_argument("--job-id", required=True)
         elif name == "records":
-            cmd.add_argument("--kind", choices=("checks", "interpretations", "activity", "assessments", "tasks", "notes", "jobs", "measurements"), required=True)
+            cmd.add_argument("--kind", choices=("checks", "interpretations", "activity", "assessments", "tasks", "notes", "jobs", "measurements", "cases"), required=True)
             cmd.add_argument("--job-id")
             cmd.add_argument("--offset", type=int, default=0)
             cmd.add_argument("--limit", type=int, default=20)

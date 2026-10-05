@@ -1,0 +1,753 @@
+{
+  "schema_version": "develop-pytest-validation-v1",
+  "base_commit": "9b6d8f7046a046e5e3ac706743d8923935356be0",
+  "implementation_scope": [
+    "pytest collection, selection and phase outcomes inside the strict namespace Sandbox",
+    "immutable case observations bound to Run/Job/attempt/Candidate/Check/bundle/Domain/adapter",
+    "explicit v2 scenario rules and limited requirement reports",
+    "advisory Develop perspective profiles and frozen pytest runtimes"
+  ],
+  "verification": {
+    "verified_at": "2026-10-05T07:40:48.368190+00:00",
+    "tests": 253,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 392.51,
+    "execution_identity": "1b49c727570da598713764f2c836336b0e1d78cdd2245c781a207d4a1874f69c",
+    "source_bundle_hash": "3395c627da28447313c29742bd03cc4e0408fa1b7dbd897d8be6d4b174fce15f",
+    "source_files": 63,
+    "extra_paths": [
+      "runtime/script/external-harness-sandbox.ts",
+      "runtime/packages/security/src/sandbox.ts",
+      "scripts/evaluate-pytest-domain.py",
+      "scripts/prepare-pytest-runtime.py",
+      "pyproject.toml",
+      "POLICIES.md",
+      "README.md",
+      "skills/harness-workflow/references/protocol.md",
+      "src/harness_external/develop_manifest.json"
+    ],
+    "command": "BASE_HARNESS_EXTERNAL_LIVE=1 .venv/bin/python -m pytest -q",
+    "sandbox_bridge_build": "passed",
+    "python_compile": "passed",
+    "skill_validation": "passed",
+    "diff_check": "passed"
+  },
+  "regression_evidence": {
+    "queue_defaults": "Known omitted/None versus empty-dependencies replay defect was reproduced; the fixed control passed the same three cases, with baseline improvement and six separate baseline/Candidate observations.",
+    "late_results": "Wrong Job, Candidate, Check, attempt, check set, bundle and Domain bindings rejected; late case checkpoint rejected.",
+    "partial_results": "Finished cases retained after timeout; interrupted collection is unconfirmed rather than missing.",
+    "legacy_contracts": "Existing tests included; v1 coverage remains advisory."
+  },
+  "conformance_pilot": {
+    "schema_version": "develop-pytest-conformance-pilot-v1",
+    "model_calls": 0,
+    "framework_runtime": {
+      "id": "pytest-cases-v1",
+      "revision": "1",
+      "versions": {
+        "iniconfig": "2.3.0",
+        "packaging": "26.3",
+        "pluggy": "1.6.0",
+        "pygments": "2.21.0",
+        "pytest": "9.1.1"
+      },
+      "runner_hash": "8cb55ff92ac7961186b5b8a9acb3f78dd5c520d4b9641dcf2bcf359a00b0725f",
+      "package_hash": "8fe5ae94845b46cc795e56a947c815f89e1aed8a08bd4f163bf2a397e42e2504",
+      "runtime_hash": "0faec2992691780b5eb600c892d8c2c087c1b56be9bf6a9c9a56541c5d224172",
+      "artifact_key": "c184c7f3e8d4e708beb787c6695fa222b2ff2d3001db8d2defb63e2449451515",
+      "identity_hash": "c81bd05676b7612ff13eebdf0e02718f14c710ddc336dd1a04a02b1c115425c8"
+    },
+    "conditions": {
+      "A": "same execution, command exit criterion",
+      "B": "same adapter facts, Domain-normalized case criteria without Run state",
+      "C": "same artifacts/criteria through full Core submission, observations and gates"
+    },
+    "results": [
+      {
+        "task": "declared_case_missing",
+        "test_source_sha256": "3b637cf543c0a844f54df86f0091a5b9b47f23e1659a4119c1db3ee423cf6867",
+        "A_process_exit_passed": true,
+        "B_domain_case_rules_passed": false,
+        "C_core_gate_passed": false,
+        "C_completed_allowed": false,
+        "adapter_seconds": 1.4937408299883828,
+        "core_verification_seconds": 3.478006217017537,
+        "run_id": "run_5c299f0d967f44fcb09d45b86a5782ec",
+        "job_id": "job_288a55c9f4444944b1dae00ebd6b7d5f",
+        "measurement_status": "failed",
+        "case_outcomes": {
+          "test_cases.py::test_other": "passed"
+        },
+        "case_observations": [
+          {
+            "acceptance_binding_hash": "a482bf3e9b50111704d367c2f7e5dc2c311303f88cebb6b34683951035f90e74",
+            "adapter_identity": {
+              "artifact_key": "c184c7f3e8d4e708beb787c6695fa222b2ff2d3001db8d2defb63e2449451515",
+              "id": "pytest-cases-v1",
+              "identity_hash": "c81bd05676b7612ff13eebdf0e02718f14c710ddc336dd1a04a02b1c115425c8",
+              "package_hash": "8fe5ae94845b46cc795e56a947c815f89e1aed8a08bd4f163bf2a397e42e2504",
+              "revision": "1",
+              "runner_hash": "8cb55ff92ac7961186b5b8a9acb3f78dd5c520d4b9641dcf2bcf359a00b0725f",
+              "runtime_hash": "0faec2992691780b5eb600c892d8c2c087c1b56be9bf6a9c9a56541c5d224172",
+              "versions": {
+                "iniconfig": "2.3.0",
+                "packaging": "26.3",
+                "pluggy": "1.6.0",
+                "pygments": "2.21.0",
+                "pytest": "9.1.1"
+              }
+            },
+            "attempt": 1,
+            "candidate_hash": "d6d4a881f5282bf9622950194fadc86fbf66d7137c434e2cad63ca8d1d5f93f7",
+            "case": {
+              "case_id": "test_cases.py::test_other",
+              "discovered": true,
+              "duration_seconds": 0.0007191269833128899,
+              "executed": true,
+              "finished": true,
+              "framework": "pytest",
+              "outcome": "passed",
+              "path": "test_cases.py",
+              "phases": [
+                {
+                  "duration": 0.00028869599918834865,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "setup",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.0002563869929872453,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "call",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.00017404399113729596,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "teardown",
+                  "wasxfail": null
+                }
+              ],
+              "selected": true,
+              "started": true
+            },
+            "check_id": "domain.behavior",
+            "check_ref": {
+              "id": "check:run_5c299f0d967f44fcb09d45b86a5782ec:domain.behavior",
+              "revision": 1,
+              "sha256": "7e650f68e2eec014505ced87cdaa7893a1eea66d391d8eaf738e9b2567b75607"
+            },
+            "check_set_hash": "66faae1da64a6536555afecb0f487546ae8a92397c6f93961594f70fdd5cf02c",
+            "contract_hash": "8158e61b1773700829d31936c2bed63043b241eabcdb3e57b2c465f33a70d9c2",
+            "domain_identity": {
+              "configuration_hash": "3ca3d1236ffa3bb9d32f73e0b75d144aa46742c01603f4713eb00f3d83ebb1da",
+              "id": "develop",
+              "identity_hash": "21bc817eb9f29814e6a95cf3ad65d756bba922dbbdd2d0eb9e265b8ebea43849",
+              "implementation_hash": "40601f9b8dad53de46792686fd700f1b2224cd0a6fec5e06d896771615a51c88",
+              "revision": "develop-external-5",
+              "schema_version": "domain-identity-v2"
+            },
+            "execution_observation_id": "observation:job_288a55c9f4444944b1dae00ebd6b7d5f:1",
+            "interpretation_ref": {
+              "id": "interpretation:run_5c299f0d967f44fcb09d45b86a5782ec",
+              "revision": 1,
+              "sha256": "fbf69f9c8013818af72ac09fcfb4228f8174e4f11a06fa33f56caf33564029cb"
+            },
+            "job_id": "job_288a55c9f4444944b1dae00ebd6b7d5f",
+            "observation_id": "case:54ea28621ac1018378ba3c8f2878b5bf03d78038b98b328d6345143505b1ed25",
+            "origin": "verifier",
+            "policy_ref": {
+              "id": "policy:run_5c299f0d967f44fcb09d45b86a5782ec",
+              "revision": 1,
+              "sha256": "eccb73da74ba54c68b0914d8cf4ffedbe52828f8cae21e206a94a42bd8b3850e"
+            },
+            "record_hash": "32b8e7e14a636168bbfda15c934fd0d1410cd1d67a74578dfa838bc63ce96578",
+            "record_type": "case-observation-v1",
+            "run_id": "run_5c299f0d967f44fcb09d45b86a5782ec",
+            "runtime_environment_hash": "a045a7e32c63334b3eb656a56a312221721760e9bf2167c2c31db21677e9e282",
+            "subject": {
+              "id": "candidate_5cb7929a221e4ea1bb18b1449034c3af",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "6d49d6198d45394275bb56ecb523177e7eb355b5385d5cb10c77bcf7dee54729"
+            },
+            "subject_role": "candidate",
+            "trust": "locally_reported"
+          }
+        ],
+        "check_observation_refs": [
+          {
+            "observation_id": "observation:job_288a55c9f4444944b1dae00ebd6b7d5f:0",
+            "record_hash": "b85b1d081164c51cbf6d04f7e8597ea8ef0652ace7ad66be6d049101faaf2b9f"
+          },
+          {
+            "observation_id": "observation:job_288a55c9f4444944b1dae00ebd6b7d5f:1",
+            "record_hash": "715074e19b872877b8d3d9d4716a9a31a89e526f050f3c94eb079194a9fb31f0"
+          }
+        ],
+        "requirement_observations": {
+          "meaning": "declared_links_and_observed_execution_not_goal_proof",
+          "requirements": [
+            {
+              "declared_scenarios_observed": false,
+              "failed_check_ids": [
+                "domain.behavior"
+              ],
+              "known_gap_ids": [],
+              "linked_cases_passed": false,
+              "linked_checks_passed": false,
+              "requirement_id": "behavior",
+              "scenarios": [
+                {
+                  "check_id": "domain.behavior",
+                  "check_observation_id": "observation:job_288a55c9f4444944b1dae00ebd6b7d5f:1",
+                  "executed": false,
+                  "observation_id": null,
+                  "required": true,
+                  "scenario_id": "required",
+                  "status": "missing",
+                  "test_ref": {
+                    "case_id": "test_cases.py::test_required",
+                    "framework": "pytest",
+                    "path": "test_cases.py"
+                  }
+                }
+              ],
+              "status": "linked_checks_failed"
+            }
+          ],
+          "schema_version": "develop-requirement-observations-v1",
+          "scope": {
+            "acceptance_binding_hash": "a482bf3e9b50111704d367c2f7e5dc2c311303f88cebb6b34683951035f90e74",
+            "candidate_hash": "d6d4a881f5282bf9622950194fadc86fbf66d7137c434e2cad63ca8d1d5f93f7",
+            "check_set_hash": "66faae1da64a6536555afecb0f487546ae8a92397c6f93961594f70fdd5cf02c",
+            "contract_hash": "8158e61b1773700829d31936c2bed63043b241eabcdb3e57b2c465f33a70d9c2",
+            "job_id": "job_288a55c9f4444944b1dae00ebd6b7d5f",
+            "run_id": "run_5c299f0d967f44fcb09d45b86a5782ec"
+          }
+        }
+      },
+      {
+        "task": "declared_case_skipped",
+        "test_source_sha256": "8f8964473bf49d95b6afce7361f6aa2e60ff8c372032f0321cbb4cb1e3ff0181",
+        "A_process_exit_passed": true,
+        "B_domain_case_rules_passed": false,
+        "C_core_gate_passed": false,
+        "C_completed_allowed": false,
+        "adapter_seconds": 1.44111322297249,
+        "core_verification_seconds": 3.3878100359870587,
+        "run_id": "run_7a2023e6bf984744a4589222d431f010",
+        "job_id": "job_aaa135a638ee409b9d8599b5d2546615",
+        "measurement_status": "failed",
+        "case_outcomes": {
+          "test_cases.py::test_required": "skipped"
+        },
+        "case_observations": [
+          {
+            "acceptance_binding_hash": "14bc5fd2fd4bf56094280368865f85771c1238979c9af8785b4901f2ee30ee79",
+            "adapter_identity": {
+              "artifact_key": "c184c7f3e8d4e708beb787c6695fa222b2ff2d3001db8d2defb63e2449451515",
+              "id": "pytest-cases-v1",
+              "identity_hash": "c81bd05676b7612ff13eebdf0e02718f14c710ddc336dd1a04a02b1c115425c8",
+              "package_hash": "8fe5ae94845b46cc795e56a947c815f89e1aed8a08bd4f163bf2a397e42e2504",
+              "revision": "1",
+              "runner_hash": "8cb55ff92ac7961186b5b8a9acb3f78dd5c520d4b9641dcf2bcf359a00b0725f",
+              "runtime_hash": "0faec2992691780b5eb600c892d8c2c087c1b56be9bf6a9c9a56541c5d224172",
+              "versions": {
+                "iniconfig": "2.3.0",
+                "packaging": "26.3",
+                "pluggy": "1.6.0",
+                "pygments": "2.21.0",
+                "pytest": "9.1.1"
+              }
+            },
+            "attempt": 1,
+            "candidate_hash": "fb334eb62a4bbeb6d387adfc023e50242c9925f9845ac1ebadf60eaec2480491",
+            "case": {
+              "case_id": "test_cases.py::test_required",
+              "discovered": true,
+              "duration_seconds": 0.00034030198003165424,
+              "executed": false,
+              "finished": true,
+              "framework": "pytest",
+              "outcome": "skipped",
+              "path": "test_cases.py",
+              "phases": [
+                {
+                  "duration": 0.00020019197836518288,
+                  "message": "('/workspace/test_cases.py', 2, 'Skipped: not implemented')",
+                  "outcome": "skipped",
+                  "phase": "setup",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.00014011000166647136,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "teardown",
+                  "wasxfail": null
+                }
+              ],
+              "selected": true,
+              "started": true
+            },
+            "check_id": "domain.behavior",
+            "check_ref": {
+              "id": "check:run_7a2023e6bf984744a4589222d431f010:domain.behavior",
+              "revision": 1,
+              "sha256": "c142d57c965cbdb7ee98ff2688c829a3225332596e765820cef9592d76c3e2ec"
+            },
+            "check_set_hash": "4a6833c782a385197c7bdd58c9adaca7564bd9cdd322216dfee96c68ad9daab8",
+            "contract_hash": "cdd82c65d1a51bda01c0531f45269fbffd4884538d3cafaf5fa01c7bc9d0d103",
+            "domain_identity": {
+              "configuration_hash": "3ca3d1236ffa3bb9d32f73e0b75d144aa46742c01603f4713eb00f3d83ebb1da",
+              "id": "develop",
+              "identity_hash": "21bc817eb9f29814e6a95cf3ad65d756bba922dbbdd2d0eb9e265b8ebea43849",
+              "implementation_hash": "40601f9b8dad53de46792686fd700f1b2224cd0a6fec5e06d896771615a51c88",
+              "revision": "develop-external-5",
+              "schema_version": "domain-identity-v2"
+            },
+            "execution_observation_id": "observation:job_aaa135a638ee409b9d8599b5d2546615:1",
+            "interpretation_ref": {
+              "id": "interpretation:run_7a2023e6bf984744a4589222d431f010",
+              "revision": 1,
+              "sha256": "e0840ae6e26bd9f8ed77e19e03f80dbbce9346dceae4586969b6285208c8bbee"
+            },
+            "job_id": "job_aaa135a638ee409b9d8599b5d2546615",
+            "observation_id": "case:246a9f7d9c20f6f6350f0ba9c4a9f2c71125f248b66df8a33dfac9a139a62942",
+            "origin": "verifier",
+            "policy_ref": {
+              "id": "policy:run_7a2023e6bf984744a4589222d431f010",
+              "revision": 1,
+              "sha256": "986f6f5d69a2fd527803411f1285283f5253fcce1dd863b9cefcb008390cc47c"
+            },
+            "record_hash": "dd7db1f441dfafc08004a1e5f2580903033cebab6c6bd5e87f172229337d8d2f",
+            "record_type": "case-observation-v1",
+            "run_id": "run_7a2023e6bf984744a4589222d431f010",
+            "runtime_environment_hash": "a045a7e32c63334b3eb656a56a312221721760e9bf2167c2c31db21677e9e282",
+            "subject": {
+              "id": "candidate_9427a915418c4cc8831963bc410e3a63",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "7a4b3e49c6c43afc661f841833b6a71a3b81c08975e489259cea8fa91b456cd3"
+            },
+            "subject_role": "candidate",
+            "trust": "locally_reported"
+          }
+        ],
+        "check_observation_refs": [
+          {
+            "observation_id": "observation:job_aaa135a638ee409b9d8599b5d2546615:0",
+            "record_hash": "54dea96549782c196c6f4fdb8d86679b459bf679856ee8618ea9d62f7664b70d"
+          },
+          {
+            "observation_id": "observation:job_aaa135a638ee409b9d8599b5d2546615:1",
+            "record_hash": "b73cd49d725a477c645c631d434fc527c9534302251763822015cc6e2e261792"
+          }
+        ],
+        "requirement_observations": {
+          "meaning": "declared_links_and_observed_execution_not_goal_proof",
+          "requirements": [
+            {
+              "declared_scenarios_observed": true,
+              "failed_check_ids": [
+                "domain.behavior"
+              ],
+              "known_gap_ids": [],
+              "linked_cases_passed": false,
+              "linked_checks_passed": false,
+              "requirement_id": "behavior",
+              "scenarios": [
+                {
+                  "check_id": "domain.behavior",
+                  "check_observation_id": "observation:job_aaa135a638ee409b9d8599b5d2546615:1",
+                  "executed": false,
+                  "observation_id": "case:246a9f7d9c20f6f6350f0ba9c4a9f2c71125f248b66df8a33dfac9a139a62942",
+                  "required": true,
+                  "scenario_id": "required",
+                  "status": "skipped",
+                  "test_ref": {
+                    "case_id": "test_cases.py::test_required",
+                    "framework": "pytest",
+                    "path": "test_cases.py"
+                  }
+                }
+              ],
+              "status": "linked_checks_failed"
+            }
+          ],
+          "schema_version": "develop-requirement-observations-v1",
+          "scope": {
+            "acceptance_binding_hash": "14bc5fd2fd4bf56094280368865f85771c1238979c9af8785b4901f2ee30ee79",
+            "candidate_hash": "fb334eb62a4bbeb6d387adfc023e50242c9925f9845ac1ebadf60eaec2480491",
+            "check_set_hash": "4a6833c782a385197c7bdd58c9adaca7564bd9cdd322216dfee96c68ad9daab8",
+            "contract_hash": "cdd82c65d1a51bda01c0531f45269fbffd4884538d3cafaf5fa01c7bc9d0d103",
+            "job_id": "job_aaa135a638ee409b9d8599b5d2546615",
+            "run_id": "run_7a2023e6bf984744a4589222d431f010"
+          }
+        }
+      },
+      {
+        "task": "declared_case_failed",
+        "test_source_sha256": "be5ad4f1569d5f1eacf8e155864a72f5a344f0d3adeb3beac66289ac9dd1ecd5",
+        "A_process_exit_passed": false,
+        "B_domain_case_rules_passed": false,
+        "C_core_gate_passed": false,
+        "C_completed_allowed": false,
+        "adapter_seconds": 1.4372073159902357,
+        "core_verification_seconds": 3.6047982840100303,
+        "run_id": "run_8d362e2382dd43f192d4aafcaea6b118",
+        "job_id": "job_89aff039fec14e6a8b21efe6ea9433dd",
+        "measurement_status": "failed",
+        "case_outcomes": {
+          "test_cases.py::test_required": "failed"
+        },
+        "case_observations": [
+          {
+            "acceptance_binding_hash": "b2087d00d818c5eb0215a5b5cc668ed481ac560b42b087b7b77d425632fd6b12",
+            "adapter_identity": {
+              "artifact_key": "c184c7f3e8d4e708beb787c6695fa222b2ff2d3001db8d2defb63e2449451515",
+              "id": "pytest-cases-v1",
+              "identity_hash": "c81bd05676b7612ff13eebdf0e02718f14c710ddc336dd1a04a02b1c115425c8",
+              "package_hash": "8fe5ae94845b46cc795e56a947c815f89e1aed8a08bd4f163bf2a397e42e2504",
+              "revision": "1",
+              "runner_hash": "8cb55ff92ac7961186b5b8a9acb3f78dd5c520d4b9641dcf2bcf359a00b0725f",
+              "runtime_hash": "0faec2992691780b5eb600c892d8c2c087c1b56be9bf6a9c9a56541c5d224172",
+              "versions": {
+                "iniconfig": "2.3.0",
+                "packaging": "26.3",
+                "pluggy": "1.6.0",
+                "pygments": "2.21.0",
+                "pytest": "9.1.1"
+              }
+            },
+            "attempt": 1,
+            "candidate_hash": "69eceab38ef260bddff26213d1025e2bb1d2d182473e5c51c33161b5166bfb60",
+            "case": {
+              "case_id": "test_cases.py::test_required",
+              "discovered": true,
+              "duration_seconds": 0.0006807589961681515,
+              "executed": true,
+              "finished": true,
+              "framework": "pytest",
+              "outcome": "failed",
+              "path": "test_cases.py",
+              "phases": [
+                {
+                  "duration": 0.00020914000924676657,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "setup",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.00020873898756690323,
+                  "message": ">   def test_required(): assert False\n                         ^^^^^^^^^^^^\nE   assert False\n\ntest_cases.py:1: AssertionError",
+                  "outcome": "failed",
+                  "phase": "call",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.0002628799993544817,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "teardown",
+                  "wasxfail": null
+                }
+              ],
+              "selected": true,
+              "started": true
+            },
+            "check_id": "domain.behavior",
+            "check_ref": {
+              "id": "check:run_8d362e2382dd43f192d4aafcaea6b118:domain.behavior",
+              "revision": 1,
+              "sha256": "78554b264712c72e64c92e5fe6a1c9c3f506cc98525d630614edd15e5b4ee219"
+            },
+            "check_set_hash": "6ff82c11202b11be273146758296e404e6a1209208f774793ab9b479ace7c222",
+            "contract_hash": "ca589ccc4acad5b529769fc5d0faa0ee0a1bef64ce785c01d1e3c1fae78a288b",
+            "domain_identity": {
+              "configuration_hash": "3ca3d1236ffa3bb9d32f73e0b75d144aa46742c01603f4713eb00f3d83ebb1da",
+              "id": "develop",
+              "identity_hash": "21bc817eb9f29814e6a95cf3ad65d756bba922dbbdd2d0eb9e265b8ebea43849",
+              "implementation_hash": "40601f9b8dad53de46792686fd700f1b2224cd0a6fec5e06d896771615a51c88",
+              "revision": "develop-external-5",
+              "schema_version": "domain-identity-v2"
+            },
+            "execution_observation_id": "observation:job_89aff039fec14e6a8b21efe6ea9433dd:1",
+            "interpretation_ref": {
+              "id": "interpretation:run_8d362e2382dd43f192d4aafcaea6b118",
+              "revision": 1,
+              "sha256": "3e7c46a09b8db96c7a1b37cccb6551c2e3e2e81616a4a24157a9ef3cb6d860e0"
+            },
+            "job_id": "job_89aff039fec14e6a8b21efe6ea9433dd",
+            "observation_id": "case:b22e87a8626d77d56baba769fab1215acad78bc0a3a058cbf6ddf11f2fdd16e8",
+            "origin": "verifier",
+            "policy_ref": {
+              "id": "policy:run_8d362e2382dd43f192d4aafcaea6b118",
+              "revision": 1,
+              "sha256": "1d78cd55da4b865bae3a601127ce546690e27631d3301a812ea8dc977b78e641"
+            },
+            "record_hash": "3a9cafea982e647f3569648509ec017b82a4ccba18360c7b5a03619ffc0b411f",
+            "record_type": "case-observation-v1",
+            "run_id": "run_8d362e2382dd43f192d4aafcaea6b118",
+            "runtime_environment_hash": "a045a7e32c63334b3eb656a56a312221721760e9bf2167c2c31db21677e9e282",
+            "subject": {
+              "id": "candidate_115edf453bb9415586a782751cfa5ec4",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "2b1ff80c883a9020f96f8678b6653178241d68579ccd82c19096cb608983f462"
+            },
+            "subject_role": "candidate",
+            "trust": "locally_reported"
+          }
+        ],
+        "check_observation_refs": [
+          {
+            "observation_id": "observation:job_89aff039fec14e6a8b21efe6ea9433dd:0",
+            "record_hash": "68383cd3932ac5f92d65aff49e87ad23323084b7ab408606bd73c29f13ee077b"
+          },
+          {
+            "observation_id": "observation:job_89aff039fec14e6a8b21efe6ea9433dd:1",
+            "record_hash": "4b59fec07ae579d907b92d94751a3e51f96c26449fa4015b416cb45924ae7dcc"
+          }
+        ],
+        "requirement_observations": {
+          "meaning": "declared_links_and_observed_execution_not_goal_proof",
+          "requirements": [
+            {
+              "declared_scenarios_observed": true,
+              "failed_check_ids": [
+                "domain.behavior"
+              ],
+              "known_gap_ids": [],
+              "linked_cases_passed": false,
+              "linked_checks_passed": false,
+              "requirement_id": "behavior",
+              "scenarios": [
+                {
+                  "check_id": "domain.behavior",
+                  "check_observation_id": "observation:job_89aff039fec14e6a8b21efe6ea9433dd:1",
+                  "executed": true,
+                  "observation_id": "case:b22e87a8626d77d56baba769fab1215acad78bc0a3a058cbf6ddf11f2fdd16e8",
+                  "required": true,
+                  "scenario_id": "required",
+                  "status": "failed",
+                  "test_ref": {
+                    "case_id": "test_cases.py::test_required",
+                    "framework": "pytest",
+                    "path": "test_cases.py"
+                  }
+                }
+              ],
+              "status": "linked_checks_failed"
+            }
+          ],
+          "schema_version": "develop-requirement-observations-v1",
+          "scope": {
+            "acceptance_binding_hash": "b2087d00d818c5eb0215a5b5cc668ed481ac560b42b087b7b77d425632fd6b12",
+            "candidate_hash": "69eceab38ef260bddff26213d1025e2bb1d2d182473e5c51c33161b5166bfb60",
+            "check_set_hash": "6ff82c11202b11be273146758296e404e6a1209208f774793ab9b479ace7c222",
+            "contract_hash": "ca589ccc4acad5b529769fc5d0faa0ee0a1bef64ce785c01d1e3c1fae78a288b",
+            "job_id": "job_89aff039fec14e6a8b21efe6ea9433dd",
+            "run_id": "run_8d362e2382dd43f192d4aafcaea6b118"
+          }
+        }
+      },
+      {
+        "task": "declared_case_passed",
+        "test_source_sha256": "8bb3770bcd066f4498d089623bc3b2b1ad99660a0515c9c371908db6920622a6",
+        "A_process_exit_passed": true,
+        "B_domain_case_rules_passed": true,
+        "C_core_gate_passed": true,
+        "C_completed_allowed": true,
+        "adapter_seconds": 1.4535526850086171,
+        "core_verification_seconds": 3.596650405001128,
+        "run_id": "run_8584597bb973447cb35df665d0ecb09a",
+        "job_id": "job_b7f0e760900a45a8a4554f41a6d2c27f",
+        "measurement_status": "passed",
+        "case_outcomes": {
+          "test_cases.py::test_required": "passed"
+        },
+        "case_observations": [
+          {
+            "acceptance_binding_hash": "9ff7e83e08fd6ac39bc276759bee4e3ba09a01b6990f2041393e30a8551fcaa4",
+            "adapter_identity": {
+              "artifact_key": "c184c7f3e8d4e708beb787c6695fa222b2ff2d3001db8d2defb63e2449451515",
+              "id": "pytest-cases-v1",
+              "identity_hash": "c81bd05676b7612ff13eebdf0e02718f14c710ddc336dd1a04a02b1c115425c8",
+              "package_hash": "8fe5ae94845b46cc795e56a947c815f89e1aed8a08bd4f163bf2a397e42e2504",
+              "revision": "1",
+              "runner_hash": "8cb55ff92ac7961186b5b8a9acb3f78dd5c520d4b9641dcf2bcf359a00b0725f",
+              "runtime_hash": "0faec2992691780b5eb600c892d8c2c087c1b56be9bf6a9c9a56541c5d224172",
+              "versions": {
+                "iniconfig": "2.3.0",
+                "packaging": "26.3",
+                "pluggy": "1.6.0",
+                "pygments": "2.21.0",
+                "pytest": "9.1.1"
+              }
+            },
+            "attempt": 1,
+            "candidate_hash": "81b3765ef26cad3e748818b275b35cd7e3f4a0bdbd2a5b214a2c62e7c2f39835",
+            "case": {
+              "case_id": "test_cases.py::test_required",
+              "discovered": true,
+              "duration_seconds": 0.0005828760040458292,
+              "executed": true,
+              "finished": true,
+              "framework": "pytest",
+              "outcome": "passed",
+              "path": "test_cases.py",
+              "phases": [
+                {
+                  "duration": 0.00022484900546260178,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "setup",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.00018751999596133828,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "call",
+                  "wasxfail": null
+                },
+                {
+                  "duration": 0.00017050700262188911,
+                  "message": null,
+                  "outcome": "passed",
+                  "phase": "teardown",
+                  "wasxfail": null
+                }
+              ],
+              "selected": true,
+              "started": true
+            },
+            "check_id": "domain.behavior",
+            "check_ref": {
+              "id": "check:run_8584597bb973447cb35df665d0ecb09a:domain.behavior",
+              "revision": 1,
+              "sha256": "25c98db1e1432df0b619ff8d0524cd0d2f792074127202fdd71a8c78f9ba60c8"
+            },
+            "check_set_hash": "40e0d0fb2bec9abaa6687dc23d1e04f01ad04b43d5bf1491f2976834d37f2ac5",
+            "contract_hash": "5ff394609e9331979ea2984102a1769c735773a1da512ad4461e4250fa5f7678",
+            "domain_identity": {
+              "configuration_hash": "3ca3d1236ffa3bb9d32f73e0b75d144aa46742c01603f4713eb00f3d83ebb1da",
+              "id": "develop",
+              "identity_hash": "21bc817eb9f29814e6a95cf3ad65d756bba922dbbdd2d0eb9e265b8ebea43849",
+              "implementation_hash": "40601f9b8dad53de46792686fd700f1b2224cd0a6fec5e06d896771615a51c88",
+              "revision": "develop-external-5",
+              "schema_version": "domain-identity-v2"
+            },
+            "execution_observation_id": "observation:job_b7f0e760900a45a8a4554f41a6d2c27f:1",
+            "interpretation_ref": {
+              "id": "interpretation:run_8584597bb973447cb35df665d0ecb09a",
+              "revision": 1,
+              "sha256": "0be45b041cf372d53983b0698c153f6a65bc421a4f1617b3b5b2c3af75a9a91a"
+            },
+            "job_id": "job_b7f0e760900a45a8a4554f41a6d2c27f",
+            "observation_id": "case:eba1ea62d328f987fa97f28937fdeaa8c3621561d2e8f962765023b1ef1dd81e",
+            "origin": "verifier",
+            "policy_ref": {
+              "id": "policy:run_8584597bb973447cb35df665d0ecb09a",
+              "revision": 1,
+              "sha256": "eba7a884ccd41c0c91dbd320b377059baff75f97977d28d5e0cd31849874f2d7"
+            },
+            "record_hash": "b1caa7842b9826e69f4d9b71c7b7a0743b5f24a997c7e0fb52e19de4c0a89482",
+            "record_type": "case-observation-v1",
+            "run_id": "run_8584597bb973447cb35df665d0ecb09a",
+            "runtime_environment_hash": "a045a7e32c63334b3eb656a56a312221721760e9bf2167c2c31db21677e9e282",
+            "subject": {
+              "id": "candidate_38b9828715fb492cb8d6ef1f8adbd40c",
+              "kind": "candidate",
+              "revision": 1,
+              "sha256": "76addacbd85fc608cdaa33e6b46eb8db6e8d1a4d72e7e9682acb1a0961a1958c"
+            },
+            "subject_role": "candidate",
+            "trust": "locally_reported"
+          }
+        ],
+        "check_observation_refs": [
+          {
+            "observation_id": "observation:job_b7f0e760900a45a8a4554f41a6d2c27f:0",
+            "record_hash": "b23e85368058c6d32470749d6bba9c267ef2a474de73afe8576d24c356c351d3"
+          },
+          {
+            "observation_id": "observation:job_b7f0e760900a45a8a4554f41a6d2c27f:1",
+            "record_hash": "4cba854060c5644ec98b3cbf5a521214f41dd93b138677b72ee9d1ab1ec68f61"
+          }
+        ],
+        "requirement_observations": {
+          "meaning": "declared_links_and_observed_execution_not_goal_proof",
+          "requirements": [
+            {
+              "declared_scenarios_observed": true,
+              "failed_check_ids": [],
+              "known_gap_ids": [],
+              "linked_cases_passed": true,
+              "linked_checks_passed": true,
+              "requirement_id": "behavior",
+              "scenarios": [
+                {
+                  "check_id": "domain.behavior",
+                  "check_observation_id": "observation:job_b7f0e760900a45a8a4554f41a6d2c27f:1",
+                  "executed": true,
+                  "observation_id": "case:eba1ea62d328f987fa97f28937fdeaa8c3621561d2e8f962765023b1ef1dd81e",
+                  "required": true,
+                  "scenario_id": "required",
+                  "status": "passed",
+                  "test_ref": {
+                    "case_id": "test_cases.py::test_required",
+                    "framework": "pytest",
+                    "path": "test_cases.py"
+                  }
+                }
+              ],
+              "status": "linked_checks_passed"
+            }
+          ],
+          "schema_version": "develop-requirement-observations-v1",
+          "scope": {
+            "acceptance_binding_hash": "9ff7e83e08fd6ac39bc276759bee4e3ba09a01b6990f2041393e30a8551fcaa4",
+            "candidate_hash": "81b3765ef26cad3e748818b275b35cd7e3f4a0bdbd2a5b214a2c62e7c2f39835",
+            "check_set_hash": "40e0d0fb2bec9abaa6687dc23d1e04f01ad04b43d5bf1491f2976834d37f2ac5",
+            "contract_hash": "5ff394609e9331979ea2984102a1769c735773a1da512ad4461e4250fa5f7678",
+            "job_id": "job_b7f0e760900a45a8a4554f41a6d2c27f",
+            "run_id": "run_8584597bb973447cb35df665d0ecb09a"
+          }
+        }
+      }
+    ],
+    "limitations": [
+      "Fixed synthetic artifacts, not Host/model A/B/C performance or cost evidence.",
+      "A and B share one execution; their difference is the criterion, not solver behavior.",
+      "Temporary Run stores are removed after validation; this report retains case bodies, outcomes and bindings."
+    ]
+  },
+  "prior_interrupted_attempt": {
+    "observed_wall_elapsed_seconds": 5185.763948440552,
+    "pytest_test_elapsed_seconds": 0.864,
+    "run_deadline_seconds": 3600,
+    "effect": "Expired result discarded before case collection; no gates passed.",
+    "cause_of_wall_clock_change": "not established",
+    "limits_changed": false,
+    "recheck": "five related tests and final complete suite passed"
+  },
+  "limitations": [
+    "Case observations are local-advisory and locally reported; protected attestation and test validity are not established.",
+    "Namespace backend on Linux/WSL; Windows-native adapter execution is unsupported.",
+    "The A/B/C fixed-artifact pilot is not a Luna/AGY or other model performance comparison.",
+    "Additional project dependencies and plugins are not installed automatically."
+  ],
+  "model_calls": 0,
+  "model_comparison": false,
+  "committed": false,
+  "pushed": false
+}

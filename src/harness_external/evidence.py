@@ -13,7 +13,7 @@ def execution_status(report, sandbox=None):
     if reason.startswith("SANDBOX_LIMIT_EXCEEDED"):
         return "error"
     if result["execution"] == "not_run":
-        return "unavailable" if reason.startswith(("SANDBOX_ADAPTER_UNAVAILABLE", "SANDBOX_SETUP_FAILED", "SANDBOX_UNAVAILABLE")) else "not_run"
+        return "unavailable" if reason.startswith(("SANDBOX_ADAPTER_UNAVAILABLE", "SANDBOX_SETUP_FAILED", "SANDBOX_UNAVAILABLE", "ADAPTER_UNAVAILABLE")) else "not_run"
     return "error"
 
 
@@ -21,11 +21,17 @@ def scope(items):
     kinds = Counter(item["kind"] for item in items)
     statuses = Counter(item["execution_status"] for item in items)
     completed_commands = sum(item["kind"] == "command" and item["execution_status"] == "completed" for item in items)
-    return {"file_checks": kinds["file"], "command_checks": kinds["command"],
+    result = {"file_checks": kinds["file"], "command_checks": kinds["command"],
             "completed_commands": completed_commands, "execution_statuses": dict(statuses),
             "test_case_count": None, "test_case_scope": "not_collected_by_generic_command_exit_measurement",
             "goal_satisfaction": "not_measured", "check_validity": "not_independently_established",
             "observations": items}
+    cases = [item["case_summary"] for item in items if item.get("case_summary")]
+    if cases:
+        result.update(test_case_count=sum(c["executed_count"] for c in cases), test_case_scope="observed_case_runs_in_case_aware_checks",
+                      discovered_case_count=sum(c["discovered_count"] for c in cases), selected_case_count=sum(c["selected_count"] for c in cases),
+                      test_case_count_complete=len(cases) == kinds["command"] and all(c["collection_complete"] and c["session_complete"] for c in cases))
+    return result
 
 
 def unmeasured():
@@ -57,6 +63,9 @@ def compare(items, job, run):
                 reasons.append("recorded_environment_changed")
             if before["execution_status"] != "completed" or after["execution_status"] != "completed":
                 reasons.append("execution_not_completed")
+            prior_cases, current_cases = before.get("case_summary"), after.get("case_summary")
+            if prior_cases and current_cases and prior_cases.get("case_scope_hash") != current_cases.get("case_scope_hash"):
+                reasons.append("observed_case_scope_changed")
         comparable = not reasons
         state = "inconclusive"
         if comparable:
