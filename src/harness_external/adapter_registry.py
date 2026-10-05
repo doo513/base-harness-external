@@ -7,17 +7,15 @@ These are local-advisory consistency checks, not a same-user trust boundary.
 import copy
 from dataclasses import asdict, dataclass, field
 import hashlib
-import importlib
-import importlib.util
 import inspect
 from pathlib import Path
 import re
-import sys
 import threading
 
 from harness.common import canonical_bytes, canonical_hash
 from .errors import fields, relative_path, require
 from .registry import code_identity
+from .adapter_loading import load_module
 
 METHODS = ("runtime", "command", "stage", "observer")
 _IMPORT_LOCK = threading.RLock()
@@ -60,7 +58,7 @@ class AdapterRegistry:
             self._registrations[value.adapter_id] = value
 
     def resolve(self, adapter_id):
-        # sys.path is process-global; registration contexts must not interleave.
+        # Serialize registry instance creation and private package initialization.
         with _IMPORT_LOCK:
             return self._resolve(adapter_id)
 
@@ -69,28 +67,15 @@ class AdapterRegistry:
         if adapter_id not in self._instances:
             entry = self._registrations[adapter_id]
             module_name, name = entry.factory.split(":")
-            before_path = list(sys.path)
             try:
-                if entry.import_root is not None:
-                    sys.path.insert(0, entry.import_root)
-                spec = importlib.util.find_spec(module_name)
-                require(spec is not None and spec.origin is not None and Path(spec.origin).is_file(),
-                        "ADAPTER_UNAVAILABLE", "Registered factory source is unavailable")
-                source = Path(spec.origin).resolve()
-                require(entry.import_root is None or source.is_relative_to(Path(entry.import_root).resolve()),
-                        "ADAPTER_IMPORT_CONTEXT", "A different installation already owns this module name")
                 expected = self._expected.get(adapter_id)
-                if expected:
-                    require(hashlib.sha256(source.read_bytes()).hexdigest() == expected["factory_source_hash"],
-                            "ADAPTER_IMPLEMENTATION_CHANGED", "Registered factory changed before worker import")
-                factory = getattr(importlib.import_module(module_name), name, None)
-                require(inspect.isclass(factory) and factory.__module__ == module_name and factory.__name__ == name,
+                module = load_module(module_name, entry.import_root, expected["factory_source_hash"] if expected else None)
+                factory = getattr(module, name, None)
+                require(inspect.isclass(factory) and factory.__module__ == module.__name__ and factory.__name__ == name,
                         "ADAPTER_REGISTRATION_INVALID", "Factory must be defined in the registered module")
                 adapter = factory(**copy.deepcopy(entry.config))
             except (ImportError, AttributeError) as error:
                 require(False, "ADAPTER_UNAVAILABLE", "Cannot load registered adapter: " + str(error))
-            finally:
-                sys.path[:] = before_path
             require(getattr(adapter, "adapter_id", None) == adapter_id and isinstance(getattr(adapter, "revision", None), str)
                     and bool(adapter.revision) and all(callable(getattr(adapter, method, None)) for method in METHODS),
                     "ADAPTER_MODULE_INVALID", "Adapter does not implement the execution port")

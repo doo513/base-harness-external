@@ -210,7 +210,7 @@ def independent_run(tmp_path, monkeypatch):
 
 def test_materialized_command_receipt_cannot_be_replaced(tmp_path, monkeypatch):
     api, run_id = independent_run(tmp_path, monkeypatch)
-    monkeypatch.setattr("harness_external.adapter_execution.execute", lambda *args:
+    monkeypatch.setattr("harness_external.adapter_execution.execute", lambda *args, **kwargs:
                         ({"status": "completed", "capture": {"argv": ["wrong-command"], "cwd": "."}}, None))
     job_id = api.verify(run_id, "verify")["job_id"]
     execute_job(api.store.root, job_id)

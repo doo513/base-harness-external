@@ -91,6 +91,33 @@ class Harness:
             run.update(status="blocked", phase="handoff", termination_reason="DEADLINE_EXCEEDED")
             self.store.save_run(connection, run)
 
+    def _mutation_snapshot(self, run_id, request_id, fingerprint, *, verification=False):
+        """Admit briefly, as submit() does; preparation must not hold a writer."""
+        with self.store.transaction() as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior, None
+            run = self.store.run(connection, run_id)
+            self._admit(connection, run, verification=verification, request=(run_id, request_id, fingerprint))
+            # Successful admission changes only this detached copy. The action
+            # is charged at publication; terminal limit errors are durable now.
+            return None, run
+
+    def _publish_prepared_run(self, run, expected_revision, request_id, fingerprint, result):
+        run_id = run["run_id"]
+        with self.store.transaction() as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior
+            current = self.store.run(connection, run_id)
+            self._admit(connection, current, request=(run_id, request_id, fingerprint))
+            require(current["revision"] == expected_revision and not current["active_job"],
+                    "RUN_CONFLICT", "Run changed during preparation; inspect its current revision before retrying")
+            run["actions"] = current["actions"]
+            self.store.save_run(connection, run)
+            self.store.remember(connection, run_id, request_id, fingerprint, result)
+            return result
+
     def _refresh_for_read(self, run_id):
         with self.store.transaction(write=False) as connection:
             run = self.store.run(connection, run_id)
@@ -380,12 +407,11 @@ class Harness:
     def revise(self, run_id: str, proposal: dict, request_id: str):
         fields(proposal, {"expected_revision", "goal_summary", "parameters", "assumptions", "open_questions", "observation_ids", "activity_ids"}, {"expected_revision"})
         fingerprint = canonical_hash({"operation": "revise", "proposal": proposal})
-        with self.store.transaction() as connection:
-            prior = self.store.replay(connection, run_id, request_id, fingerprint)
-            if prior:
-                return prior
-            run = self.store.run(connection, run_id)
-            self._admit(connection, run, request=(run_id, request_id, fingerprint))
+        prior, run = self._mutation_snapshot(run_id, request_id, fingerprint)
+        if prior:
+            return prior
+        expected_revision = run["revision"]
+        with self.store.transaction(write=False) as connection:
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait for the owned verification before revising")
             previous = run["interpretations"][-1]
             require(len(run["interpretations"]) < 100, "INTERPRETATION_LIMIT", "Interpretation history limit reached")
@@ -442,21 +468,18 @@ class Harness:
             run.update(domain_questions=prepared["questions"], phase="waiting_input" if prepared["status"] == "needs_input" else "awaiting_submission",
                        verification={"status": "not_run"})
             run["domain_preparation"] = self._domain_preparation_view(prepared)
-            self.store.save_run(connection, run)
             result = response(run_id=run_id, interpretation=interpretation, phase=run["phase"],
                               questions=run["domain_questions"], domain_preparation=run["domain_preparation"])
-            self.store.remember(connection, run_id, request_id, fingerprint, result)
-            return result
+        return self._publish_prepared_run(run, expected_revision, request_id, fingerprint, result)
 
     def register_check(self, run_id: str, proposal: dict, request_id: str):
         fields(proposal, {"check_id", "parameters", "expected_revision", "interpretation_revision", "provenance"}, {"check_id", "parameters", "interpretation_revision"})
         fingerprint = canonical_hash({"operation": "check", "proposal": proposal})
-        with self.store.transaction() as connection:
-            prior = self.store.replay(connection, run_id, request_id, fingerprint)
-            if prior:
-                return prior
-            run = self.store.run(connection, run_id)
-            self._admit(connection, run, request=(run_id, request_id, fingerprint))
+        prior, run = self._mutation_snapshot(run_id, request_id, fingerprint)
+        if prior:
+            return prior
+        expected_revision = run["revision"]
+        with self.store.transaction(write=False):
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Cannot change checks while verification owns the Run")
             latest = run["interpretations"][-1]["ref"]
             require(type(proposal["interpretation_revision"]) is int and proposal["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Check proposal refers to an older interpretation")
@@ -477,10 +500,8 @@ class Harness:
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]
             run["verification"] = {"status": "not_run"}
-            self.store.save_run(connection, run)
             result = response(run_id=run_id, check=created, gated=key in run["gate_bindings"])
-            self.store.remember(connection, run_id, request_id, fingerprint, result)
-            return result
+        return self._publish_prepared_run(run, expected_revision, request_id, fingerprint, result)
 
     def retire_check(self, run_id: str, proposal: dict, request_id: str):
         fields(proposal, {"check_id", "expected_revision", "interpretation_revision", "reason"},
@@ -610,18 +631,26 @@ class Harness:
         fingerprint = canonical_hash(request)
         # Optional runtime packaging can perform substantial file I/O. Keep it
         # outside the writer transaction so other Runs can checkpoint/heartbeat.
-        with self.store.transaction(write=False) as connection:
-            prior = self.store.replay(connection, run_id, request_id, fingerprint)
-            if prior:
-                return prior
-            initial = self.store.run(connection, run_id)
-            initial_checks = copy.deepcopy(semantics.current_checks(initial))
-            initial_check_hash = semantics.check_set_hash(initial_checks)
+        prior, initial = self._mutation_snapshot(run_id, request_id, fingerprint, verification=True)
+        if prior:
+            return prior
+        require(not initial["active_job"], "VERIFICATION_ACTIVE", "A verifier already owns this Run")
+        require(initial["candidate"] is not None, "SUBMIT_REQUIRED", "Submit a snapshot before verification")
+        require("verify" in initial["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation has not admitted measurements")
+        initial_checks = copy.deepcopy(semantics.current_checks(initial))
+        initial_check_hash = semantics.check_set_hash(initial_checks)
+        require(initial["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed; start a new Run with the new version")
+        self._validate_checks(initial, initial["contract"])
+        if initial.get("acceptance"):
+            acceptance.validate(initial["acceptance"], self.store.directory(run_id))
+            acceptance.validate_subject(initial["acceptance"], initial["candidate"])
         from .adapter_execution import bind as bind_adapters
         prepared_implementations = self.adapters.pin_implementations(
             [item["spec"]["parameters"] for item in initial_checks], initial.get("adapter_implementations"))
         prepared_bindings = bind_adapters(initial_checks, self.store.root, initial.get("adapter_bindings"), self.adapters)
         prepared_registrations = self.adapters.export(prepared_bindings)
+        self.adapters.validate_bindings(prepared_bindings)
+        self.adapters.pin_implementations([], prepared_implementations)
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -634,18 +663,15 @@ class Harness:
                     "CANDIDATE_SUPERSEDED", "Another submission replaced the expected Candidate; no verification was started")
             require(not compare_baseline or run.get("baseline"), "BASELINE_REQUIRED", "This Run has no pre-edit baseline; do not reconstruct one from edited files")
             require("verify" in run["domain_preparation"]["available_operations"], "NEEDS_INPUT", "Domain preparation has not admitted measurements")
-            require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed; start a new Run with the new version")
+            require(run["revision"] == initial["revision"], "VERIFICATION_CONFLICT", "Run changed while preparing verification")
             job_id = "job_" + uuid.uuid4().hex
             now = time.time()
             checks = copy.deepcopy(semantics.current_checks(run))
-            self._validate_checks(run, run["contract"])
             require(semantics.check_set_hash(checks) == initial_check_hash, "VERIFICATION_CONFLICT", "Checks changed while preparing adapter runtimes")
             require(all(old.get("status") == "unavailable" or prepared_bindings.get(key) == old
                         for key, old in run.get("adapter_bindings", {}).items()), "ADAPTER_RUNTIME_CHANGED", "Another request pinned a different runtime")
-            self.adapters.validate_bindings(prepared_bindings)
             require(all(prepared_implementations.get(key) == value for key, value in run.get("adapter_implementations", {}).items()),
                     "ADAPTER_IMPLEMENTATION_CHANGED", "Another request pinned a different adapter")
-            self.adapters.pin_implementations([], prepared_implementations)
             require(all(binding["implementation"] == prepared_implementations[binding["id"]] for binding in prepared_bindings.values()),
                     "ADAPTER_IMPLEMENTATION_CHANGED", "Runtime binding differs from admitted adapter")
             run["adapter_implementations"] = prepared_implementations
@@ -665,8 +691,6 @@ class Harness:
                 job["baseline"] = copy.deepcopy(run["baseline"])
             job.update(check_set_hash=semantics.check_set_hash(checks), domain_identity=copy.deepcopy(run["domain_module"]))
             if run.get("acceptance"):
-                acceptance.validate(run["acceptance"], self.store.directory(run_id))
-                acceptance.validate_subject(run["acceptance"], run["candidate"])
                 job["acceptance_binding_hash"] = run["acceptance"]["binding_hash"]
             require(job["total_checks"] > 0, "CHECKS_REQUIRED", "Register a measurement before verification")
             run.update(active_job=job_id, phase="verifying", verification={"status": "queued", "job_id": job_id},
@@ -785,6 +809,47 @@ class Harness:
         except (OSError, HarnessError):
             return False
 
+    def _validate_completion(self, connection, run, gate_results, *, validate_result=False):
+        require(run["status"] == "active" and time.time() < run["deadline_at"], "RUN_CLOSED", "Expired/blocked Runs can only finish as partial or abandoned")
+        require(not run["active_job"] and "finish_completed" in run["domain_preparation"]["available_operations"] and gate_results["status"] in {"passed", "not_required"},
+                "VERIFICATION_REQUIRED", "Pinned completion gates have not been satisfied")
+        if run["policy"]["mode"] == "strict":
+            require(run["verification"]["status"] == "passed", "VERIFICATION_REQUIRED", "Strict policy requires all measurements to pass")
+        require(not run["contract"]["rules"].get("snapshot_required", False) or run["candidate"] is not None,
+                "SUBMIT_REQUIRED", "The contract requires a submitted snapshot before completion")
+        job = self.store.job(connection, run["verification"]["job_id"]) if run["verification"].get("job_id") else None
+        observed = (job.get("result") or {}) if job else {}
+        if run["policy"]["mode"] == "strict":
+            require(job is not None and job["status"] == "completed", "VERIFICATION_REQUIRED", "Strict policy requires a completed verifier job")
+        if observed:
+            if validate_result:
+                self.store.validate_result(connection, job)
+            require(observed.get("result_hash") == canonical_hash({k: v for k, v in observed.items() if k != "result_hash"})
+                    and observed.get("result_hash") == run["verification"].get("result_hash"),
+                    "RESULT_CORRUPT", "Verification result digest/status mismatch")
+            require(job["candidate_hash"] == run["candidate"]["candidate_hash"] and job["contract_hash"] == run["contract"]["contract_hash"],
+                    "RESULT_BINDING", "Verification does not cover the current candidate/contract")
+            require(job.get("check_set_hash") == semantics.check_set_hash(semantics.current_checks(run)),
+                    "RESULT_BINDING", "Verification does not cover the current check set")
+
+    def _completion_snapshot(self, run_id, request_id, fingerprint):
+        with self.store.transaction(write=False) as connection:
+            prior = self.store.replay(connection, run_id, request_id, fingerprint)
+            if prior:
+                return prior, None
+            run = self.store.run(connection, run_id)
+            self._validate_completion(connection, run, semantics.gates(run, self.store.gate_measurements(connection, run)), validate_result=True)
+        if run["candidate"]:
+            validate_candidate(run["candidate"], self.store.directory(run_id) / identifier(run["candidate"]["candidate_id"], "candidate") / "payload")
+            if run.get("acceptance"):
+                acceptance.validate(run["acceptance"], self.store.directory(run_id))
+                acceptance.validate_subject(run["acceptance"], run["candidate"])
+        require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
+        self.adapters.validate_bindings(run.get("adapter_bindings", {}))
+        self.adapters.pin_implementations([], run.get("adapter_implementations"))
+        self._module(run)
+        return None, run
+
     def finish(self, run_id: str, request_id: str, *, outcome: str, summary: str = "", assessment: dict | None = None):
         require(outcome in {"completed", "partial", "abandoned"} and isinstance(summary, str) and len(summary) <= 16000,
                 "INVALID_FINISH", "Outcome is completed, partial or abandoned")
@@ -792,6 +857,11 @@ class Harness:
         if assessment is not None:
             request["assessment"] = assessment
         fingerprint = canonical_hash(request)
+        prepared = None
+        if outcome == "completed":
+            prior, prepared = self._completion_snapshot(run_id, request_id, fingerprint)
+            if prior:
+                return prior
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -804,35 +874,8 @@ class Harness:
             measured = self.store.gate_measurements(connection, run)
             gate_results = semantics.gates(run, measured)
             if outcome == "completed":
-                require(run["status"] == "active" and time.time() < run["deadline_at"], "RUN_CLOSED", "Expired/blocked Runs can only finish as partial or abandoned")
-                require(not run["active_job"] and "finish_completed" in run["domain_preparation"]["available_operations"] and gate_results["status"] in {"passed", "not_required"},
-                        "VERIFICATION_REQUIRED", "Pinned completion gates have not been satisfied")
-                if run["policy"]["mode"] == "strict":
-                    require(run["verification"]["status"] == "passed", "VERIFICATION_REQUIRED", "Strict policy requires all measurements to pass")
-                require(not run["contract"]["rules"].get("snapshot_required", False) or run["candidate"] is not None,
-                        "SUBMIT_REQUIRED", "The contract requires a submitted snapshot before completion")
-                job = self.store.job(connection, run["verification"]["job_id"]) if run["verification"].get("job_id") else None
-                observed = (job.get("result") or {}) if job else {}
-                if run["policy"]["mode"] == "strict":
-                    require(job is not None and job["status"] == "completed", "VERIFICATION_REQUIRED", "Strict policy requires a completed verifier job")
-                if observed:
-                    self.store.validate_result(connection, job)
-                    require(
-                        observed.get("result_hash") == canonical_hash({k: v for k, v in observed.items() if k != "result_hash"}) and
-                        observed.get("result_hash") == run["verification"].get("result_hash"), "RESULT_CORRUPT", "Verification result digest/status mismatch")
-                    require(job["candidate_hash"] == run["candidate"]["candidate_hash"] and job["contract_hash"] == run["contract"]["contract_hash"],
-                        "RESULT_BINDING", "Verification does not cover the current candidate/contract")
-                    require(job.get("check_set_hash") == semantics.check_set_hash(semantics.current_checks(run)),
-                            "RESULT_BINDING", "Verification does not cover the current check set")
-                if run["candidate"]:
-                    validate_candidate(run["candidate"], self.store.directory(run_id) / identifier(run["candidate"]["candidate_id"], "candidate") / "payload")
-                    if run.get("acceptance"):
-                        acceptance.validate(run["acceptance"], self.store.directory(run_id))
-                        acceptance.validate_subject(run["acceptance"], run["candidate"])
-                require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
-                self.adapters.validate_bindings(run.get("adapter_bindings", {}))
-                self.adapters.pin_implementations([], run.get("adapter_implementations"))
-                self._module(run)
+                self._validate_completion(connection, run, gate_results)
+                require(run["revision"] == prepared["revision"], "RUN_CONFLICT", "Run changed while checking completion; inspect it before retrying")
             if run["active_job"]:
                 job = self.store.job(connection, run["active_job"])
                 job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")

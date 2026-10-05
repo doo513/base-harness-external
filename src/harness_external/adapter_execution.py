@@ -24,6 +24,11 @@ OUTCOMES = {"passed", "failed", "skipped", "error", "xfail", "xpass", "not_selec
 def command(check, registry=None):
     registry = registry if registry is not None else builtin_adapter_registry()
     execution = registry.resolve(check["adapter"]["id"]).command(copy.deepcopy(check))
+    return validate_command(check, execution)
+
+
+def validate_command(check, execution):
+    """Validate/copy one materialization without invoking an adapter again."""
     fields(execution, {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode"},
            {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode"})
     require(execution["kind"] == "command" and type(execution["expectedExitCode"]) is int and execution["expectedExitCode"] == 0,
@@ -77,7 +82,7 @@ def _case(case):
     return copy.deepcopy(case)
 
 
-def execute(check, payload, state_root, abort, remaining, binding, on_case, registry=None):
+def execute(check, payload, state_root, abort, remaining, binding, on_case, registry=None, *, execution=None):
     from .worker import clean_environment, stop_child
     deadline = time.monotonic() + remaining
     registry = registry if registry is not None else builtin_adapter_registry()
@@ -85,7 +90,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
     registry.validate_bindings({"current": binding})
     require(binding["id"] == check["adapter"]["id"], "ADAPTER_SELECTION_CHANGED", "Check and adapter binding differ")
     adapter = registry.resolve(binding["id"])
-    execution = command(check, registry)
+    execution = command(check, registry) if execution is None else validate_command(check, execution)
     artifact_path = relative_path(adapter.report_path)
     artifact = Path(payload) / artifact_path
     require(not artifact.exists() and not artifact.is_symlink(), "ADAPTER_RESOURCE_CONFLICT", "Snapshot collides with the adapter observation artifact")

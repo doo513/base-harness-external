@@ -1,0 +1,65 @@
+{
+  "schema_version": "adapter-concurrency-validation-v1",
+  "base_commit": "ca49eb0f7c42c2c9e773fcb8644f20ebb9e29245",
+  "verified_at": "2026-10-05T11:29:03.626447+00:00",
+  "scope": [
+    "Prepare revision/check changes, verification setup and completion identity/file checks outside SQLite write transactions, with revision and request replay checks at publication.",
+    "Materialize each adapter command once per Check/subject and reuse it for runtime identity, execution and receipt comparison.",
+    "Load explicit plugin roots in private packages without modifying process-wide sys.path."
+  ],
+  "verification": {
+    "command": "BASE_HARNESS_EXTERNAL_LIVE=1 .venv/bin/python -m pytest -q --junitxml=/tmp/harness-adapter-concurrency-final.xml",
+    "tests": 328,
+    "passed": 328,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 484.897,
+    "new_concurrency_tests": 18,
+    "python": "3.12.3",
+    "sandbox_unit_command": "bun test tests/sandbox.test.ts",
+    "sandbox_unit_passed": 3,
+    "sandbox_unit_failed": 0,
+    "sandbox_unit_skipped": 3,
+    "sandbox_unit_skip_reason": "Windows-specific checks on a Linux host",
+    "bun": "1.4.0",
+    "python_compile": "passed",
+    "diff_check": "passed"
+  },
+  "observed_boundaries": {
+    "slow_adapter_does_not_block_other_run_heartbeat_or_measurement": ["revise", "check", "verify", "finish"],
+    "concurrent_run_changes_are_not_overwritten": ["revise", "check", "verify", "finish"],
+    "same_request_publishes_once": ["revise", "check", "verify", "finish"],
+    "deadline_is_rechecked_after_preparation_and_terminal_error_replayed": true,
+    "finish_rejects_candidate_replacement_during_preparation": true,
+    "unrelated_import_keeps_host_path_during_plugin_load": true,
+    "same_named_modules_and_lazy_relative_imports_are_isolated_by_root": true,
+    "one_command_materialization_per_subject_in_real_sandbox": true,
+    "different_materialized_commands_cannot_claim_comparable_baseline_results": true,
+    "existing_detached_worker_restoration_and_cancellation_regressions_pass": true
+  },
+  "source": {
+    "execution_identity": "8d22f70b7de4879745d2fcfbdfdc709761108772fb91dca3b6f4c8556ac7da18",
+    "source_bundle_hash": "0b216e772d93f4b92533a61c400ae374f20451b47fc0ffdc09059eae09e7b60a",
+    "source_files": 65,
+    "manifest_rule": "SHA-256 each src/**/*.py and tests/**/*.py plus extra_paths, indexed by relative path; SHA-256 the sorted-key compact JSON mapping.",
+    "extra_paths": [
+      "README.md",
+      "POLICIES.md",
+      "scripts/evaluate-pytest-domain.py",
+      "runtime/script/external-harness-sandbox.ts",
+      "runtime/packages/security/src/sandbox.ts"
+    ]
+  },
+  "compatibility": [
+    "Conflicting updates return RUN_CONFLICT or VERIFICATION_CONFLICT; no automatic mutation retry is introduced.",
+    "Plugins using import_root must use package-relative imports for local helpers; absolute imports use installed application dependencies.",
+    "Pinned implementation changes require a new Run. Historical records are not rewritten."
+  ],
+  "limitations": [
+    "Controlled contention and actual local Sandbox checks, not a production load or commercial-model benchmark.",
+    "Plugins remain trusted application code. Reports remain unsigned local-advisory records."
+  ],
+  "committed": false,
+  "pushed": false
+}

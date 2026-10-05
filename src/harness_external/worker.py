@@ -230,6 +230,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                     from .adapter_execution import command as adapter_command
                     execution = adapter_command(check, adapters)
                 environment["top_level_runtime"] = runtime_identity(execution)
+                environment["command_hash"] = canonical_hash({key: execution[key] for key in ("argv", "cwd", "timeout_seconds")})
                 if check.get("adapter"):
                     from .adapter_execution import execute as execute_adapter
                     binding = job["adapter_bindings"][check_record["check_id"]]
@@ -251,7 +252,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                             store.checkpoint_case(connection, job_id, owner, item)
                         case_reports.append({"observation_id": item["observation_id"], "record_hash": item["record_hash"]})
                         case_items.append(item)
-                    capture, case_summary = execute_adapter(check, payload, store.root, abort, job["deadline_at"] - time.time(), binding, checkpoint_case, adapters)
+                    capture, case_summary = execute_adapter(check, payload, store.root, abort, job["deadline_at"] - time.time(), binding, checkpoint_case, adapters,
+                                                           execution=execution)
                 else:
                     environment.pop("adapter_identity", None)
                     capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())

@@ -142,7 +142,10 @@ The framework-neutral `ExecutionAdapter` port has four methods:
 - `runtime(state_root, pinned=None)`: prepare an identity or validate/reuse an
   existing frozen runtime. Raise `AdapterUnavailable` for missing optional setup.
 - `command(check)`: describe bounded argv, cwd, exit condition and timeout. It
-  must not execute the command or increase the admitted timeout.
+  must not execute the command or increase the admitted timeout. Worker calls it
+  once per Check/subject and uses that same materialization for runtime identity,
+  Sandbox execution and receipt comparison. The recorded command digest also
+  prevents differing invocations from being treated as comparable baseline runs.
 - `stage(state_root, runtime, destination, token)`: validate the pinned runtime
   and stage trusted files into the common Sandbox's read-only resource mount.
 - `observer(token, runtime)`: create a fresh session-local `CaseObserver`. Its
@@ -172,8 +175,13 @@ api = Harness(state_dir, domains=my_domains, adapters=adapters)
 
 Factories are explicit top-level Python classes with JSON-compatible constructor
 configuration/defaults. An optional absolute `import_root` names an operator-
-managed plugin directory; it is not discovered from the Candidate. Use unique
-module names and install/register plugins before starting work. Source, methods,
+managed plugin directory; it is not discovered from the Candidate. Explicit roots
+load into private packages without editing the process-wide `sys.path` or replacing
+ordinary module names. Use package-relative imports for helpers inside such a root;
+absolute imports refer to installed application dependencies. Lazy relative imports
+and roots containing the same module names remain separate in Host and Worker.
+Registrations without `import_root` use the application's normal installed packages.
+Source, methods,
 effective configuration and declared `identity_files` dependencies are hashed;
 provide stable `identity_file_ids` and, when needed, explicit `identity_config`.
 Omitted and explicitly supplied constructor defaults have the same identity.
@@ -195,6 +203,13 @@ from the shared Core execution digest. Historical records remain readable.
 The stock CLI uses the built-in pytest registration. Custom applications inject
 their registry through `Harness(..., adapters=...)`; there is no model-facing
 factory-import API or automatic plugin discovery.
+
+Run revision/check preparation, verification setup and completion file/identity
+checks take place outside the SQLite writer transaction. Publication rechecks the
+request ID, current Run revision, lifecycle, budget/deadline and execution ownership.
+Concurrent replay of the same request publishes once. A conflicting Run change
+returns `RUN_CONFLICT` or `VERIFICATION_CONFLICT`; inspect the Run before deciding
+whether to retry. A concurrent update is never overwritten by a prepared copy.
 
 `parameters.validation_profile` may explicitly select `stateful-cli`,
 `concurrent-queue` or `pure-function`. These profiles supply advisory verification
