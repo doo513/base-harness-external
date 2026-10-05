@@ -12,6 +12,7 @@ from . import develop_cases
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
+DEVELOP_REVISION = "develop-external-6"
 
 
 def normalize_file(expectation, inputs):
@@ -203,7 +204,7 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
     require(len({c["check_key"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS",
             "Checks with the same target/operator or command need distinct explicit id values")
     body = {
-        "schema_version": "external-goal-contract-v1", "domain_id": "develop", "domain_revision": "develop-external-4",
+        "schema_version": "external-goal-contract-v1", "domain_id": "develop", "domain_revision": DEVELOP_REVISION,
         "source_domain": {"id": source_domain["id"], "revision": source_domain["revision"], "manifest_hash": canonical_hash(source_domain)},
         "original_goal": goal, "profile": profile, "inputs": sorted(inputs), "artifacts": sorted(artifacts), "checks": checks,
         "verifier": verifier,
@@ -221,7 +222,7 @@ class DevelopModule:
     identity_files = (str(files("harness_external").joinpath("develop_manifest.json")), str(files("harness_external").joinpath("develop_cases.py")))
     identity_file_ids = ("develop-manifest", "develop-case-semantics")
     domain_id = "develop"
-    revision = "develop-external-5"
+    revision = DEVELOP_REVISION
 
     def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
         """Compile configured acceptance plus revisable caller exploration.
@@ -304,6 +305,9 @@ class DevelopModule:
         result["acceptance_check_ids"] = list(required)
         result["coverage_inventory_summary"] = coverage_summary
         result["contract"]["coverage_inventory"] = coverage_inventory
+        links = develop_cases.compile_observation_links(coverage_inventory)
+        if links is not None:
+            result["contract"]["observation_links"] = links
         result["contract"]["acceptance_requirements"] = copy.deepcopy(requirements)
         result["contract"]["limitations"].append("Requirement and scenario links express configured inventory, not proof that tests adequately represent the goal.")
         result["contract"]["contract_hash"] = canonical_hash({k: v for k, v in result["contract"].items() if k != "contract_hash"})
@@ -360,6 +364,7 @@ class DevelopModule:
         require(type(parameters.get("expectedExitCode", 0)) is int and parameters.get("expectedExitCode", 0) == 0,
                 "CHECK_UNSUPPORTED", "Develop command checks expect exit zero")
         if "adapter" in parameters:
+            fields(parameters, {"kind", "expectedExitCode", "timeout_seconds", "adapter"}, {"kind", "adapter"})
             adapter = fields(parameters["adapter"], {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
             require(adapter["id"] == "pytest-cases-v1", "CHECK_UNSUPPORTED", "Unknown case adapter")
             rules = fields(adapter["rules"], {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"},
@@ -367,7 +372,6 @@ class DevelopModule:
             result = develop_cases.normalize({"id": "normalized", "paths": adapter["paths"], "args": adapter["args"],
                          "required_cases": rules["required_case_ids"], "allowed_outcomes": rules["allowed_outcomes"],
                          "timeout_seconds": parameters.get("timeout_seconds", 30)}, contract["inputs"])
-            require(result["argv"] == parameters["argv"] and result["cwd"] == parameters["cwd"] and result["adapter"] == adapter,
-                    "CHECK_SCOPE_CONFLICT", "Case-aware command changed")
+            require(result["adapter"] == adapter, "CHECK_SCOPE_CONFLICT", "Case-aware conditions changed")
             return result
         return normalize_command({key: value for key, value in parameters.items() if key not in {"kind", "expectedExitCode"}})

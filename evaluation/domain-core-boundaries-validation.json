@@ -1,0 +1,75 @@
+{
+  "schema_version": "domain-core-boundaries-validation-v1",
+  "base_commit": "56525a4f44ed8f2de5202c8f6a8f02824b9a3b4f",
+  "verified_at": "2026-10-05T09:34:07.454227+00:00",
+  "scope": [
+    "Remove Worker imports of Develop result aggregation; compile Domain declarations into common observation links.",
+    "Move pytest Runner command, working directory and private resource paths from Domain into the existing verifier adapter."
+  ],
+  "not_in_scope": [
+    "Adapter registry or additional test frameworks",
+    "Model invocation, model comparison or autonomous repair",
+    "New Ready or authentication guarantees"
+  ],
+  "verification": {
+    "command": "BASE_HARNESS_EXTERNAL_LIVE=1 .venv/bin/python -m pytest -q --junitxml=/tmp/harness-domain-boundaries-final.xml",
+    "tests": 293,
+    "passed": 293,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 404.728,
+    "boundary_tests": 40,
+    "python": "3.12.3",
+    "sandbox_unit_command": "bun test tests/sandbox.test.ts",
+    "sandbox_unit_passed": 3,
+    "sandbox_unit_failed": 0,
+    "sandbox_unit_skipped": 3,
+    "sandbox_unit_skip_reason": "Windows-specific checks on a Linux host",
+    "bun": "1.4.0",
+    "python_compile": "passed",
+    "diff_check": "passed"
+  },
+  "observed_boundaries": {
+    "worker_imports_develop": false,
+    "domain_constructs_private_pytest_command": false,
+    "common_links_use_opaque_case_ids": true,
+    "foreign_baseline_and_old_revision_facts_do_not_satisfy_current_links": true,
+    "receipt_is_checked_against_materialized_adapter_command": true,
+    "adapter_artifact_collision_is_rejected_without_overwriting_input": true,
+    "independent_domain_without_develop_imports_completed_in_real_sandbox": true,
+    "independent_domain_reused_existing_pytest_adapter": true,
+    "missing_case_gate_rejection_preserved": true,
+    "queue_baseline_failure_then_candidate_pass_preserved": true,
+    "timeout_partial_observations_preserved": true
+  },
+  "source": {
+    "execution_identity": "1c7e99dbc53f2fb2b9e15c7380af182b330c58fbab081219bb9a5651719174d7",
+    "develop_revision": "develop-external-6",
+    "develop_identity_hash": "4f97e592d9f7ab25aface3935f5a49e52e4927a3b768b4ee2b642fbe9c31a350",
+    "source_bundle_hash": "7468443c8907ab9fe69ada1a92c219be9f79ba06998454a454801c97f252c1ae",
+    "source_files": 58,
+    "manifest_rule": "SHA-256 each src/**/*.py and tests/**/*.py plus extra_paths, indexed by relative path; SHA-256 the sorted-key compact JSON mapping.",
+    "extra_paths": [
+      "README.md",
+      "POLICIES.md",
+      "runtime/script/external-harness-sandbox.ts",
+      "runtime/packages/security/src/sandbox.ts"
+    ]
+  },
+  "compatibility": {
+    "requirement_observations_field_preserved": true,
+    "new_link_schema": "requirement-case-links-v1",
+    "new_report_schema": "requirement-observations-v1",
+    "old_records_rewritten": false,
+    "new_run_required_after_pinned_implementation_change": true
+  },
+  "limitations": [
+    "Controlled code and Sandbox tests, not commercial-model task-quality or cost evidence.",
+    "The independent Domain is a test fixture, not a newly shipped production Domain.",
+    "The adapter remains pytest-only with no registration API.",
+    "Results remain local-advisory and unsigned; linked observations do not prove goal completeness."
+  ],
+  "committed": false,
+  "pushed": false
+}

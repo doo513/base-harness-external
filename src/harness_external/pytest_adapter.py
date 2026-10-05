@@ -6,15 +6,39 @@ import math
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import zipfile
 
 from harness.common import canonical_bytes, canonical_hash
-from .errors import require
+from .errors import HarnessError, fields, integer, relative_path, require
+from .adapter_ports import AdapterUnavailable
 from .snapshots import no_links
 
 ADAPTER_ID = "pytest-cases-v1"
 MAX_EVENTS = 30000
 MAX_REPORT_BYTES = 8 * 1024 * 1024
+REPORT_PATH = ".harness-cases.jsonl"
+RESOURCE_MOUNT = "/opt/harness-runtime"
+
+
+def build_command(check):
+    """Materialize an approved semantic Check into this adapter's command.
+
+    The Domain does not choose the interpreter, runner, mount layout or output
+    file. The Worker binds the actual receipt to this deterministic command.
+    """
+    fields(check, {"kind", "adapter", "expectedExitCode", "timeout_seconds", "check_key", "check_id"}, {"kind", "adapter"})
+    adapter = fields(check["adapter"], {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
+    require(check["kind"] == "command" and adapter["id"] == ADAPTER_ID, "ADAPTER_UNREGISTERED", "Unsupported case adapter")
+    paths, args = adapter["paths"], adapter["args"]
+    require(isinstance(paths, list) and 1 <= len(paths) <= 32, "ADAPTER_COMMAND", "Invalid collection files")
+    for path in paths:
+        relative_path(path)
+    require(isinstance(args, list) and len(args) <= 32 and all(isinstance(arg, str) and len(arg) <= 2000 and "\x00" not in arg for arg in args),
+            "ADAPTER_COMMAND", "Invalid collection arguments")
+    return {"kind": "command", "argv": ["python3", "-I", RESOURCE_MOUNT + "/runner.py", RESOURCE_MOUNT + "/packages.zip",
+                                          REPORT_PATH, json.dumps({"paths": paths, "args": args}, ensure_ascii=False, separators=(",", ":"))],
+            "cwd": ".", "timeout_seconds": integer(check.get("timeout_seconds", 30), 1, 120, "timeout_seconds"), "expectedExitCode": 0}
 
 
 @lru_cache(maxsize=4)
@@ -128,7 +152,7 @@ def prepare_runtime(state_root, *, refresh=False):
 
 class Collector:
     """Normalize a current-session event stream; preserve incomplete knowledge."""
-    def __init__(self, token):
+    def __init__(self, token, expected_version=None):
         self.token = token
         self.sequence = 0
         self.cases = {}
@@ -139,6 +163,7 @@ class Collector:
         self.exit_status = None
         self.framework_version = None
         self.protocol_error = None
+        self.expected_version = expected_version
 
     def feed(self, event):
         require(isinstance(event, dict) and event.get("version") == 1 and event.get("token") == self.token
@@ -151,6 +176,8 @@ class Collector:
         if kind == "session_start":
             require(self.sequence == 1 and event.get("framework") == "pytest", "CASE_REPORT_PROTOCOL", "Missing session start")
             self.framework_version = event["framework_version"]
+            require(self.expected_version is None or self.framework_version == self.expected_version,
+                    "ADAPTER_RUNTIME_CHANGED", "Reporter framework version differs from pinned runtime")
         elif kind == "discovered":
             require(not self.collection_finished, "CASE_REPORT_PROTOCOL", "Discovery arrived after collection finished")
             case_id = event["case_id"]
@@ -241,3 +268,45 @@ class Collector:
                 "cases": list(self.cases.values()), "event_count": self.sequence,
                 "case_scope_hash": canonical_hash({"discovered": sorted(self.cases),
                     "selected": sorted(c["case_id"] for c in self.cases.values() if c["selected"])}) if self.collection_complete else None}
+
+    def finish(self, error=None):
+        if error:
+            self.protocol_error = error
+            self.session_complete = False
+        for case in self.cases.values():
+            if case["selected"] and not case["finished"]:
+                case["outcome"] = "incomplete" if case["started"] else "not_run"
+        return {**self.summary(), "protocol_error": self.protocol_error}
+
+
+class PytestAdapter:
+    adapter_id = ADAPTER_ID
+    revision = "2"
+    report_path = REPORT_PATH
+    identity_files = (str(Path(__file__).with_name("pytest_runner.py")),)
+    identity_file_ids = ("pytest-runner",)
+
+    def runtime(self, state_root, pinned=None):
+        if pinned is not None:
+            return load_runtime(state_root, pinned)["identity"]
+        try:
+            return prepare_runtime(state_root)["identity"]
+        except HarnessError as error:
+            if error.code != "PYTEST_RUNTIME_UNAVAILABLE":
+                raise
+            raise AdapterUnavailable(error.code) from error
+
+    def command(self, check):
+        return build_command(check)
+
+    def stage(self, state_root, runtime, destination, token):
+        loaded = load_runtime(state_root, runtime)
+        for name in ("runner.py", "packages.zip"):
+            shutil.copyfile(Path(loaded["directory"]) / name, destination / name)
+        require(hashlib.sha256((destination / "packages.zip").read_bytes()).hexdigest() == runtime["runtime_hash"]
+                and hashlib.sha256((destination / "runner.py").read_bytes()).hexdigest() == runtime["runner_hash"],
+                "ADAPTER_RUNTIME_CHANGED", "Runtime changed while preparing resources")
+        (destination / "capture.json").write_bytes(canonical_bytes({"token": token}))
+
+    def observer(self, token, runtime):
+        return Collector(token, runtime["versions"]["pytest"])

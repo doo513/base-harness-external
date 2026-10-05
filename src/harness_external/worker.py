@@ -19,7 +19,7 @@ from harness.common import canonical_bytes, canonical_hash, redact
 from .errors import HarnessError, require
 from .snapshots import validate_candidate
 from .store import Store, identifier
-from . import semantics, acceptance, evidence
+from . import semantics, acceptance, evidence, observation_links
 
 
 def clean_environment() -> dict:
@@ -190,6 +190,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
         require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
         require(job.get("check_set_hash") == semantics.check_set_hash(job["checks"]), "CHECK_SET_CHANGED", "Pinned check set changed")
+        from .adapter_registry import AdapterRegistry
+        adapters = AdapterRegistry.restore(job.get("adapter_registrations", {}))
+        adapters.validate_bindings(job.get("adapter_bindings", {}))
         if run.get("acceptance"):
             acceptance.validate(run["acceptance"], store.directory(run["run_id"]))
             require(job.get("acceptance_binding_hash") == run["acceptance"]["binding_hash"],
@@ -222,7 +225,11 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             case_summary = None
             if check["kind"] == "command":
                 check["timeout_seconds"] = max(1, spec["timeoutMs"] // 1000)
-                environment["top_level_runtime"] = runtime_identity(check)
+                execution = check
+                if check.get("adapter"):
+                    from .adapter_execution import command as adapter_command
+                    execution = adapter_command(check, adapters)
+                environment["top_level_runtime"] = runtime_identity(execution)
                 if check.get("adapter"):
                     from .adapter_execution import execute as execute_adapter
                     binding = job["adapter_bindings"][check_record["check_id"]]
@@ -244,17 +251,17 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                             store.checkpoint_case(connection, job_id, owner, item)
                         case_reports.append({"observation_id": item["observation_id"], "record_hash": item["record_hash"]})
                         case_items.append(item)
-                    capture, case_summary = execute_adapter(check, payload, store.root, abort, job["deadline_at"] - time.time(), binding, checkpoint_case)
+                    capture, case_summary = execute_adapter(check, payload, store.root, abort, job["deadline_at"] - time.time(), binding, checkpoint_case, adapters)
                 else:
                     environment.pop("adapter_identity", None)
                     capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time())
-                require(environment["top_level_runtime"] == runtime_identity(check), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
+                require(environment["top_level_runtime"] == runtime_identity(execution), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
                 measured_runtime = capture.get("provenance") or {}
                 environment["sandbox"] = {key: measured_runtime[key] for key in ("backend", "containment", "network", "kernel", "distro") if key in measured_runtime}
-                parameters = {"kind": "command", "argv": check["argv"], "cwd": check["cwd"], "expectedExitCode": 0}
+                parameters = {"kind": "command", "argv": execution["argv"], "cwd": execution["cwd"], "expectedExitCode": 0}
                 if capture["status"] in {"completed", "error"} and capture.get("capture"):
                     receipt = capture["capture"]
-                    require(receipt["argv"] == check["argv"] and receipt["cwd"] == check["cwd"], "RECEIPT_BINDING", "Command receipt identity mismatch")
+                    require(receipt["argv"] == execution["argv"] and receipt["cwd"] == execution["cwd"], "RECEIPT_BINDING", "Command receipt identity mismatch")
                     measurement["capture"] = {**receipt, "stdout": redact(receipt["stdout"]), "stderr": redact(receipt["stderr"])}
                     provenance = capture.get("provenance")
                 else:
@@ -307,6 +314,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                                    "execution_status": checkpoint["execution_status"], "comparison_status": checkpoint["comparison_status"],
                                    "case_summary": checkpoint.get("case_summary")})
         validate_candidate(candidate, payload)
+        adapters.validate_bindings(job.get("adapter_bindings", {}))
         status = "passed" if all(s == "passed" for s in comparisons) else "failed"
         if "incomplete" in comparisons:
             status = "incomplete"
@@ -316,12 +324,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                   "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
                   "baseline_comparison": evidence.compare(measured_scope, job, run),
                   "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
-        from .develop_cases import requirement_report
         result.update(case_observation_refs=case_reports,
-                      requirement_observations=requirement_report(run["contract"], check_items, case_items))
-        if result["requirement_observations"] is not None:
-            result["requirement_observations"]["scope"] = {"run_id": run["run_id"], "job_id": job_id, "candidate_hash": job["candidate_hash"],
-                        "check_set_hash": job["check_set_hash"], "contract_hash": job["contract_hash"], "acceptance_binding_hash": job.get("acceptance_binding_hash")}
+                      requirement_observations=observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
         result["result_hash"] = canonical_hash(result)
     except Exception as error:
         failure = {"code": getattr(error, "code", "VERIFICATION_ERROR"), "message": str(redact(str(error)))[:2000]}
@@ -332,12 +336,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                       "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
                       "baseline_comparison": evidence.compare(measured_scope, job, run),
                       "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
-            from .develop_cases import requirement_report
             result.update(case_observation_refs=case_reports,
-                          requirement_observations=requirement_report(run["contract"], check_items, case_items))
-            if result["requirement_observations"] is not None:
-                result["requirement_observations"]["scope"] = {"run_id": run["run_id"], "job_id": job_id, "candidate_hash": job["candidate_hash"],
-                            "check_set_hash": job["check_set_hash"], "contract_hash": job["contract_hash"], "acceptance_binding_hash": job.get("acceptance_binding_hash")}
+                          requirement_observations=observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
             result["result_hash"] = canonical_hash(result)
     finally:
         done.set()

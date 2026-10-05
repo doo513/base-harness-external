@@ -1,0 +1,75 @@
+{
+  "schema_version": "adapter-interface-validation-v1",
+  "base_commit": "56525a4f44ed8f2de5202c8f6a8f02824b9a3b4f",
+  "prior_stage_report": "evaluation/domain-core-boundaries-validation.json",
+  "verified_at": "2026-10-05T10:17:57.820516+00:00",
+  "scope": [
+    "ExecutionAdapter and CaseObserver ports with explicit application-owned registrations",
+    "Framework-neutral strict Sandbox transport and migrated built-in PytestAdapter",
+    "Pinned adapter implementation/configuration at Check admission and runtime binding at verification",
+    "Detached Worker reconstruction, per-session isolation and completion binding records"
+  ],
+  "verification": {
+    "command": "BASE_HARNESS_EXTERNAL_LIVE=1 .venv/bin/python -m pytest -q --junitxml=/tmp/harness-adapter-interface-final.xml",
+    "tests": 310,
+    "passed": 310,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 457.310,
+    "adapter_registry_tests": 17,
+    "targeted_domain_adapter_tests_passed": 88,
+    "python": "3.12.3",
+    "sandbox_unit_command": "bun test tests/sandbox.test.ts",
+    "sandbox_unit_passed": 3,
+    "sandbox_unit_failed": 0,
+    "sandbox_unit_skipped": 3,
+    "sandbox_unit_skip_reason": "Windows-specific checks on a Linux host",
+    "bun": "1.4.0",
+    "python_compile": "passed",
+    "diff_check": "passed"
+  },
+  "observed_boundaries": {
+    "worker_and_shared_transport_import_concrete_pytest_adapter": false,
+    "registration_roundtrip_retains_identity": true,
+    "unknown_or_duplicate_adapter_is_rejected": true,
+    "check_cannot_register_a_factory": true,
+    "implementation_change_before_first_verification_is_rejected": true,
+    "implementation_or_config_change_before_finish_is_rejected": true,
+    "runtime_and_binding_corruption_is_rejected": true,
+    "omitted_and_explicit_constructor_defaults_have_equal_identity": true,
+    "deadline_expiry_during_setup_prevents_command_launch": true,
+    "independent_non_pytest_adapter_runs_in_detached_real_sandbox_worker": true,
+    "host_restart_can_query_and_finish_with_matching_registry": true,
+    "concurrent_registries_keep_distinct_configurations": true,
+    "cancellation_retains_case_facts_without_gate_success": true,
+    "unused_plugin_changes_do_not_change_shared_core_execution_digest": true,
+    "completion_records_include_used_adapter_bindings": true
+  },
+  "corrected_during_validation": [
+    "A restart initially treated omitted versus explicit constructor defaults as different configurations. Factory signature defaults are now normalized, with a regression test."
+  ],
+  "source": {
+    "execution_identity": "4132a78afe1d6bf1f19b3d14c31b60af4d415e24db1cabfd9fb71ca4706de85c",
+    "pytest_adapter_identity": "811b9be1160cd1dc651341f0be78ef89ff515434316a75306527846f6bfa0f8f",
+    "source_bundle_hash": "0c786c4e1fff45f0affe7f87bee878b18a3961c39977dd973ec61bc6962bc570",
+    "source_files": 63,
+    "manifest_rule": "SHA-256 each src/**/*.py and tests/**/*.py plus extra_paths, indexed by relative path; SHA-256 the sorted-key compact JSON mapping.",
+    "extra_paths": [
+      "README.md",
+      "POLICIES.md",
+      "scripts/evaluate-pytest-domain.py",
+      "runtime/script/external-harness-sandbox.ts",
+      "runtime/packages/security/src/sandbox.ts"
+    ]
+  },
+  "limitations": [
+    "Pytest is still the only bundled production framework adapter. The second adapter is a controlled test fixture.",
+    "Custom registrations are injected by an application through the Python Harness constructor; the stock CLI uses built-in registration.",
+    "Plugins are trusted application code, not sandboxed untrusted Python extensions. Same-user tamper resistance is not claimed.",
+    "No model calls, commercial-model quality comparison or Windows-native validation were performed.",
+    "Reports remain unsigned local-advisory records, not goal-completeness or Ready certification."
+  ],
+  "committed": false,
+  "pushed": false
+}

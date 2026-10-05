@@ -11,7 +11,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from harness_external.adapter_execution import execute
+from harness_external.adapter_execution import bind, execute
 from harness_external.develop_cases import normalize
 from harness_external.errors import HarnessError
 from harness_external.observation_rules import evaluate
@@ -56,7 +56,8 @@ def main():
             check = normalize({"id": "behavior", "paths": ["test_cases.py"], "required_cases": ["test_cases.py::test_required"], "timeout_seconds": 10},
                               ["app.py", "test_cases.py"])
             started = time.monotonic()
-            captured, facts = execute(check, workspace, direct_state, threading.Event(), 30, runtime["identity"], lambda *args: None)
+            binding = bind([{"check_id": "behavior", "spec": {"parameters": check}}], direct_state)["behavior"]
+            captured, facts = execute(check, workspace, direct_state, threading.Event(), 30, binding, lambda *args: None)
             direct_seconds = time.monotonic() - started
             a = captured.get("capture", {}).get("exitCode") == 0
             b = a and all(c["result"] == "pass" for c in evaluate(facts, check["adapter"]["rules"]))

@@ -111,6 +111,91 @@ case-aware checks; `test_case_count_complete` and `test_case_scope` describe its
 limits. Generic command checks keep unknown case counts. Baseline case runs are
 not included in the Candidate's count.
 
+### Domain, Core and execution boundaries
+
+Develop compiles v2 coverage into the contract's optional `observation_links`
+(`requirement-case-links-v1`). This common format contains requirement/scenario
+IDs, Check IDs and opaque case IDs; `test_ref` is display-only metadata. Core
+validates the references and joins them only to observations matching the pinned
+Job, Candidate, Check revision and execution identities. It does not interpret
+Develop coverage labels, pytest node-ID syntax or the meaning of a requirement.
+The link report is informational: it neither creates a gate nor replaces a Check.
+
+Worker calls the common joiner, not a Develop report function. The existing result
+field `requirement_observations` is retained; new reports use the framework-neutral
+schema `requirement-observations-v1` and include `links_hash`. Previously stored
+reports remain readable and are not rewritten.
+
+Case-aware Domain checks specify adapter ID, collection/selection conditions and
+outcome rules, not `argv`, `cwd` or private Runner paths. The pytest adapter builds
+the actual command and owns its runtime mount and observation artifact. Worker
+checks the returned receipt against that materialized command. Ordinary caller-
+supplied `test_commands` still contain their explicit argv. Pytest remains the
+only bundled production adapter; applications can explicitly register others.
+As with any pinned implementation change, start a new Run to use the new code;
+old Run identities are not silently migrated.
+
+### Adapter interface and application registration
+
+The framework-neutral `ExecutionAdapter` port has four methods:
+
+- `runtime(state_root, pinned=None)`: prepare an identity or validate/reuse an
+  existing frozen runtime. Raise `AdapterUnavailable` for missing optional setup.
+- `command(check)`: describe bounded argv, cwd, exit condition and timeout. It
+  must not execute the command or increase the admitted timeout.
+- `stage(state_root, runtime, destination, token)`: validate the pinned runtime
+  and stage trusted files into the common Sandbox's read-only resource mount.
+- `observer(token, runtime)`: create a fresh session-local `CaseObserver`. Its
+  `feed(event)` returns a completed normalized case or None; `finish(error)`
+  returns the normalized session summary, including incomplete facts.
+
+An adapter also supplies `adapter_id`, `revision` and a relative `report_path`.
+Normalized cases preserve opaque `case_id`, discovered/selected/started/executed/
+finished flags, outcome and diagnostic phases. A summary contains cases and
+collection/session completion flags. The common transport bounds output, checks
+case consistency, invokes only the strict Sandbox, enforces cancellation and
+deadlines, and owns checkpoint callbacks. It does not interpret framework events.
+Adapter output cannot create gates or Ready; Core compares Domain-defined rules.
+
+Registration belongs to the application's bootstrap, not a caller's Check:
+
+```python
+from harness_external.adapter_registry import AdapterRegistration, AdapterRegistry
+from harness_external.service import Harness
+
+adapters = AdapterRegistry([
+    AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter"),
+    AdapterRegistration("my-cases-v1", "my_application.adapters:MyAdapter", config={}),
+])
+api = Harness(state_dir, domains=my_domains, adapters=adapters)
+```
+
+Factories are explicit top-level Python classes with JSON-compatible constructor
+configuration/defaults. An optional absolute `import_root` names an operator-
+managed plugin directory; it is not discovered from the Candidate. Use unique
+module names and install/register plugins before starting work. Source, methods,
+effective configuration and declared `identity_files` dependencies are hashed;
+provide stable `identity_file_ids` and, when needed, explicit `identity_config`.
+Omitted and explicitly supplied constructor defaults have the same identity.
+Factory and adapter methods are trusted application code, must be bounded and
+must not execute Candidate code themselves. This is not a sandbox for arbitrary
+Python plugins or a transitive dependency/tamper-proof attestation. Keep config
+non-secret: registration/binding records are diagnostic data.
+
+Implementation identity is pinned when a Check is admitted; optional runtime
+artifacts are bound on verification. Jobs persist only the used registrations so
+a detached Worker reconstructs the same configured instances and rejects changed
+implementations/runtimes. Restore the same application configuration after a Host
+restart. A changed or missing registration cannot silently replace an earlier
+selection. Registries/observers are instance/session-scoped, not global callbacks.
+Completion records retain the used adapter bindings alongside the Core verifier
+identity; neither a plugin name nor a Core digest alone describes that execution.
+Only used adapter identities affect a Run; concrete plugin source is separate
+from the shared Core execution digest. Historical records remain readable.
+The stock CLI uses the built-in pytest registration. Custom applications inject
+their registry through `Harness(..., adapters=...)`; there is no model-facing
+factory-import API or automatic plugin discovery.
+
 `parameters.validation_profile` may explicitly select `stateful-cli`,
 `concurrent-queue` or `pure-function`. These profiles supply advisory verification
 perspectives. The Host selects a suitable profile; no natural-language keyword

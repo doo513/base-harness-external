@@ -20,6 +20,12 @@ For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 Develop also supports [pytest case observations](POLICIES.md#pytest-case-observations):
 exact scenario bindings, selected/executed/outcome facts and scoped requirement
 reports. The optional pytest runtime is isolated in the existing Sandbox.
+Domain compiles declarative links; Core joins their opaque IDs to scoped facts.
+Worker does not import Develop to aggregate results, and the pytest adapter owns
+its private execution command. See [responsibility boundaries](POLICIES.md#domain-core-and-execution-boundaries).
+Applications can [register verifier adapters](POLICIES.md#adapter-interface-and-application-registration)
+through the common port; detached Workers restore pinned registrations without
+framework-specific dispatch code. Pytest is the only bundled production adapter.
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.
 

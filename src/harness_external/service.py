@@ -17,8 +17,9 @@ from .snapshots import capture, no_links, read_file, validate_candidate
 from .store import Store, StopRun, identifier
 from . import semantics
 from .registry import builtin_registry
+from .adapter_registry import builtin_adapter_registry
 from . import queries, maintenance
-from . import acceptance, evidence
+from . import acceptance, evidence, observation_links
 from .identity import verifier_identity
 
 
@@ -30,10 +31,11 @@ def response(**data) -> dict:
 
 
 class Harness:
-    def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None):
+    def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None, adapters=None):
         self.store = Store(state_dir)
         self.domains = domains or builtin_registry()
         self.policies = acceptance.PolicyRegistry(policy_root)
+        self.adapters = adapters if adapters is not None else builtin_adapter_registry()
 
     @staticmethod
     def _domain_preparation_view(preparation):
@@ -104,6 +106,7 @@ class Harness:
 
     def _validate_checks(self, run, contract):
         module = self._module(run)
+        observation_links.validate(contract.get("observation_links"), [item["check_id"] for item in semantics.current_checks(run)])
         for item in semantics.current_checks(run):
             parameters = copy.deepcopy(item["spec"]["parameters"])
             if parameters["kind"] == "command":
@@ -219,6 +222,8 @@ class Harness:
                 contract["rules"]["all_checks_required"] = False
                 contract["contract_hash"] = canonical_hash({k: v for k, v in contract.items() if k != "contract_hash"})
             require(contract["original_goal"] == goal and contract["domain_id"] == domain_id, "DOMAIN_RESULT_BINDING", "Domain changed intent identity")
+            observation_links.validate(contract.get("observation_links"), [check.get("check_id") for check in contract["checks"]])
+            adapter_implementations = self.adapters.pin_implementations(contract["checks"])
             bound = limits(budget)
         require(not capture_baseline or bool(contract["inputs"]), "NEEDS_INPUT", "Declare baseline input files before capturing the original")
         # File I/O must not block checkpoints in unrelated Runs. Only publish the
@@ -232,6 +237,7 @@ class Harness:
                 baseline = capture(source, contract["inputs"], staging, overlays=overlays)
             now = time.time()
             run = {"schema_version": API_VERSION, "storage_schema": "run-store-v2", "run_id": run_id, "workspace": str(source), "goal": goal,
+                   "adapter_implementations": adapter_implementations,
                    "contract": contract, "revision": 0, "status": "active", "phase": "awaiting_submission",
                    "created_at": now, "deadline_at": now + bound["timeout_seconds"], "limits": bound,
                    "actions": 0, "verification_attempts": 0, "generation": 0, "candidate": None,
@@ -423,6 +429,8 @@ class Harness:
                              "origin": "caller", "trust": "untrusted"})
             semantics.sync_checks(run, prepared["contract"]["checks"], interpretation["ref"])
             self._validate_checks(run, prepared["contract"])
+            run["adapter_implementations"] = self.adapters.pin_implementations(
+                [item["spec"]["parameters"] for item in semantics.current_checks(run)], run.get("adapter_implementations"))
             old_inputs = run["contract"]["inputs"]
             run["interpretations"].append(interpretation)
             run["contract"] = prepared["contract"]
@@ -464,6 +472,7 @@ class Harness:
                                              role="mandatory" if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"] else "exploratory",
                                              author=source_provenance["declared_author"], approval_claim=source_provenance["approval"],
                                              generator={"kind": "domain_normalization", "module": run["domain_module"]})
+            run["adapter_implementations"] = self.adapters.pin_implementations([parameters], run.get("adapter_implementations"))
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]
@@ -609,7 +618,10 @@ class Harness:
             initial_checks = copy.deepcopy(semantics.current_checks(initial))
             initial_check_hash = semantics.check_set_hash(initial_checks)
         from .adapter_execution import bind as bind_adapters
-        prepared_bindings = bind_adapters(initial_checks, self.store.root, initial.get("adapter_bindings"))
+        prepared_implementations = self.adapters.pin_implementations(
+            [item["spec"]["parameters"] for item in initial_checks], initial.get("adapter_implementations"))
+        prepared_bindings = bind_adapters(initial_checks, self.store.root, initial.get("adapter_bindings"), self.adapters)
+        prepared_registrations = self.adapters.export(prepared_bindings)
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -630,6 +642,13 @@ class Harness:
             require(semantics.check_set_hash(checks) == initial_check_hash, "VERIFICATION_CONFLICT", "Checks changed while preparing adapter runtimes")
             require(all(old.get("status") == "unavailable" or prepared_bindings.get(key) == old
                         for key, old in run.get("adapter_bindings", {}).items()), "ADAPTER_RUNTIME_CHANGED", "Another request pinned a different runtime")
+            self.adapters.validate_bindings(prepared_bindings)
+            require(all(prepared_implementations.get(key) == value for key, value in run.get("adapter_implementations", {}).items()),
+                    "ADAPTER_IMPLEMENTATION_CHANGED", "Another request pinned a different adapter")
+            self.adapters.pin_implementations([], prepared_implementations)
+            require(all(binding["implementation"] == prepared_implementations[binding["id"]] for binding in prepared_bindings.values()),
+                    "ADAPTER_IMPLEMENTATION_CHANGED", "Runtime binding differs from admitted adapter")
+            run["adapter_implementations"] = prepared_implementations
             run["adapter_bindings"] = prepared_bindings
             timeout = 45 + (2 if compare_baseline else 1) * sum(check["spec"]["timeoutMs"] / 1000 + 10 for check in checks)
             job = {"job_id": job_id, "run_id": run_id, "status": "queued", "heartbeat_at": now,
@@ -639,6 +658,7 @@ class Harness:
                    "cleanup": "not_started", "result": None}
             job.update(checks=checks, candidate=copy.deepcopy(run["candidate"]),
                        adapter_bindings=copy.deepcopy(run["adapter_bindings"]),
+                       adapter_registrations=prepared_registrations,
                        interpretation_ref=run["interpretations"][-1]["ref"], policy_ref=run["policy"]["ref"],
                        completed_checks=0, total_checks=len(checks) * (2 if compare_baseline else 1))
             if compare_baseline:
@@ -810,6 +830,8 @@ class Harness:
                         acceptance.validate(run["acceptance"], self.store.directory(run_id))
                         acceptance.validate_subject(run["acceptance"], run["candidate"])
                 require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed after measurement")
+                self.adapters.validate_bindings(run.get("adapter_bindings", {}))
+                self.adapters.pin_implementations([], run.get("adapter_implementations"))
                 self._module(run)
             if run["active_job"]:
                 job = self.store.job(connection, run["active_job"])
@@ -828,6 +850,7 @@ class Harness:
                           measurement=copy.deepcopy(run["verification"]), assessment=semantics.assessment_view(run), gates=gate_results,
                           unresolved_work=[task["task_id"] for task in run["logical_tasks"] if task["state"] != "settled"])
             record.update(check_set_hash=semantics.check_set_hash(semantics.current_checks(run)), domain_identity=run["domain_module"],
+                          adapter_bindings=copy.deepcopy(run.get("adapter_bindings", {})),
                           acceptance=acceptance.view(run.get("acceptance")), predecessor=run.get("predecessor"),
                           baseline_comparison=run["verification"].get("baseline_comparison"),
                           outcome_meaning="caller_requested_disposition_not_verification_success")

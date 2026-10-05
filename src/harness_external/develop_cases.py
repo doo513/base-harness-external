@@ -1,6 +1,5 @@
-"""Develop owns pytest selectors, declared mappings and limited requirement reports."""
+"""Develop compiles selectors and declared links, never execution commands or facts."""
 import copy
-import json
 
 from .errors import fields, require, relative_path, integer
 
@@ -26,7 +25,6 @@ def normalize(value, inputs):
     for path in paths:
         relative_path(path)
         require(path in inputs, "PYTEST_SCOPE", "Pytest collection files must be declared inputs")
-    require(".harness-cases.jsonl" not in inputs, "PYTEST_SCOPE", "The observer output path is reserved")
     args = value.get("args", [])
     require(isinstance(args, list) and len(args) <= 32 and all(isinstance(v, str) and len(v) <= 2000 for v in args),
             "PYTEST_ARGS", "Invalid pytest arguments")
@@ -50,11 +48,9 @@ def normalize(value, inputs):
     allowed = value.get("allowed_outcomes", ["passed"])
     require(isinstance(allowed, list) and allowed and all(isinstance(p, str) for p in allowed) and len(set(allowed)) == len(allowed)
             and set(allowed) <= {"passed", "skipped", "xfail", "xpass"}, "PYTEST_OUTCOMES", "Invalid allowed outcomes")
-    settings = {"paths": paths, "args": args}
     from .domain import check_identity
-    return {"kind": "command", "argv": ["python3", "-I", "/opt/harness-runtime/runner.py", "/opt/harness-runtime/packages.zip",
-                                          ".harness-cases.jsonl", json.dumps(settings, ensure_ascii=False, separators=(",", ":"))],
-            "cwd": ".", "expectedExitCode": 0, "timeout_seconds": integer(value.get("timeout_seconds", 30), 1, 120, "timeout_seconds"),
+    return {"kind": "command", "expectedExitCode": 0,
+            "timeout_seconds": integer(value.get("timeout_seconds", 30), 1, 120, "timeout_seconds"),
             "adapter": {"id": "pytest-cases-v1", "paths": paths, "args": args,
                         "rules": {"required_case_ids": list(required), "allowed_outcomes": list(allowed), "minimum_selected": 1,
                                   "require_complete_session": True}},
@@ -75,37 +71,18 @@ def apply_required_scenarios(parameters, coverage):
     return result
 
 
-def requirement_report(contract, checks, case_observations):
-    inventory = contract.get("coverage_inventory") or {}
+def compile_observation_links(inventory):
+    """Translate Develop coverage into the common, framework-opaque link contract.
+
+    The Core need not load Develop or understand its coverage schema, scenario
+    kinds, paths, profiles or pytest node ID syntax to join these references.
+    """
     if inventory.get("schema_version") != "develop-coverage-inventory-v2":
         return None
-    by_check = {item["check_id"]: item for item in checks if item["subject_role"] == "candidate"}
-    by_case = {(item["check_id"], item["case"]["case_id"]): item for item in case_observations if item["subject_role"] == "candidate"}
-    requirements = []
-    for requirement in inventory["requirements"]:
-        scenarios = []
-        for declared in inventory["scenarios"]:
-            if declared["requirement_id"] != requirement["requirement_id"]:
-                continue
-            found = by_case.get((declared["check_id"], declared["test_ref"]["case_id"]))
-            measured = by_check.get(declared["check_id"])
-            summary = (measured or {}).get("case_summary") or {}
-            status = found["case"]["outcome"] if found else "missing" if summary.get("collection_complete") else "unconfirmed"
-            scenarios.append({"scenario_id": declared["id"], "check_id": declared["check_id"], "test_ref": declared["test_ref"],
-                              "required": declared.get("required", False), "status": status,
-                              "executed": found["case"]["executed"] if found else False if status == "missing" else None,
-                              "observation_id": found["observation_id"] if found else None,
-                              "check_observation_id": measured.get("observation_id") if measured else None})
-        failed_checks = [key for key in requirement["check_ids"] if by_check.get(key, {}).get("comparison_status") == "failed"]
-        all_seen = bool(scenarios) and all(s["status"] not in {"missing", "unconfirmed", "not_run", "not_selected", "incomplete"} for s in scenarios)
-        all_passed = bool(scenarios) and all(s["executed"] is True and s["status"] == "passed" for s in scenarios)
-        linked_checks_passed = bool(requirement["check_ids"]) and all(by_check.get(key, {}).get("comparison_status") == "passed" for key in requirement["check_ids"])
-        requirements.append({"requirement_id": requirement["requirement_id"], "scenarios": scenarios,
-                             "declared_scenarios_observed": all_seen, "linked_cases_passed": all_passed,
-                             "linked_checks_passed": linked_checks_passed,
-                             "known_gap_ids": requirement["known_gap_ids"], "failed_check_ids": failed_checks,
-                             "status": "no_declared_scenarios" if not scenarios else "linked_checks_failed" if failed_checks else
-                                       "linked_checks_passed" if all_passed and linked_checks_passed else
-                                       "declared_scenarios_observed" if all_seen else "declared_scenarios_unconfirmed"})
-    return {"schema_version": "develop-requirement-observations-v1", "requirements": requirements,
-            "meaning": "declared_links_and_observed_execution_not_goal_proof"}
+    return {"schema_version": "requirement-case-links-v1",
+            "requirements": [{key: copy.deepcopy(item[key]) for key in ("requirement_id", "check_ids", "known_gap_ids")}
+                             for item in inventory["requirements"]],
+            "scenarios": [{"scenario_id": item["id"], "requirement_id": item["requirement_id"],
+                           "check_id": item["check_id"], "case_id": item["test_ref"]["case_id"],
+                           "required": item.get("required", False), "test_ref": copy.deepcopy(item["test_ref"])}
+                          for item in inventory["scenarios"]]}

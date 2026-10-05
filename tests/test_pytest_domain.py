@@ -6,10 +6,10 @@ import threading
 
 import pytest
 
-from harness_external.adapter_execution import execute
-from harness_external.develop_cases import normalize, requirement_report
+from harness_external.adapter_execution import bind, execute
+from harness_external.develop_cases import normalize
 from harness_external.errors import HarnessError
-from harness_external.pytest_adapter import Collector, prepare_runtime
+from harness_external.pytest_adapter import Collector
 from harness_external.service import Harness
 from harness_external.worker import execute_job
 
@@ -43,6 +43,10 @@ def policy_fixture(tmp_path, source, *, required="test_cases.py::test_ok", args=
 
 def emit(collector, event, **body):
     return collector.feed({"version": 1, "token": "session", "seq": collector.sequence + 1, "event": event, **body})
+
+
+def bind_check(check, state):
+    return bind([{"check_id": "test", "spec": {"parameters": check}}], state)["test"]
 
 
 def test_collector_distinguishes_call_pass_teardown_error():
@@ -103,10 +107,9 @@ def test_live_adapter_collects_and_executes_without_host_pytest_in_sandbox(tmp_p
     (payload / "test_cases.py").write_text("import pytest\ndef test_ok(): assert True\ndef test_bad(): assert False\n@pytest.mark.skip(reason='not available')\ndef test_skip(): pass\n")
     state = tmp_path / "state"
     state.mkdir()
-    runtime = prepare_runtime(state)
     check = normalize({"id": "tests", "paths": ["test_cases.py"]}, ["test_cases.py"])
     observed = []
-    capture, summary = execute(check, payload, state, threading.Event(), 30, runtime["identity"], lambda case, _: observed.append(case))
+    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda case, _: observed.append(case))
     assert capture["status"] == "completed", capture
     assert summary["collection_complete"] and summary["session_complete"], summary
     assert {case["outcome"] for case in observed} == {"passed", "failed", "skipped"}
@@ -269,9 +272,8 @@ def test_live_runtime_is_readonly_and_candidate_cannot_shadow_pytest(tmp_path):
         "    with pytest.raises(OSError):\n        Path('/opt/harness-runtime/runner.py').write_text('changed')\n")
     state = tmp_path / "state"
     state.mkdir()
-    runtime = prepare_runtime(state)
     check = normalize({"id": "runtime", "paths": ["test_runtime.py"]}, ["test_runtime.py", "pytest.py"])
-    capture, summary = execute(check, payload, state, threading.Event(), 30, runtime["identity"], lambda *args: None)
+    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda *args: None)
     assert capture["capture"]["exitCode"] == 0, capture
     assert summary["cases"][0]["outcome"] == "passed"
 
@@ -317,10 +319,11 @@ def test_runtime_preparation_does_not_hold_the_writer_transaction(tmp_path, monk
     other = api.start(domain_id="develop", goal="two", workspace=str(workspace), parameters={}, request_id="two")["run_id"]
     api.submit(run_id, "submit")
     entered, release = threading.Event(), threading.Event()
+    original_bind = bind
     def slow(*args):
         entered.set()
         assert release.wait(10)
-        return {"domain.tests": {"id": "pytest-cases-v1", "status": "unavailable", "reason": "test fixture"}}
+        return original_bind(*args)
     monkeypatch.setattr("harness_external.adapter_execution.bind", slow)
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
     with ThreadPoolExecutor() as pool:
@@ -338,7 +341,7 @@ def test_unavailable_adapter_is_not_missing_or_passing(tmp_path, monkeypatch):
     api, workspace, _ = policy_fixture(tmp_path, "def test_ok(): pass\n")
     def missing(*args):
         raise HarnessError("PYTEST_RUNTIME_UNAVAILABLE", "fixture missing packages")
-    monkeypatch.setattr("harness_external.adapter_execution.prepare_runtime", missing)
+    monkeypatch.setattr("harness_external.pytest_adapter.prepare_runtime", missing)
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
     run_id = api.start(domain_id="develop", goal="check", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
     api.submit(run_id, "submit")
