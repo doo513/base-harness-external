@@ -48,6 +48,19 @@ execution checks workspace, Domain, intent and policy inside Core, before replay
 or mutation. The helper never picks a Run,
 generates an assessment, or changes an initial policy for you.
 
+With `request --binding`, omit `run_id` from `--arguments`: the binding supplies
+it. Read requests also omit `--action-id`; an unsuccessful request builder has not
+created a request file. `--config` selects the client configuration, not a binding.
+For example, inspect measurements without creating another action:
+
+```sh
+python3 <skill>/scripts/harness_client.py request --binding /absolute/task-binding.json \
+  --operation records --arguments 'json:{"kind":"measurements","job_id":"JOB_ID","limit":20}' \
+  --output /absolute/measurements-request.json
+python3 <skill>/scripts/harness_client.py --config /absolute/client.json call \
+  --request /absolute/measurements-request.json
+```
+
 ## Lossless context and lower-cost follow-up
 
 ```sh
@@ -222,6 +235,33 @@ deferred require a nonblank `conclusion`. Reopening defaults the conclusion to e
 so an old answer is not silently retained. A distinct request ID records a new
 update; replay the same envelope/ID after response loss. Concurrent stale updates
 are rejected without replacing the newer version.
+
+When answering the same question, reuse its returned `details`; do not replace the
+question with a generic closeout instruction. Given a saved observe response, this
+constructs the `data` object for a new update (the request still needs its own ID):
+
+```python
+current = saved_response["need"]  # Or the selected item from records kind=needs.
+data = {
+    "kind": "need", "note": "Record the source-grounded conclusion",
+    "need": {
+        "id": current["need_id"], "expected_revision": current["ref"]["revision"],
+        "details": current["details"], "state": "addressed",
+        "conclusion": "The supplied schema specifies which value survives."
+    },
+    "references": ["schema.txt#collision-policy"]
+}
+```
+
+Keep these fields at their distinct levels:
+
+| Field in `data` | Value |
+|---|---|
+| `need.details` | Domain question, reason, criterion and Domain references |
+| `need.conclusion` | Answer or deferral explanation, not inside `details` |
+| `references` | Locator strings, not path/symbol objects or a field inside `need` |
+| `need.activity_ids` | Optional complete returned `activity.ref.id` values; do not invent a UUID or use a Need ID |
+| `observation_ids` | Returned Verifier observation IDs, not caller notes |
 
 Top-level `references` are bounded source locators (file/symbol/section or URL),
 never fetched by Harness and never authenticated facts. Top-level `observation_ids`

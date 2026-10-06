@@ -64,6 +64,8 @@ Avoid mirroring the same question into both a Need and `open_questions`/task not
 Only revise the contract/checks when their actual meaning or scope changes; routine
 Need updates must not invalidate a verified Candidate. On recovery, inspect the Need
 summary and context-change hints without rereading unchanged source material blindly.
+When recording an answer, reuse the saved question/details and the protocol's
+update example. Reword a question only when the actual uncertainty changes.
 
 Plan, decompose, delegate when appropriate and try alternatives using the Host's
 existing capabilities and permissions. Do not add a model loop to Harness or make
