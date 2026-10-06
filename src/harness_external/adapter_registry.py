@@ -18,6 +18,7 @@ from .registry import code_identity
 from .adapter_loading import load_module
 
 METHODS = ("runtime", "command", "stage", "observer")
+SCHEMA_METHODS = ("normalize_selection", "validate_reference", "legacy_execution_check")
 _IMPORT_LOCK = threading.RLock()
 
 
@@ -27,6 +28,7 @@ class AdapterRegistration:
     factory: str
     config: dict = field(default_factory=dict)
     import_root: str | None = None
+    parameter_alias: str | None = None
 
 
 def validate_binding(binding):
@@ -55,7 +57,16 @@ class AdapterRegistry:
                     "ADAPTER_REGISTRATION_INVALID", "Adapter configuration must be a bounded JSON object")
             require(value.import_root is None or isinstance(value.import_root, str) and Path(value.import_root).is_absolute()
                     and Path(value.import_root).is_dir(), "ADAPTER_REGISTRATION_INVALID", "Import root must be an existing absolute application directory")
+            require(value.parameter_alias is None or isinstance(value.parameter_alias, str)
+                    and bool(re.fullmatch(r"[a-z][a-z0-9_]{0,95}", value.parameter_alias))
+                    and value.parameter_alias not in {"inputs", "artifacts", "expectations", "execution_checks", "test_commands", "profile", "validation_profile"},
+                    "ADAPTER_REGISTRATION_INVALID", "Invalid legacy parameter alias")
+            require(value.parameter_alias is None or value.parameter_alias not in self.parameter_aliases(),
+                    "ADAPTER_DUPLICATE", "Duplicate legacy parameter alias")
             self._registrations[value.adapter_id] = value
+
+    def parameter_aliases(self):
+        return {entry.parameter_alias: key for key, entry in self._registrations.items() if entry.parameter_alias is not None}
 
     def resolve(self, adapter_id):
         # Serialize registry instance creation and private package initialization.
@@ -90,7 +101,7 @@ class AdapterRegistry:
         arguments.apply_defaults()
         source = Path(inspect.getsourcefile(factory))
         sources, methods = {}, {}
-        for name in METHODS:
+        for name in (*METHODS, *(name for name in SCHEMA_METHODS if callable(getattr(adapter, name, None)))):
             function = getattr(adapter, name)
             target = getattr(function, "__func__", function)
             require(hasattr(target, "__code__"), "ADAPTER_IDENTITY_UNAVAILABLE", "Adapter methods must expose Python code identity")
@@ -116,7 +127,8 @@ class AdapterRegistry:
         body = {"schema_version": "execution-adapter-identity-v1", "id": adapter_id, "revision": adapter.revision,
                 "factory": entry.factory, "factory_source_hash": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "implementation_hash": canonical_hash({"sources": sources, "methods": methods}),
-                "configuration_hash": canonical_hash({"registration": arguments.arguments, "effective": config, "identity_file_ids": file_ids})}
+                "configuration_hash": canonical_hash({"registration": arguments.arguments, "effective": config, "identity_file_ids": file_ids,
+                                                      "parameter_alias": entry.parameter_alias})}
         result = {**body, "identity_hash": canonical_hash(body)}
         if adapter_id in self._expected:
             require(result == self._expected[adapter_id], "ADAPTER_IMPLEMENTATION_CHANGED", "Pinned adapter implementation or configuration changed")
@@ -153,7 +165,7 @@ class AdapterRegistry:
         entries, expected = [], {}
         for key, item in manifest.items():
             fields(item, {"registration", "identity"}, {"registration", "identity"})
-            fields(item["registration"], {"adapter_id", "factory", "config", "import_root"}, {"adapter_id", "factory", "config", "import_root"})
+            fields(item["registration"], {"adapter_id", "factory", "config", "import_root", "parameter_alias"}, {"adapter_id", "factory", "config", "import_root"})
             require(item["registration"]["adapter_id"] == key and item["identity"].get("id") == key,
                     "ADAPTER_REGISTRATION_INVALID", "Worker registration identity mismatch")
             entries.append(AdapterRegistration(**item["registration"]))
@@ -165,4 +177,4 @@ class AdapterRegistry:
 
 def builtin_adapter_registry():
     # Registration is lazy: read-only CLI calls do not import verifier plugins.
-    return AdapterRegistry([AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter")])
+    return AdapterRegistry([AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter", parameter_alias="pytest_checks")])

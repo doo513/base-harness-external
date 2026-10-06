@@ -102,15 +102,24 @@ changes into the user's workspace.
   can stop a pending job; the job's `cleanup` field distinguishes a request from
   acknowledged cleanup. A stale worker cannot publish into a closed/newer Run.
 
-Develop parameters are `inputs`, `artifacts`, `expectations`, `test_commands`, and
-optional `profile`. Every artifact requires a concrete expectation (`equals`,
+Develop parameters are `inputs`, `artifacts`, `expectations`, `execution_checks`,
+and optional `profile` / advisory `validation_profile`. Every artifact requires a concrete expectation (`equals`,
 `contains`, or `sha256`). The default `execution` profile requires at least one
-test command and always expects exit code zero. Explicit `structural` profile
+execution check and always expects exit code zero. Each entry uses `kind: command`
+with explicit `argv`, or `kind: cases` with a registered `adapter_id`, opaque
+`selector`, and normalized case criteria. Explicit `structural` profile
 requires file expectations and excludes commands; it says nothing about runtime
 behavior. Missing criteria return `NEEDS_INPUT`, not invented success conditions.
 Strict mode retains the original preparation requirements. Exploratory mode can
 start before these parameters are known and returns a durable `waiting_input`
 Run with Domain questions. Supply the missing parameters through `revise`.
+The missing execution question is `develop:execution_checks`, with answer field
+`execution_checks`; it does not require a particular test framework. Legacy
+`test_commands` and the bundled adapter's `pytest_checks` alias remain accepted
+through the application compatibility bridge. Do not mix nonempty legacy lists
+with `execution_checks`. When switching an existing interpretation to the new
+field, clear its old lists in the same `revise` request. See
+[case-aware input and adapter schema ownership](POLICIES.md#pytest-case-observations).
 Once input scope is known, Domain preparation can admit snapshots and exploratory
 measurements even while final artifact/test criteria are incomplete. Its
 `available_operations` distinguishes measurement readiness from completion
@@ -156,10 +165,10 @@ Use `resolution.display_status`, `measurement_status`, `assessment_status`, and
 `gate_status` together. A requested completed disposition without measurement is
 reported as `closed_unverified`; it is not a passing verification or certification.
 
-Expectations and test_commands may include an explicit `id` (for example
-`{"id":"behavior","argv":["python3","-m","unittest"]}`), producing check ID
+Expectations and command execution checks may include an explicit `id` (for example
+`{"kind":"command","id":"behavior","argv":["python3","-m","unittest"]}`), producing check ID
 `domain.behavior`. Without it, Develop defines identity by file path/operator or
-command argv/cwd. IDs such as file-0 are assigned once, then retained by that
+command argv/cwd. Case-aware checks require a logical `id`. IDs such as file-0 are assigned once, then retained by that
 identity across reorder, insertion and reactivation. Multiple criteria with the
 same implicit identity require explicit IDs. An ambiguous change is rejected
 rather than guessed from a list position. Domain extensions can provide stable

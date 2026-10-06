@@ -9,7 +9,8 @@
     "inputs": ["leasequeue.py", "acceptance_tests/test_queue.py"],
     "artifacts": ["leasequeue.py"],
     "expectations": [{"id": "entry", "path": "leasequeue.py", "operator": "contains", "expected": "class Queue"}],
-    "pytest_checks": [{"id": "behavior", "paths": ["acceptance_tests/test_queue.py"], "timeout_seconds": 30}]
+    "execution_checks": [{"kind": "cases", "id": "behavior", "adapter_id": "pytest-cases-v1",
+                          "selector": {"paths": ["acceptance_tests/test_queue.py"]}, "timeout_seconds": 30}]
   },
   "required_check_ids": ["domain.entry", "domain.behavior"],
   "requirements": [{"id": "replay", "statement": "Replay treats omitted, None and empty dependencies equivalently and does not duplicate an event.", "check_ids": ["domain.entry", "domain.behavior"], "minimum_evidence": "testcase"}],

@@ -21,6 +21,40 @@ REPORT_PATH = ".harness-cases.jsonl"
 RESOURCE_MOUNT = "/opt/harness-runtime"
 
 
+def node_id(value):
+    require(isinstance(value, str) and 0 < len(value.encode("utf-8")) <= 4096 and "\x00" not in value and "\n" not in value
+            and "::" in value, "PYTEST_CASE_ID", "Use an exact pytest node ID")
+    relative_path(value.split("::", 1)[0])
+    return value
+
+
+def normalize_selection(selector, inputs, required_cases):
+    fields(selector, {"paths", "args"}, {"paths"})
+    paths, args = selector["paths"], selector.get("args", [])
+    require(isinstance(paths, list) and 1 <= len(paths) <= 32 and all(isinstance(p, str) for p in paths)
+            and len(set(paths)) == len(paths), "PYTEST_SCOPE", "Declare unique test files")
+    for path in paths:
+        relative_path(path)
+        require(path in inputs, "PYTEST_SCOPE", "Pytest collection files must be declared inputs")
+    require(isinstance(args, list) and len(args) <= 32 and all(isinstance(v, str) and len(v) <= 2000 and "\x00" not in v for v in args),
+            "PYTEST_ARGS", "Invalid pytest arguments")
+    pending = False
+    for argument in args:
+        if pending:
+            require(bool(argument), "PYTEST_ARGS", "Missing selector value")
+            pending = False
+        elif argument in {"-k", "-m", "--maxfail"}:
+            pending = True
+        else:
+            require(argument in {"-q", "-v", "-x", "--strict-markers", "--collect-only"}
+                    or argument.startswith(("--maxfail=", "-k=", "-m=")), "PYTEST_ARGS", "Unsupported pytest option: " + argument)
+    require(not pending, "PYTEST_ARGS", "Missing selector value")
+    for item in required_cases:
+        node_id(item)
+        require(item.split("::", 1)[0] in paths, "PYTEST_SCOPE", "Required case is outside collection scope")
+    return {"selector": {"paths": list(paths), "args": list(args)}, "source_paths": list(paths)}
+
+
 def build_command(check):
     """Materialize an approved semantic Check into this adapter's command.
 
@@ -28,14 +62,17 @@ def build_command(check):
     file. The Worker binds the actual receipt to this deterministic command.
     """
     fields(check, {"kind", "adapter", "expectedExitCode", "timeout_seconds", "check_key", "check_id"}, {"kind", "adapter"})
-    adapter = fields(check["adapter"], {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
+    adapter = check["adapter"]
+    if isinstance(adapter, dict) and "selector" in adapter:
+        fields(adapter, {"id", "selector", "source_paths", "rules"}, {"id", "selector", "source_paths", "rules"})
+        selection = normalize_selection(adapter["selector"], adapter["source_paths"], adapter["rules"]["required_case_ids"])
+        require(selection["source_paths"] == adapter["source_paths"], "ADAPTER_COMMAND", "Collection scope changed")
+    else:
+        # Existing application-defined Domains can still emit the flat v1 envelope.
+        fields(adapter, {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
+        selection = normalize_selection({"paths": adapter["paths"], "args": adapter["args"]}, adapter["paths"], adapter["rules"]["required_case_ids"])
     require(check["kind"] == "command" and adapter["id"] == ADAPTER_ID, "ADAPTER_UNREGISTERED", "Unsupported case adapter")
-    paths, args = adapter["paths"], adapter["args"]
-    require(isinstance(paths, list) and 1 <= len(paths) <= 32, "ADAPTER_COMMAND", "Invalid collection files")
-    for path in paths:
-        relative_path(path)
-    require(isinstance(args, list) and len(args) <= 32 and all(isinstance(arg, str) and len(arg) <= 2000 and "\x00" not in arg for arg in args),
-            "ADAPTER_COMMAND", "Invalid collection arguments")
+    paths, args = selection["selector"]["paths"], selection["selector"]["args"]
     return {"kind": "command", "argv": ["python3", "-I", RESOURCE_MOUNT + "/runner.py", RESOURCE_MOUNT + "/packages.zip",
                                           REPORT_PATH, json.dumps({"paths": paths, "args": args}, ensure_ascii=False, separators=(",", ":"))],
             "cwd": ".", "timeout_seconds": integer(check.get("timeout_seconds", 30), 1, 120, "timeout_seconds"), "expectedExitCode": 0}
@@ -113,7 +150,7 @@ def prepare_runtime(state_root, *, refresh=False):
     selection = root / (canonical_hash({"versions": versions, "runner_hash": runner_hash}) + ".json")
     no_links(selection)
     if selection.is_file() and not refresh:
-        return load_runtime(state_root, json.loads(selection.read_text()))
+        return load_runtime(state_root, json.loads(selection.read_text(encoding="utf-8")))
     if refresh:
         _package_snapshot.cache_clear()
     package_hash, archive_bytes = _package_snapshot(tuple(versions.items()), runner_hash)
@@ -281,10 +318,24 @@ class Collector:
 
 class PytestAdapter:
     adapter_id = ADAPTER_ID
-    revision = "2"
+    revision = "3"
     report_path = REPORT_PATH
     identity_files = (str(Path(__file__).with_name("pytest_runner.py")),)
     identity_file_ids = ("pytest-runner",)
+
+    def legacy_execution_check(self, value):
+        fields(value, {"id", "paths", "args", "required_cases", "allowed_outcomes", "timeout_seconds"}, {"id", "paths"})
+        return {"kind": "cases", "adapter_id": self.adapter_id,
+                "selector": {"paths": value["paths"], "args": value.get("args", [])},
+                **{key: value[key] for key in ("id", "required_cases", "allowed_outcomes", "timeout_seconds") if key in value}}
+
+    def normalize_selection(self, selector, inputs, required_cases):
+        return normalize_selection(selector, inputs, required_cases)
+
+    def validate_reference(self, selector, reference):
+        case = node_id(reference["case_id"])
+        require(reference.get("framework", "pytest") == "pytest" and case.split("::", 1)[0] == reference["path"]
+                and reference["path"] in selector["paths"], "COVERAGE_TEST_REFERENCE", "Pytest reference must match its declared collection file/check")
 
     def runtime(self, state_root, pinned=None):
         if pinned is not None:

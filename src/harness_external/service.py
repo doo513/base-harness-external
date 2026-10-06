@@ -18,6 +18,7 @@ from .store import Store, StopRun, identifier
 from . import semantics
 from .registry import builtin_registry
 from .adapter_registry import builtin_adapter_registry
+from .check_preparation import AdapterCheckPreparation
 from . import queries, maintenance
 from . import acceptance, evidence, observation_links
 from .identity import verifier_identity
@@ -33,9 +34,9 @@ def response(**data) -> dict:
 class Harness:
     def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None, adapters=None):
         self.store = Store(state_dir)
-        self.domains = domains or builtin_registry()
-        self.policies = acceptance.PolicyRegistry(policy_root)
         self.adapters = adapters if adapters is not None else builtin_adapter_registry()
+        self.domains = domains or builtin_registry(check_preparation=AdapterCheckPreparation(self.adapters))
+        self.policies = acceptance.PolicyRegistry(policy_root)
 
     @staticmethod
     def _domain_preparation_view(preparation):

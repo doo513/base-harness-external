@@ -7,22 +7,28 @@ import threading
 import pytest
 
 from harness_external.adapter_execution import bind, execute
-from harness_external.develop_cases import normalize
+from harness_external.develop_cases import normalize as normalize_cases
+from harness_external.adapter_registry import builtin_adapter_registry
+from harness_external.check_preparation import AdapterCheckPreparation
 from harness_external.errors import HarnessError
-from harness_external.pytest_adapter import Collector
+from harness_external.pytest_adapter import Collector, PytestAdapter
 from harness_external.service import Harness
 from harness_external.worker import execute_job
+
+
+def normalize(value, inputs):
+    return normalize_cases(PytestAdapter().legacy_execution_check(value), inputs, AdapterCheckPreparation(builtin_adapter_registry()))
 
 
 def policy_fixture(tmp_path, source, *, required="test_cases.py::test_ok", args=None):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "app.py").write_text("def value(): return 1\n")
+    (workspace / "app.py").write_text("def value(): return 1\n", encoding="utf-8")
     root = tmp_path / "policies"
     directory = root / "behavior"
     bundle = directory / "bundle"
     bundle.mkdir(parents=True)
-    (bundle / "test_cases.py").write_text(source)
+    (bundle / "test_cases.py").write_text(source, encoding="utf-8")
     definition = {"schema_version": "acceptance-policy-v1", "policy_id": "behavior", "domain_id": "develop", "revision": "1",
                   "parameters": {"profile": "execution", "inputs": ["app.py", "test_cases.py"], "artifacts": ["app.py"],
                       "expectations": [{"id": "entry", "path": "app.py", "operator": "contains", "expected": "def value"}],
@@ -35,8 +41,8 @@ def policy_fixture(tmp_path, source, *, required="test_cases.py::test_ok", args=
                                      "test_ref": {"framework": "pytest", "path": "test_cases.py", "case_id": required}}]},
                   "bundle": {"version": "1", "files": ["test_cases.py"]},
                   "approval": {"declared_by": "test operator", "reference": "fixed test fixture"}}
-    (directory / "policy.json").write_text(json.dumps(definition))
-    (root / "registry.json").write_text(json.dumps({"defaults": {"develop": "behavior"}}))
+    (directory / "policy.json").write_text(json.dumps(definition), encoding="utf-8")
+    (root / "registry.json").write_text(json.dumps({"defaults": {"develop": "behavior"}}), encoding="utf-8")
     api = Harness(tmp_path / "state", policy_root=root)
     return api, workspace, definition
 

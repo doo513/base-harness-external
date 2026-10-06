@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from harness_external.adapter_execution import bind, execute
+from harness_external.adapter_registry import builtin_adapter_registry
+from harness_external.check_preparation import AdapterCheckPreparation
 from harness_external.develop_cases import normalize
 from harness_external.errors import HarnessError
 from harness_external.observation_rules import evaluate
@@ -30,7 +32,8 @@ def policy():
     return {"schema_version": "acceptance-policy-v1", "policy_id": "pilot", "domain_id": "develop", "revision": "1",
             "parameters": {"profile": "execution", "inputs": ["app.py", "test_cases.py"], "artifacts": ["app.py"],
                            "expectations": [{"id": "entry", "path": "app.py", "operator": "contains", "expected": "def value"}],
-                           "pytest_checks": [{"id": "behavior", "paths": ["test_cases.py"], "timeout_seconds": 10}]},
+                           "execution_checks": [{"kind": "cases", "id": "behavior", "adapter_id": "pytest-cases-v1",
+                                                 "selector": {"paths": ["test_cases.py"]}, "timeout_seconds": 10}]},
             "required_check_ids": ["domain.entry", "domain.behavior"],
             "requirements": [{"id": "behavior", "statement": "Observe the declared test case", "check_ids": ["domain.entry", "domain.behavior"], "minimum_evidence": "testcase"}],
             "coverage": {"schema_version": "develop-coverage-v2", "profile_id": "pilot", "profile_revision": "1", "known_gaps": [],
@@ -51,10 +54,11 @@ def main():
             trial = root / name
             workspace = trial / "workspace"
             workspace.mkdir(parents=True)
-            (workspace / "app.py").write_text("def value(): return 1\n")
-            (workspace / "test_cases.py").write_text(tests)
-            check = normalize({"id": "behavior", "paths": ["test_cases.py"], "required_cases": ["test_cases.py::test_required"], "timeout_seconds": 10},
-                              ["app.py", "test_cases.py"])
+            (workspace / "app.py").write_text("def value(): return 1\n", encoding="utf-8")
+            (workspace / "test_cases.py").write_text(tests, encoding="utf-8")
+            check = normalize({"kind": "cases", "id": "behavior", "adapter_id": "pytest-cases-v1", "selector": {"paths": ["test_cases.py"]},
+                               "required_cases": ["test_cases.py::test_required"], "timeout_seconds": 10},
+                              ["app.py", "test_cases.py"], AdapterCheckPreparation(builtin_adapter_registry()))
             started = time.monotonic()
             binding = bind([{"check_id": "behavior", "spec": {"parameters": check}}], direct_state)["behavior"]
             captured, facts = execute(check, workspace, direct_state, threading.Event(), 30, binding, lambda *args: None)
@@ -64,8 +68,8 @@ def main():
             policies = trial / "policies"
             bundle = policies / "pilot/bundle"
             bundle.mkdir(parents=True)
-            (bundle / "test_cases.py").write_text(tests)
-            (policies / "pilot/policy.json").write_text(json.dumps(policy()))
+            (bundle / "test_cases.py").write_text(tests, encoding="utf-8")
+            (policies / "pilot/policy.json").write_text(json.dumps(policy()), encoding="utf-8")
             api = Harness(trial / "state", policy_root=policies)
             run_id = api.start(domain_id="develop", goal="Measure " + name, workspace=str(workspace), parameters={},
                                policy_id="pilot", request_id="start")["run_id"]

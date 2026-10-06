@@ -59,13 +59,25 @@ unchanged by this inventory.
 
 ## Pytest case observations
 
-Develop can opt into `parameters.pytest_checks` alongside ordinary `test_commands`:
+Develop uses `parameters.execution_checks` for both ordinary commands and
+case-aware checks. Selecting the bundled pytest adapter looks like:
 
 ```json
-{"id":"behavior", "paths":["acceptance_tests/test_queue.py"],
- "args":[], "required_cases":["acceptance_tests/test_queue.py::test_replay_has_one_event"],
- "allowed_outcomes":["passed"], "timeout_seconds":30}
+{"execution_checks": [
+  {"kind":"cases", "id":"behavior", "adapter_id":"pytest-cases-v1",
+   "selector":{"paths":["acceptance_tests/test_queue.py"], "args":[]},
+   "required_cases":["acceptance_tests/test_queue.py::test_replay_has_one_event"],
+   "allowed_outcomes":["passed"], "timeout_seconds":30},
+  {"kind":"command", "id":"cli", "argv":["python3","app.py","--help"]}
+]}
 ```
+
+The Domain does not interpret this selector, pytest options or node-ID grammar;
+the selected Adapter's data-only schema capability validates them. Develop owns
+the common outcome rules and requirement/scenario mapping. The application bridge
+still converts old `test_commands` and registered `pytest_checks` lists. A supplied
+`execution_checks` field cannot be combined with nonempty legacy lists;
+clear old lists explicitly when migrating via `revise`.
 
 Collection paths are explicit input files. Supported selection options are `-k`,
 `-m`, `-x`, `--maxfail`, `-q`, `-v`, `--strict-markers` and `--collect-only`.
@@ -73,8 +85,9 @@ Collection and execution are observed in the same session. Collection-only
 results never satisfy the default execution condition. Project `conftest.py`
 and configuration files must be included in the declared input scope when needed.
 
-Use `coverage.schema_version: develop-coverage-v2` for exact pytest bindings.
-Each scenario has `test_ref: {framework: "pytest", path: "...", case_id: "...::..."}`
+Use `coverage.schema_version: develop-coverage-v2` for exact case bindings.
+Each scenario has `test_ref: {path: "...", case_id: "...::..."}` for this adapter
+(optional `framework: "pytest"` is display metadata validated by that adapter)
 and may set `required: true`. Parameter IDs, including brackets and Unicode, are
 preserved. The declared file and node-ID prefix must agree. Required scenarios
 are compiled into immutable Check rules; ordinary v1 inventory remains advisory.
@@ -130,10 +143,23 @@ Case-aware Domain checks specify adapter ID, collection/selection conditions and
 outcome rules, not `argv`, `cwd` or private Runner paths. The pytest adapter builds
 the actual command and owns its runtime mount and observation artifact. Worker
 checks the returned receipt against that materialized command. Ordinary caller-
-supplied `test_commands` still contain their explicit argv. Pytest remains the
+supplied `execution_checks` with `kind: command` still contain their explicit argv. Pytest remains the
 only bundled production adapter; applications can explicitly register others.
 As with any pinned implementation change, start a new Run to use the new code;
 old Run identities are not silently migrated.
+
+Application composition injects a `CheckPreparationPort` into Develop. The
+bundled `AdapterCheckPreparation` bridge converts legacy input aliases, dispatches
+selector/reference validation to the registered adapter, and checks its returned
+source paths against the admitted input scope. No callback executes tests, reads
+the Candidate, or changes a Run. The resulting Check stores adapter `id`, opaque
+`selector`, common `source_paths` and Domain-owned `rules`. Neither Develop nor
+Core imports a concrete adapter or parses its test names.
+The preparation port exposes a stable `identity()`; the built-in bridge hashes
+its method implementations, effective configuration and alias dispatch separately
+from the used adapters. Default Develop identity includes it. A custom Domain's
+explicit `identity_config` remains that implementation's complete configuration
+contract; it may be a JSON value or a data-returning method.
 
 ### Adapter interface and application registration
 
@@ -151,6 +177,22 @@ The framework-neutral `ExecutionAdapter` port has four methods:
 - `observer(token, runtime)`: create a fresh session-local `CaseObserver`. Its
   `feed(event)` returns a completed normalized case or None; `finish(error)`
   returns the normalized session summary, including incomplete facts.
+
+To use the same Develop compiler, an adapter also implements the optional
+`CaseSchemaAdapter` data-only capability:
+
+- `normalize_selection(selector, inputs, required_cases)` validates framework
+  syntax and returns `{selector, source_paths}`. It may not widen input scope or
+  change required-case IDs/outcome criteria.
+- `validate_reference(selector, reference)` rejects incompatible case/source
+  links. Case IDs are opaque to Develop; their grammar belongs here.
+
+Existing adapters used by application-defined Domains need not implement this
+capability; selecting one from Develop without it fails explicitly. These schema
+methods are fingerprinted with the execution methods. An optional registration
+`parameter_alias` requires `legacy_execution_check(value)` to translate old
+caller input into a canonical `kind: cases` entry; it never supplies policy approval.
+The registration alias is included in the adapter's configuration identity.
 
 An adapter also supplies `adapter_id`, `revision` and a relative `report_path`.
 Normalized cases preserve opaque `case_id`, discovered/selected/started/executed/
@@ -170,8 +212,15 @@ adapters = AdapterRegistry([
     AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter"),
     AdapterRegistration("my-cases-v1", "my_application.adapters:MyAdapter", config={}),
 ])
-api = Harness(state_dir, domains=my_domains, adapters=adapters)
+api = Harness(state_dir, adapters=adapters)  # built-in Develop gets the schema port
 ```
+
+For an explicit custom Domain registry containing Develop, construct it with
+`DevelopModule(check_preparation=AdapterCheckPreparation(adapters))` and pass
+that registry as `domains`. A standalone `DevelopModule()` supports file and
+ordinary command checks; case-aware preparation requires the injected port.
+The default adapter registry also registers the legacy `pytest_checks` alias;
+custom registrations can opt into it with `parameter_alias="pytest_checks"`.
 
 Factories are explicit top-level Python classes with JSON-compatible constructor
 configuration/defaults. An optional absolute `import_root` names an operator-

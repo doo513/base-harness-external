@@ -7,7 +7,7 @@ import sys
 
 def main():
     runtime, report_path, settings_json = sys.argv[1:]
-    token = json.loads(Path("/opt/harness-runtime/capture.json").read_text())["token"]
+    token = json.loads(Path("/opt/harness-runtime/capture.json").read_text(encoding="utf-8"))["token"]
     sys.path.insert(0, runtime)
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     import pytest

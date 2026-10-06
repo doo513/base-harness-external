@@ -9,10 +9,13 @@ from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, require, fields, relative_path, integer, limits, validate_contract
 from . import develop_cases
+from .check_preparation import AdapterCheckPreparation, CheckPreparationPort
+from .registry import effective_config
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
-DEVELOP_REVISION = "develop-external-6"
+DEVELOP_REVISION = "develop-external-7"
+PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile"}
 
 
 def normalize_file(expectation, inputs):
@@ -49,7 +52,7 @@ def normalize_command(command):
             **check_identity(command, "command", {"argv": argv, "cwd": cwd})}
 
 
-def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, check_index, bundle_paths):
+def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, check_index, bundle_paths, preparation):
     """Validate and summarize an operator-declared Develop test inventory.
 
     This records where checks are intended to be exercised. It does not inspect
@@ -97,10 +100,10 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
             case_id = reference["case_id"]
             require(path in bundle_paths, "COVERAGE_TEST_REFERENCE", "Coverage test reference must point into the pinned bundle")
             if version2:
-                develop_cases.node_id(case_id)
-                require(reference.get("framework") == "pytest" and case_id.split("::", 1)[0] == path
-                        and check_index[check_id].get("adapter", {}).get("id") == "pytest-cases-v1"
-                        and path in check_index[check_id]["adapter"]["paths"], "COVERAGE_TEST_REFERENCE", "Pytest reference must match its declared collection file/check")
+                develop_cases.case_id(case_id)
+                adapter = check_index[check_id].get("adapter", {})
+                require(bool(adapter) and path in adapter["source_paths"], "COVERAGE_TEST_REFERENCE", "Case reference must match its declared source/check")
+                preparation.reference(adapter, reference)
                 require(type(item.get("required", False)) is bool, "COVERAGE_TEST_REFERENCE", "required must be boolean")
             else:
                 require(isinstance(case_id, str) and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:-]{0,199}", case_id)),
@@ -109,7 +112,10 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
                               "kind": kind, "test_ref": {"path": path, "case_id": case_id}})
             if version2:
                 scenarios[-1].update(required=item.get("required", False))
-                scenarios[-1]["test_ref"]["framework"] = "pytest"
+                if "framework" in reference:
+                    require(isinstance(reference["framework"], str) and 0 < len(reference["framework"]) <= 128,
+                            "COVERAGE_TEST_REFERENCE", "Framework metadata must be bounded text")
+                    scenarios[-1]["test_ref"]["framework"] = reference["framework"]
             entries[requirement_id]["scenario_ids"].append(scenario_id)
         for item in source_gaps:
             fields(item, {"id", "requirement_id", "reason"}, {"id", "requirement_id", "reason"})
@@ -150,7 +156,7 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
     if coverage is not None:
         report["source_hash"] = canonical_hash(coverage)
         if coverage.get("schema_version") == "develop-coverage-v2":
-            report["limitations"][0] = "Exact node IDs are declared here; discovered/selected/executed cases are measured only during verification."
+            report["limitations"][0] = "Exact case IDs are declared here; discovered/selected/executed cases are measured only during verification."
             report["limitations"][1] = "Only explicit required scenarios become normalized Gate conditions; other links remain advisory."
     summary = {"schema_version": report["schema_version"], "status": status, "profile": report["profile"],
                "scenario_count": len(scenarios), "known_gap_count": len(gaps),
@@ -162,7 +168,17 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
     return report, summary
 
 
-def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) -> dict:
+def normalize_execution(value, inputs, preparation):
+    require(isinstance(value, dict), "INVALID_PARAMETERS", "Execution check must be an object")
+    if value.get("kind") == "command":
+        return normalize_command({key: item for key, item in value.items() if key != "kind"})
+    require(value.get("kind") == "cases", "INVALID_PARAMETERS", "Execution check kind must be command or cases")
+    return develop_cases.normalize(value, inputs, preparation)
+
+
+def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, *, check_preparation=None) -> dict:
+    preparation = check_preparation if check_preparation is not None else AdapterCheckPreparation()
+    parameters = preparation.parameters(parameters)
     require(domain_id == "develop", "DOMAIN_UNSUPPORTED", "Only develop is supported")
     # Packaged extraction of the existing Develop manifest, not a second model
     # policy loader. Execution permissions from that manifest are NOT granted.
@@ -170,7 +186,7 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
     require(source_domain["id"] == domain_id and {"artifact", "command_exit", "behavior"} <= set(source_domain["verification"]["criterionTemplates"]),
             "DOMAIN_POLICY_MISMATCH", "Unsupported source domain criteria")
     require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-    fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"}, {"inputs", "artifacts", "expectations"})
+    fields(parameters, PARAMETERS, {"inputs", "artifacts", "expectations"})
     inputs = parameters["inputs"]
     artifacts = parameters["artifacts"]
     require(isinstance(inputs, list) and 1 <= len(inputs) <= 128, "INPUTS_REQUIRED", "List 1..128 input files, including tests/fixtures")
@@ -191,16 +207,12 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict) 
         covered.add(check["path"])
         checks.append(check)
     require(set(artifacts) <= covered, "NEEDS_INPUT", "Every artifact needs at least one explicit expectation")
-    commands = parameters.get("test_commands", [])
-    pytest_checks = parameters.get("pytest_checks", [])
-    require(isinstance(pytest_checks, list) and len(pytest_checks) <= 8, "INVALID_PARAMETERS", "At most eight pytest checks are supported")
-    require(isinstance(commands, list) and len(commands) <= 8, "INVALID_PARAMETERS", "At most eight test commands are supported")
-    require((profile == "execution" and bool(commands or pytest_checks)) or (profile == "structural" and not commands and not pytest_checks),
-            "NEEDS_INPUT", "Execution requires test_commands; structural explicitly excludes command execution")
-    for command in commands:
-        checks.append(normalize_command(command))
-    for item in pytest_checks:
-        checks.append(develop_cases.normalize(item, inputs))
+    execution = parameters.get("execution_checks", [])
+    require(isinstance(execution, list) and len(execution) <= 16, "INVALID_PARAMETERS", "At most sixteen execution checks are supported")
+    require((profile == "execution" and bool(execution)) or (profile == "structural" and not execution),
+            "NEEDS_INPUT", "Execution requires execution_checks; structural explicitly excludes execution")
+    for item in execution:
+        checks.append(normalize_execution(item, inputs, preparation))
     require(len({c["check_key"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS",
             "Checks with the same target/operator or command need distinct explicit id values")
     body = {
@@ -224,13 +236,31 @@ class DevelopModule:
     domain_id = "develop"
     revision = DEVELOP_REVISION
 
+    def __init__(self, *, check_preparation: CheckPreparationPort | None = None):
+        self._check_preparation = check_preparation if check_preparation is not None else AdapterCheckPreparation()
+
+    @property
+    def _checks(self):
+        # Existing structural/command-only subclasses need not call a new base
+        # constructor. Their default bridge is stateless and has no registry.
+        selected = getattr(self, "_check_preparation", None)
+        return selected if selected is not None else AdapterCheckPreparation()
+
+    def identity_config(self):
+        # Adapter code/config is pinned separately when its Check is admitted.
+        # Retain inherited/subclass Domain policy configuration in this identity.
+        require(callable(getattr(self._checks, "identity", None)), "DOMAIN_IDENTITY_UNAVAILABLE", "Preparation port needs a stable identity")
+        return {"effective": effective_config(self, exclude={"_check_preparation"}), "identity_file_ids": list(self.identity_file_ids),
+                "check_preparation": self._checks.identity()}
+
     def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
         """Compile configured acceptance plus revisable caller exploration.
 
         Requirements and evidence kinds are Develop semantics. Core receives
         normalized checks/IDs and pins them without deciding what the goal means.
         """
-        base = copy.deepcopy(policy["parameters"])
+        base = self._checks.parameters(policy["parameters"])
+        parameters = self._checks.parameters(parameters)
         accepted = self.prepare(goal, base, verifier, exploratory=False, intent=intent)
         base["profile"] = accepted["contract"]["profile"]
         checks = accepted["contract"]["checks"]
@@ -243,7 +273,7 @@ class DevelopModule:
         bundle_paths = set(policy["bundle"]["files"])
         for key in required:
             if indexed[key].get("adapter"):
-                require(set(indexed[key]["adapter"]["paths"]) <= bundle_paths, "ACCEPTANCE_SCOPE", "Case-aware acceptance test files must belong to the pinned bundle")
+                require(set(indexed[key]["adapter"]["source_paths"]) <= bundle_paths, "ACCEPTANCE_SCOPE", "Case-aware acceptance test files must belong to the pinned bundle")
         require(bundle_paths <= set(base["inputs"]) and not bundle_paths.intersection(base["artifacts"]),
                 "ACCEPTANCE_SCOPE", "Test bundle files must be inputs, not implementation artifacts")
         require(not any(indexed[key]["kind"] == "command" for key in required) or bool(bundle_paths),
@@ -272,11 +302,11 @@ class DevelopModule:
             mapped.update(references)
         require(mapped == set(required), "REQUIREMENT_REFERENCE", "Every mandatory check must map to a requirement")
         coverage_inventory, coverage_summary = compile_coverage_inventory(
-            policy.get("coverage"), requirements, set(required), indexed, bundle_paths)
+            policy.get("coverage"), requirements, set(required), indexed, bundle_paths, self._checks)
         base = develop_cases.apply_required_scenarios(base, policy.get("coverage"))
         if policy.get("coverage", {}).get("schema_version") == "develop-coverage-v2":
             checks = self.prepare(goal, base, verifier, exploratory=False, intent=intent)["contract"]["checks"]
-        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"})
+        fields(parameters, PARAMETERS)
         require(not (base["profile"] == "execution" and parameters.get("profile") == "structural"),
                 "ACCEPTANCE_SCOPE", "Configured command acceptance cannot be downgraded to structural checks")
         merged = copy.deepcopy(base)
@@ -286,12 +316,12 @@ class DevelopModule:
             for path in extra:
                 relative_path(path)
             merged[key] = list(dict.fromkeys(base[key] + extra))
-        for key in ("expectations", "test_commands", "pytest_checks"):
+        for key in ("expectations", "execution_checks"):
             extra = parameters.get(key, [])
             require(isinstance(extra, list), "INVALID_PARAMETERS", key + " must be a list")
             originals = list(base.get(key, []))
             for proposal in extra:
-                normalized = normalize_file(proposal, merged["inputs"]) if key == "expectations" else develop_cases.normalize(proposal, merged["inputs"]) if key == "pytest_checks" else normalize_command(proposal)
+                normalized = normalize_file(proposal, merged["inputs"]) if key == "expectations" else normalize_execution(proposal, merged["inputs"], self._checks)
                 old = next((c for c in checks if c["check_key"] == normalized["check_key"]), None)
                 require(old is None or old == normalized, "ACCEPTANCE_CHECK_CHANGED", "Configured checks cannot be replaced by caller proposals")
                 if old is None:
@@ -317,12 +347,13 @@ class DevelopModule:
         if intent is not None:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-        fields(parameters, {"inputs", "artifacts", "expectations", "test_commands", "pytest_checks", "validation_profile", "profile"})
+        parameters = self._checks.parameters(parameters)
+        fields(parameters, PARAMETERS)
         perspective = parameters.get("validation_profile")
         require(perspective is None or isinstance(perspective, str) and perspective in develop_cases.PERSPECTIVES, "VALIDATION_PROFILE", "Unknown Develop perspective profile")
         profile = parameters.get("profile", "execution")
         require(isinstance(profile, str) and profile in {"structural", "execution"}, "INVALID_PARAMETERS", "Unknown Develop profile")
-        for key in ("inputs", "artifacts", "expectations", "test_commands", "pytest_checks"):
+        for key in ("inputs", "artifacts", "expectations", "execution_checks"):
             if key in parameters:
                 require(isinstance(parameters[key], list), "INVALID_PARAMETERS", "Develop parameter must be a list: " + key)
         for item in parameters.get("inputs", []) + parameters.get("artifacts", []):
@@ -331,17 +362,17 @@ class DevelopModule:
         require(len(inputs) <= 128 and len({p.casefold() for p in inputs}) == len(inputs)
                 and not any(b.startswith(a + "/") for a in inputs for b in inputs if a != b), "INVALID_PATH", "Invalid partial input file scope")
         missing = [key for key in ("inputs", "artifacts", "expectations") if not parameters.get(key)]
-        if profile == "execution" and not (parameters.get("test_commands") or parameters.get("pytest_checks")):
-            missing.append("test_commands")
+        if profile == "execution" and not parameters.get("execution_checks"):
+            missing.append("execution_checks")
         if not exploratory or not missing:
-            contract = build_contract(self.domain_id, goal, parameters, verifier)
+            contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks)
             result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"]}
             if perspective:
                 result["validation_perspectives"] = {"profile_id": perspective, "revision": "1", "perspectives": develop_cases.PERSPECTIVES[perspective], "meaning": "advisory_not_mandatory_tests"}
             return result
         # Missing domain data is a durable clarification state, never invented criteria.
         questions = [{"id": "develop:" + key, "parameter": key, "reason": "missing_domain_parameter"} for key in missing]
-        source = decode(files("harness_external").joinpath("develop_manifest.json").read_text())
+        source = decode(files("harness_external").joinpath("develop_manifest.json").read_text(encoding="utf-8"))
         contract = {"schema_version": "external-goal-contract-v1", "domain_id": self.domain_id, "domain_revision": self.revision,
                     "source_domain": {"id": source["id"], "revision": source["revision"], "manifest_hash": canonical_hash(source)},
                     "original_goal": goal, "profile": profile, "inputs": parameters.get("inputs", []),
@@ -365,13 +396,12 @@ class DevelopModule:
                 "CHECK_UNSUPPORTED", "Develop command checks expect exit zero")
         if "adapter" in parameters:
             fields(parameters, {"kind", "expectedExitCode", "timeout_seconds", "adapter"}, {"kind", "adapter"})
-            adapter = fields(parameters["adapter"], {"id", "paths", "args", "rules"}, {"id", "paths", "args", "rules"})
-            require(adapter["id"] == "pytest-cases-v1", "CHECK_UNSUPPORTED", "Unknown case adapter")
+            adapter = fields(parameters["adapter"], {"id", "selector", "source_paths", "rules"}, {"id", "selector", "source_paths", "rules"})
             rules = fields(adapter["rules"], {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"},
                            {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"})
-            result = develop_cases.normalize({"id": "normalized", "paths": adapter["paths"], "args": adapter["args"],
+            result = develop_cases.normalize({"kind": "cases", "id": "normalized", "adapter_id": adapter["id"], "selector": adapter["selector"],
                          "required_cases": rules["required_case_ids"], "allowed_outcomes": rules["allowed_outcomes"],
-                         "timeout_seconds": parameters.get("timeout_seconds", 30)}, contract["inputs"])
+                         "timeout_seconds": parameters.get("timeout_seconds", 30)}, contract["inputs"], self._checks)
             require(result["adapter"] == adapter, "CHECK_SCOPE_CONFLICT", "Case-aware conditions changed")
             return result
         return normalize_command({key: value for key, value in parameters.items() if key not in {"kind", "expectedExitCode"}})

@@ -35,6 +35,19 @@ class DomainModule(Protocol):
     def normalize_check(self, parameters: dict, contract: dict) -> dict: ...
 
 
+def effective_config(module, *, exclude=()):
+    # Merge before filtering so overriding descriptors cannot reveal shadowed
+    # parent attributes. Dynamic semantic values need an explicit identity_config.
+    effective = {}
+    for cls in reversed(type(module).__mro__):
+        effective.update(vars(cls))
+    effective.update(vars(module))
+    ignored = {"identity_files", "identity_file_ids", "identity_config", *exclude}
+    return {key: value for key, value in effective.items() if key not in ignored
+            and not key.startswith("__") and not callable(value)
+            and not isinstance(value, (property, classmethod, staticmethod))}
+
+
 class DomainRegistry:
     def __init__(self, modules):
         self._modules = {}
@@ -61,6 +74,8 @@ class DomainRegistry:
         functions = [module.prepare, module.normalize_check]
         if callable(getattr(module, "prepare_acceptance", None)):
             functions.append(module.prepare_acceptance)
+        if callable(getattr(module, "identity_config", None)):
+            functions.append(module.identity_config)
         sources, code = {}, {}
         for function in functions:
             target = getattr(function, "__func__", function)
@@ -74,18 +89,10 @@ class DomainRegistry:
             path = Path(filename).resolve(strict=True)
             sources["identity-file:" + logical_id] = hashlib.sha256(path.read_bytes()).hexdigest()
         config = getattr(module, "identity_config", None)
+        if callable(config):
+            config = config()
         if config is None:
-            # Merge before filtering: an overriding descriptor/callable must not
-            # accidentally reveal a shadowed parent's data attribute. Never run
-            # descriptors to infer configuration; dynamic values need identity_config.
-            effective = {}
-            for cls in reversed(type(module).__mro__):
-                effective.update(vars(cls))
-            effective.update(vars(module))
-            config = {"effective": {key: value for key, value in effective.items()
-                                    if key not in {"identity_files", "identity_file_ids", "identity_config"}
-                                    and not key.startswith("__") and not callable(value)
-                                    and not isinstance(value, (property, classmethod, staticmethod))},
+            config = {"effective": effective_config(module),
                       "identity_file_ids": list(identity_file_ids)}
         try:
             configuration_hash = canonical_hash(config)
@@ -97,6 +104,6 @@ class DomainRegistry:
         return {**body, "identity_hash": canonical_hash(body)}
 
 
-def builtin_registry():
+def builtin_registry(*, check_preparation=None):
     from .domain import DevelopModule
-    return DomainRegistry([DevelopModule()])
+    return DomainRegistry([DevelopModule(check_preparation=check_preparation)])

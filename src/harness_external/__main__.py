@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
     start.add_argument("--workspace", required=True)
-    start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/test_commands/profile")
+    start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/execution_checks/profile")
     start.add_argument("--mode", choices=("strict", "exploratory", "acceptance"), help="default: configured acceptance when present, otherwise legacy strict")
     start.add_argument("--policy-id", help="registered acceptance profile; cannot override an operator Domain default")
     start.add_argument("--predecessor-run-id", help="terminal Run replaced after an explicit policy change")

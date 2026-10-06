@@ -129,7 +129,7 @@ def test_common_link_contract_rejects_undefined_or_ambiguous_references(change):
 
 
 def test_domain_defines_conditions_but_adapter_constructs_runtime_command(monkeypatch):
-    from harness_external.develop_cases import normalize
+    from test_pytest_domain import normalize
     from harness_external import pytest_adapter
     from harness_external.domain import DevelopModule
     check = normalize({"id": "probe", "paths": ["test_probe.py"], "required_cases": ["test_probe.py::test_value"]}, ["test_probe.py"])
@@ -149,7 +149,7 @@ def test_domain_defines_conditions_but_adapter_constructs_runtime_command(monkey
 
 def test_reserved_observation_artifact_is_adapter_owned(tmp_path):
     from harness_external.adapter_execution import bind, execute
-    from harness_external.develop_cases import normalize
+    from test_pytest_domain import normalize
     from harness_external.pytest_adapter import REPORT_PATH
     (tmp_path / REPORT_PATH).write_text("caller data")
     check = normalize({"id": "probe", "paths": ["test_probe.py"]}, ["test_probe.py", REPORT_PATH])
@@ -163,14 +163,15 @@ def test_reserved_observation_artifact_is_adapter_owned(tmp_path):
 def test_import_boundaries_and_private_runtime_paths():
     root = Path(__file__).resolve().parents[1] / "src/harness_external"
     for name in ("worker.py", "observation_links.py", "pytest_adapter.py", "adapter_execution.py"):
-        for node in ast.walk(ast.parse((root / name).read_text())):
+        for node in ast.walk(ast.parse((root / name).read_text(encoding="utf-8"))):
             if isinstance(node, ast.ImportFrom):
                 assert (node.module or "").split(".")[-1] not in {"domain", "develop_cases"}, (name, node.lineno)
                 assert not (node.module in (None, "harness_external") and any(a.name in {"domain", "develop_cases"} for a in node.names)), (name, node.lineno)
             if isinstance(node, ast.Import):
                 assert all(a.name not in {"harness_external.domain", "harness_external.develop_cases"} for a in node.names)
     for name in ("domain.py", "develop_cases.py"):
-        source = (root / name).read_text()
+        source = (root / name).read_text(encoding="utf-8")
+        assert "pytest" not in source.lower()
         assert all(text not in source for text in ("/opt/harness-runtime", ".harness-cases.jsonl", "runner.py", "packages.zip"))
         assert all(text not in source for text in (".worker import", ".pytest_adapter import", ".adapter_execution import"))
 
