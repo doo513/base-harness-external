@@ -59,12 +59,13 @@ def compile_observation_links(inventory):
     The Core need not load Develop or understand its coverage schema, scenario
     kinds, paths, profiles or framework-specific case syntax to join references.
     """
-    if inventory.get("schema_version") != "develop-coverage-inventory-v2":
-        return None
+    # Legacy logical test names remain advisory. Check-only links can still
+    # report actual Check outcomes without claiming case discovery/execution.
+    scenarios = inventory["scenarios"] if inventory.get("schema_version") == "develop-coverage-inventory-v2" else []
     return {"schema_version": "requirement-case-links-v1",
             "requirements": [{key: copy.deepcopy(item[key]) for key in ("requirement_id", "check_ids", "known_gap_ids")}
                              for item in inventory["requirements"]],
             "scenarios": [{"scenario_id": item["id"], "requirement_id": item["requirement_id"],
                            "check_id": item["check_id"], "case_id": item["test_ref"]["case_id"],
                            "required": item.get("required", False), "test_ref": copy.deepcopy(item["test_ref"])}
-                          for item in inventory["scenarios"]]}
+                          for item in scenarios]}

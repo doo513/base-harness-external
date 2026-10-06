@@ -59,7 +59,7 @@ class AdapterRegistry:
                     and Path(value.import_root).is_dir(), "ADAPTER_REGISTRATION_INVALID", "Import root must be an existing absolute application directory")
             require(value.parameter_alias is None or isinstance(value.parameter_alias, str)
                     and bool(re.fullmatch(r"[a-z][a-z0-9_]{0,95}", value.parameter_alias))
-                    and value.parameter_alias not in {"inputs", "artifacts", "expectations", "execution_checks", "test_commands", "profile", "validation_profile"},
+                    and value.parameter_alias not in {"inputs", "artifacts", "expectations", "execution_checks", "test_commands", "profile", "validation_profile", "requirements", "coverage"},
                     "ADAPTER_REGISTRATION_INVALID", "Invalid legacy parameter alias")
             require(value.parameter_alias is None or value.parameter_alias not in self.parameter_aliases(),
                     "ADAPTER_DUPLICATE", "Duplicate legacy parameter alias")

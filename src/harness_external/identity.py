@@ -13,6 +13,7 @@ EXECUTION_FILES = (
     "harness_external/snapshots.py", "harness_external/store.py",
     "harness_external/journal.py", "harness_external/read_core.py",
     "harness_external/errors.py", "harness_external/semantics.py",
+    "harness_external/need_records.py",
     "harness_external/registry.py", "harness_external/identity.py",
     "harness_external/acceptance.py", "harness_external/evidence.py",
     "harness_external/maintenance.py", "harness_external/dispatch.py",

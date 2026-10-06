@@ -169,7 +169,7 @@ def test_import_boundaries_and_private_runtime_paths():
                 assert not (node.module in (None, "harness_external") and any(a.name in {"domain", "develop_cases"} for a in node.names)), (name, node.lineno)
             if isinstance(node, ast.Import):
                 assert all(a.name not in {"harness_external.domain", "harness_external.develop_cases"} for a in node.names)
-    for name in ("domain.py", "develop_cases.py"):
+    for name in ("domain.py", "develop_cases.py", "develop_requirements.py"):
         source = (root / name).read_text(encoding="utf-8")
         assert "pytest" not in source.lower()
         assert all(text not in source for text in ("/opt/harness-runtime", ".harness-cases.jsonl", "runner.py", "packages.zip"))

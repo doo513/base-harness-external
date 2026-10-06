@@ -20,7 +20,7 @@ from .registry import builtin_registry
 from .adapter_registry import builtin_adapter_registry
 from .check_preparation import AdapterCheckPreparation
 from . import queries, maintenance
-from . import acceptance, evidence, observation_links
+from . import acceptance, evidence, observation_links, need_records
 from .identity import verifier_identity
 
 
@@ -46,6 +46,14 @@ class Harness:
             result["coverage_inventory"] = copy.deepcopy(preparation["coverage_inventory_summary"])
         if "validation_perspectives" in preparation:
             result["validation_perspectives"] = copy.deepcopy(preparation["validation_perspectives"])
+        if "requirements_summary" in preparation:
+            # Opaque Domain metadata; declarations do not grant completion.
+            result["requirements"] = copy.deepcopy(preparation["requirements_summary"])
+        if "analysis_guidance" in preparation:
+            guidance = preparation["analysis_guidance"]
+            require(isinstance(guidance, dict) and len(canonical_bytes(guidance)) <= 32000,
+                    "DOMAIN_ANALYSIS_GUIDANCE", "Domain analysis guidance must be a bounded object")
+            result["analysis_guidance"] = copy.deepcopy(preparation["analysis_guidance"])
         return result
 
     def _reconcile(self, connection, run):
@@ -316,7 +324,10 @@ class Harness:
 
     def observe(self, run_id: str, observation: dict, request_id: str):
         fields(observation, {"note", "references", "kind", "record_id", "task_id", "parent_task_id", "depends_on", "state",
-                             "observation_ids", "interpretation_revision", "related_activity_id", "relation", "task_revision"}, {"note"})
+                             "observation_ids", "interpretation_revision", "related_activity_id", "relation", "task_revision", "need"}, {"note"})
+        require(("need" in observation) == (observation.get("kind") == "need"), "NEED_REQUIRED", "Need data requires kind=need and vice versa")
+        require(observation.get("kind") != "need" or not (set(observation) & {"task_id", "task_revision", "parent_task_id", "depends_on", "state"}),
+                "NEED_FIELDS", "Task fields cannot change a Need; put its state inside need")
         require(not (set(observation) & {"related_activity_id", "relation", "task_revision"}) or bool(observation.get("kind")),
                 "ACTIVITY_REQUIRED", "Structured relationships require an activity kind")
         require(isinstance(observation["note"], str) and 0 < len(observation["note"]) <= 16000, "INVALID_OBSERVATION", "A bounded note is required")
@@ -331,14 +342,18 @@ class Harness:
             run = self.store.run(connection, run_id)
             self._admit(connection, run, request=(run_id, request_id, fingerprint))
             require(len(run["observations"]) < 100, "OBSERVATION_LIMIT", "At most 100 caller observations per Run")
-            item = {"observation_id": "note_" + uuid.uuid4().hex, "origin": "caller", "trust": "untrusted", **redact(observation)}
+            item = {"observation_id": "note_" + uuid.uuid4().hex, "origin": "caller", "trust": "untrusted",
+                    **redact({key: value for key, value in observation.items() if key != "need"})}
             run["observations"].append(item)
             if observation.get("kind"):
-                require(isinstance(observation["kind"], str) and observation["kind"] in {"note", "hypothesis", "decision", "task"}, "ACTIVITY_KIND", "Unknown activity kind")
+                require(isinstance(observation["kind"], str) and observation["kind"] in {"note", "hypothesis", "decision", "task", "need"}, "ACTIVITY_KIND", "Unknown activity kind")
                 latest = run["interpretations"][-1]["ref"]
                 require(observation.get("interpretation_revision", latest["revision"]) == latest["revision"], "STALE_INTERPRETATION", "Activity refers to an older interpretation")
                 cited = observation.get("observation_ids", [])
                 self._observations_exist(connection, run_id, cited)
+                if observation["kind"] == "need":
+                    need = need_records.record(self, run, observation)
+                    item["need_ref"] = need["ref"]
                 related = observation.get("related_activity_id")
                 relation = observation.get("relation")
                 if related is not None or relation is not None:
@@ -370,11 +385,14 @@ class Harness:
                                            "interpretation_ref": latest, "observation_ids": cited,
                                            "task_id": observation.get("task_id"), "task_revision": expected + 1 if observation["kind"] == "task" else None,
                                            "related_activity_id": related, "relation": relation,
-                                           "origin": "caller", "trust": "untrusted"}))
+                                           "origin": "caller", "trust": "untrusted",
+                                           **({"need_ref": need["ref"]} if observation["kind"] == "need" else {})}))
             self.store.save_run(connection, run)
             result = response(run_id=run_id, observation=item)
             if observation.get("kind"):
                 result["activity"] = run["activity"][-1]
+            if observation.get("kind") == "need":
+                result["need"] = need
             self.store.remember(connection, run_id, request_id, fingerprint, result)
             return result
 

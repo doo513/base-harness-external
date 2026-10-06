@@ -1,5 +1,5 @@
 """Small recovery views and bounded history pages for external callers."""
-from . import semantics
+from . import semantics, need_records
 from . import read_core
 from .read_core import COLLECTIONS, RECENT_JOB_LIMIT, page_bounds, records
 from .views import job_view, run_view
@@ -45,4 +45,5 @@ def resume(api, run_id):
                 "measurement": run["verification"], "assessment": semantics.assessment_view(run),
                 "gates": gate_results,
                 "unresolved_work": [t["task_id"] for t in run["logical_tasks"] if t["state"] != "settled"],
+                "needs": need_records.summary(run),
                 "recent_jobs": jobs, "history_counts": counts, "record": run["record"]}

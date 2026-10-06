@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
     start.add_argument("--workspace", required=True)
-    start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/execution_checks/profile")
+    start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/execution_checks/profile; optional requirements/coverage")
     start.add_argument("--mode", choices=("strict", "exploratory", "acceptance"), help="default: configured acceptance when present, otherwise legacy strict")
     start.add_argument("--policy-id", help="registered acceptance profile; cannot override an operator Domain default")
     start.add_argument("--predecessor-run-id", help="terminal Run replaced after an explicit policy change")
@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "cancel":
             cmd.add_argument("--job-id", required=True)
         elif name == "records":
-            cmd.add_argument("--kind", choices=("checks", "interpretations", "activity", "assessments", "tasks", "notes", "jobs", "measurements", "cases"), required=True)
+            cmd.add_argument("--kind", choices=("checks", "interpretations", "activity", "assessments", "tasks", "notes", "needs", "jobs", "measurements", "cases"), required=True)
             cmd.add_argument("--job-id")
             cmd.add_argument("--offset", type=int, default=0)
             cmd.add_argument("--limit", type=int, default=20)

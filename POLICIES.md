@@ -4,6 +4,72 @@ Harness does not decide whether a test adequately expresses a natural-language
 goal. A Domain compiles requirements and checks; Core pins their identity and
 enforces the selected completion policy. Host reasoning remains autonomous.
 
+## Requirement conditions
+
+Develop accepts optional `parameters.requirements` for caller-defined Runs.
+It compiles the same condition shape as configured policy `requirements`:
+
+- `id`, `statement`, `check_ids` are required; IDs are unique and stable.
+- `kind` is `input`, `output`, `behavior` (default), `preservation`, `conflict`
+  or `failure`. This classifies the declaration; it never chooses a gate.
+- Optional `when` describes the condition under which the statement applies.
+- `minimum_evidence` is `file` (default), `command` or `testcase`.
+  Nonempty mappings must include an appropriate Check; testcase mappings need
+  a case-aware adapter. Tests still have to substantiate the declared behavior.
+
+For example, this complete caller parameter object links a preservation
+condition to a command and explicitly leaves a failure condition unlinked:
+
+```json
+{
+  "inputs": ["migrator.py", "tests/test_migrator.py"],
+  "artifacts": ["migrator.py"],
+  "expectations": [{"id":"entry", "path":"migrator.py", "operator":"contains", "expected":"def migrate"}],
+  "execution_checks": [{"kind":"command", "id":"suite", "argv":["python3","-m","unittest","discover","-s","tests","-v"]}],
+  "requirements": [
+    {"id":"R-preserve", "kind":"preservation", "when":"When migrating an existing configuration",
+     "statement":"Retain unknown fields and their values", "check_ids":["domain.suite"], "minimum_evidence":"command"},
+    {"id":"R-failure", "kind":"failure", "when":"When writing the result fails",
+     "statement":"Preserve the original and remove the temporary file", "check_ids":[], "minimum_evidence":"testcase"}
+  ]
+}
+```
+
+References target checks declared with explicit `id` values in the same Domain
+parameters. An undefined ID is rejected once preparation is complete. `check_ids: []`
+explicitly declares a coverage gap, including while planning a future case check.
+An exploratory Run can retain requirements before its file/check scope is ready;
+its summary says `pending_preparation` and does not emit observation links yet.
+`references_validated` means the declaration references were checked, not that
+the tests ran or the stated behavior was proved.
+
+Caller `parameters.coverage` reuses the coverage formats below. Its test paths
+must belong to the declared inputs. The v2 format binds exact cases through the
+selected adapter and compiles explicitly required scenarios into that Check's
+existing case rules. In exploratory mode this does not make the Check a gate.
+Legacy v1 scenario names remain advisory; only Check-level observations are joined.
+
+The compiled contract adds `requirements`, `requirement_summary`,
+`coverage_inventory` and common `observation_links`. Summaries identify the
+declaration source, unlinked requirements, requirements without scenarios and
+declared gaps. Prepare does not create observations. Check-only links report
+`linked_checks_passed` separately from `linked_cases_passed`; neither establishes
+goal completeness. Unlinked conditions remain visible even after a permitted
+closeout; completion continues to follow the selected Policy.
+
+Caller conditions can be refined via `revise`; the original Intent and pinned
+Policy stay separate. A condition change changes the contract hash and resets
+the current verification. Design choices, assumptions and open questions belong
+in the existing Interpretation fields, not in requirement approval metadata.
+Required-case changes to an already pinned Check follow the existing gate
+immutability rule; an advisory scenario link can describe an evolving hypothesis.
+
+With configured acceptance, `requirements` and `coverage` come from the pinned
+policy top level. Do not put duplicates in policy `parameters`, or override them
+through caller `start`/`revise` parameters. Changing that policy requires the
+existing operator-configuration/new-Run path. The labels `caller_proposal` and
+`operator_configuration` describe input channels, not authenticated authorship.
+
 ## Operator configuration versus task proposals
 
 Configure an acceptance registry outside the agent's editable project:
@@ -28,7 +94,7 @@ It contains:
 - `policy_id`, `revision`, `domain_id`, `schema_version: acceptance-policy-v1`;
 - Domain `parameters`, including explicit named checks;
 - `required_check_ids` and `requirements` (`id`, `statement`, `check_ids`, optional
-  `minimum_evidence: file|command|testcase`); dangling/duplicate mappings are errors;
+  `minimum_evidence: file|command|testcase`, `kind`, `when`); dangling/duplicate mappings are errors;
 - optional Domain-owned `coverage` inventory with a profile revision, scenario-to-
   requirement/check references into the pinned test bundle, and explicit known gaps;
 - `bundle.version` and explicit `bundle.files`, relative to the bundle directory;

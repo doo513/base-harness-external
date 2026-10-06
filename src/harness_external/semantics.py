@@ -150,6 +150,8 @@ def validate_run(run, *, current=False):
     for collection in ("interpretations", "check_records", "assessments", "activity"):
         for item in run[collection]:
             validate(item)
+    for item in run.get("needs", []):
+        validate(item)
     require(current or [item["ref"]["revision"] for item in run["interpretations"]] == list(range(1, len(run["interpretations"]) + 1)),
             "INTERPRETATION_CORRUPT", "Interpretation revision history is not consecutive")
     for key, ref in run["gate_bindings"].items():
@@ -296,4 +298,7 @@ def resolution(run, gate_results):
         # Coverage is a Domain declaration shown to callers, never a gate or
         # verifier observation.
         result["coverage_inventory"] = copy.deepcopy(inventory)
+    requirements = preparation.get("requirements") if isinstance(preparation, dict) else None
+    if requirements is not None:
+        result["requirements"] = copy.deepcopy(requirements)
     return result

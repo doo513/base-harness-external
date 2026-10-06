@@ -8,14 +8,14 @@ from importlib.resources import files
 from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, require, fields, relative_path, integer, limits, validate_contract
-from . import develop_cases
+from . import develop_cases, develop_requirements
 from .check_preparation import AdapterCheckPreparation, CheckPreparationPort
 from .registry import effective_config
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
-DEVELOP_REVISION = "develop-external-7"
-PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile"}
+DEVELOP_REVISION = "develop-external-9"
+PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile", "requirements", "coverage"}
 
 
 def normalize_file(expectation, inputs):
@@ -52,8 +52,8 @@ def normalize_command(command):
             **check_identity(command, "command", {"argv": argv, "cwd": cwd})}
 
 
-def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, check_index, bundle_paths, preparation):
-    """Validate and summarize an operator-declared Develop test inventory.
+def compile_coverage_inventory(coverage, requirements, eligible_check_ids, check_index, reference_paths, preparation):
+    """Validate and summarize a declared Develop test inventory.
 
     This records where checks are intended to be exercised. It does not inspect
     test code, count executed test cases, or assert that a test proves its label.
@@ -90,15 +90,15 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
             requirement_id, check_id, kind = item["requirement_id"], item["check_id"], item["kind"]
             require(isinstance(requirement_id, str) and requirement_id in requirement_by_id,
                     "COVERAGE_REQUIREMENT", "Coverage scenario references an unknown requirement")
-            require(isinstance(check_id, str) and check_id in mandatory_check_ids
+            require(isinstance(check_id, str) and check_id in eligible_check_ids
                     and check_id in requirement_by_id[requirement_id]["check_ids"] and check_id in check_index,
-                    "COVERAGE_CHECK", "Coverage scenario check must be mandatory and mapped to its requirement")
+                    "COVERAGE_CHECK", "Coverage scenario check must be admitted and mapped to its requirement")
             require(isinstance(kind, str) and kind in COVERAGE_KINDS,
                     "COVERAGE_KIND", "Unknown Develop coverage scenario kind")
             reference = fields(item["test_ref"], {"path", "case_id"} | ({"framework"} if version2 else set()), {"path", "case_id"})
             path = relative_path(reference["path"])
             case_id = reference["case_id"]
-            require(path in bundle_paths, "COVERAGE_TEST_REFERENCE", "Coverage test reference must point into the pinned bundle")
+            require(path in reference_paths, "COVERAGE_TEST_REFERENCE", "Coverage test reference is outside the declared verification source scope")
             if version2:
                 develop_cases.case_id(case_id)
                 adapter = check_index[check_id].get("adapter", {})
@@ -150,14 +150,14 @@ def compile_coverage_inventory(coverage, requirements, mandatory_check_ids, chec
               "profile": {"id": profile_id, "revision": profile_revision} if coverage is not None else None,
               "scenarios": scenarios, "known_gaps": gaps, "requirements": requirement_inventory,
               "unlisted_requirement_ids": unlisted, "assurance": assurance,
-              "limitations": ["Test references are checked against the pinned bundle path; test names and assertions are not inspected.",
+              "limitations": ["Test references are checked against declared source paths; test names and assertions are not inspected.",
                               "The verifier measures configured checks as a whole; this inventory does not create per-scenario observations.",
                               "Declared scenarios and known gaps are not proof of test validity, independence or goal completeness."]}
     if coverage is not None:
         report["source_hash"] = canonical_hash(coverage)
         if coverage.get("schema_version") == "develop-coverage-v2":
             report["limitations"][0] = "Exact case IDs are declared here; discovered/selected/executed cases are measured only during verification."
-            report["limitations"][1] = "Only explicit required scenarios become normalized Gate conditions; other links remain advisory."
+            report["limitations"][1] = "Explicit required scenarios become Check conditions; completion gates follow the selected policy."
     summary = {"schema_version": report["schema_version"], "status": status, "profile": report["profile"],
                "scenario_count": len(scenarios), "known_gap_count": len(gaps),
                "requirements": requirement_inventory, "unlisted_requirement_ids": unlisted,
@@ -227,12 +227,26 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
                         "Structural profile does not establish runtime behavior.",
                         "Local state and verifier run as the same user; reports are unsigned and not tamper-proof."],
     }
+    if "requirements" in parameters or "coverage" in parameters:
+        requirements = develop_requirements.normalize(parameters.get("requirements", []))
+        coverage = parameters.get("coverage")
+        require(bool(requirements) or coverage is None, "REQUIREMENTS_REQUIRED", "Coverage needs declared requirements")
+        indexed = {item["check_id"]: item for item in checks if "check_id" in item}
+        develop_requirements.validate_bindings(requirements, indexed)
+        inventory, _ = compile_coverage_inventory(coverage, requirements, set(indexed), indexed, set(inputs), preparation)
+        if coverage is not None and coverage.get("schema_version") == "develop-coverage-v2":
+            promoted = develop_cases.apply_required_scenarios(parameters, coverage)
+            if promoted.get("execution_checks", []) != parameters.get("execution_checks", []):
+                body["checks"] = [item for item in checks if item["kind"] == "file"] + [
+                    normalize_execution(item, inputs, preparation) for item in promoted.get("execution_checks", [])]
+        develop_requirements.attach(body, requirements, inventory, source="caller_proposal")
     return {**body, "contract_hash": canonical_hash(body)}
 
 
 class DevelopModule:
-    identity_files = (str(files("harness_external").joinpath("develop_manifest.json")), str(files("harness_external").joinpath("develop_cases.py")))
-    identity_file_ids = ("develop-manifest", "develop-case-semantics")
+    identity_files = tuple(str(files("harness_external").joinpath(name)) for name in
+                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py"))
+    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis")
     domain_id = "develop"
     revision = DEVELOP_REVISION
 
@@ -261,6 +275,10 @@ class DevelopModule:
         """
         base = self._checks.parameters(policy["parameters"])
         parameters = self._checks.parameters(parameters)
+        require(not {"requirements", "coverage"}.intersection(base), "ACCEPTANCE_DECLARATION_SOURCE",
+                "Configured requirements and coverage belong at the policy top level")
+        require(not {"requirements", "coverage"}.intersection(parameters), "ACCEPTANCE_DECLARATION_PINNED",
+                "Configured requirements and coverage cannot be replaced by caller parameters; revise assumptions or add exploratory checks")
         accepted = self.prepare(goal, base, verifier, exploratory=False, intent=intent)
         base["profile"] = accepted["contract"]["profile"]
         checks = accepted["contract"]["checks"]
@@ -278,28 +296,10 @@ class DevelopModule:
                 "ACCEPTANCE_SCOPE", "Test bundle files must be inputs, not implementation artifacts")
         require(not any(indexed[key]["kind"] == "command" for key in required) or bool(bundle_paths),
                 "ACCEPTANCE_BUNDLE_REQUIRED", "Command acceptance requires an explicitly pinned test/fixture bundle")
-        requirements = policy["requirements"]
-        require(isinstance(requirements, list) and 1 <= len(requirements) <= 100,
+        requirements = develop_requirements.normalize(policy["requirements"])
+        require(bool(requirements),
                 "REQUIREMENTS_REQUIRED", "Acceptance requires a bounded requirement-to-check mapping")
-        ids, mapped = set(), set()
-        for requirement in requirements:
-            fields(requirement, {"id", "statement", "check_ids", "minimum_evidence"}, {"id", "statement", "check_ids"})
-            key = requirement["id"]
-            require(isinstance(key, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", key)) and key not in ids,
-                    "REQUIREMENT_ID", "Requirements need unique logical IDs")
-            ids.add(key)
-            require(isinstance(requirement["statement"], str) and 0 < len(requirement["statement"]) <= 2000,
-                    "REQUIREMENT_INVALID", "A bounded requirement statement is required")
-            references = requirement["check_ids"]
-            require(isinstance(references, list) and len(references) <= 128 and all(isinstance(x, str) for x in references)
-                    and len(set(references)) == len(references) and set(references) <= set(required),
-                    "REQUIREMENT_REFERENCE", "Requirements may refer only to defined mandatory checks")
-            minimum = requirement.get("minimum_evidence", "file")
-            require(isinstance(minimum, str) and minimum in {"file", "command", "testcase"}, "REQUIREMENT_INVALID", "minimum_evidence is file, command or testcase")
-            require(minimum not in {"command", "testcase"} or any(indexed[x]["kind"] == "command" for x in references),
-                    "REQUIREMENT_EVIDENCE", "A command requirement cannot be represented by file-only checks")
-            require(minimum != "testcase" or any(indexed[x].get("adapter") for x in references), "REQUIREMENT_EVIDENCE", "A testcase requirement needs a case-aware check")
-            mapped.update(references)
+        mapped = develop_requirements.validate_bindings(requirements, indexed, eligible_ids=required, allow_unmapped=False)
         require(mapped == set(required), "REQUIREMENT_REFERENCE", "Every mandatory check must map to a requirement")
         coverage_inventory, coverage_summary = compile_coverage_inventory(
             policy.get("coverage"), requirements, set(required), indexed, bundle_paths, self._checks)
@@ -334,21 +334,24 @@ class DevelopModule:
         result = self.prepare(goal, merged, verifier, exploratory=True, intent=intent)
         result["acceptance_check_ids"] = list(required)
         result["coverage_inventory_summary"] = coverage_summary
-        result["contract"]["coverage_inventory"] = coverage_inventory
-        links = develop_cases.compile_observation_links(coverage_inventory)
-        if links is not None:
-            result["contract"]["observation_links"] = links
-        result["contract"]["acceptance_requirements"] = copy.deepcopy(requirements)
+        result["requirements_summary"] = develop_requirements.attach(result["contract"], requirements, coverage_inventory,
+                                                                     source="operator_configuration")
+        result["contract"]["acceptance_requirements"] = copy.deepcopy(policy["requirements"])
         result["contract"]["limitations"].append("Requirement and scenario links express configured inventory, not proof that tests adequately represent the goal.")
         result["contract"]["contract_hash"] = canonical_hash({k: v for k, v in result["contract"].items() if k != "contract_hash"})
         return result
 
     def prepare(self, goal, parameters, verifier, *, exploratory=False, intent=None):
+        from . import develop_analysis
         if intent is not None:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
         parameters = self._checks.parameters(parameters)
         fields(parameters, PARAMETERS)
+        requirements = develop_requirements.normalize(parameters.get("requirements", []))
+        require(parameters.get("coverage") is None or isinstance(parameters["coverage"], dict),
+                "COVERAGE_SCHEMA", "Coverage must be a declaration object or null")
+        require(bool(requirements) or parameters.get("coverage") is None, "REQUIREMENTS_REQUIRED", "Coverage needs declared requirements")
         perspective = parameters.get("validation_profile")
         require(perspective is None or isinstance(perspective, str) and perspective in develop_cases.PERSPECTIVES, "VALIDATION_PROFILE", "Unknown Develop perspective profile")
         profile = parameters.get("profile", "execution")
@@ -366,7 +369,10 @@ class DevelopModule:
             missing.append("execution_checks")
         if not exploratory or not missing:
             contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks)
-            result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"]}
+            result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"],
+                      "analysis_guidance": develop_analysis.guidance()}
+            if "requirement_summary" in contract:
+                result["requirements_summary"] = copy.deepcopy(contract["requirement_summary"])
             if perspective:
                 result["validation_perspectives"] = {"profile_id": perspective, "revision": "1", "perspectives": develop_cases.PERSPECTIVES[perspective], "meaning": "advisory_not_mandatory_tests"}
             return result
@@ -381,9 +387,17 @@ class DevelopModule:
                               "caller_observations_are_evidence": False, "ready_attestation": False},
                     "limitations": ["Local unsigned record; same-user tampering is outside this assurance.",
                                     "Goal interpretation and caller-authored tests do not prove goal coverage or independence."]}
+        result = {"status": "needs_input", "questions": questions, "contract": contract, "analysis_guidance": develop_analysis.guidance(),
+                  "available_operations": ["submit", "verify"] if inputs else []}
+        if "requirements" in parameters or "coverage" in parameters:
+            result["requirements_summary"] = develop_requirements.attach(contract, requirements, None,
+                                                                         source="caller_proposal", pending=True)
         contract["contract_hash"] = canonical_hash(contract)
-        return {"status": "needs_input", "questions": questions, "contract": contract,
-                "available_operations": ["submit", "verify"] if inputs else []}
+        return result
+
+    def normalize_need(self, details, contract):
+        from .develop_analysis import normalize
+        return normalize(details, contract)
 
     def normalize_check(self, parameters, contract):
         fields(parameters, {"kind", "path", "operator", "expected", "argv", "cwd", "timeout_seconds", "expectedExitCode", "adapter"}, {"kind"})

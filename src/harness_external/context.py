@@ -4,7 +4,7 @@ import copy
 import json
 
 from harness.common import canonical_bytes, canonical_hash
-from . import journal, read_core, semantics
+from . import journal, read_core, semantics, need_records
 from .errors import integer, require
 
 VERSION = "harness-context-v1"
@@ -121,6 +121,7 @@ def critical(run, gate_results, jobs):
             "open_question_count": len(run["interpretations"][-1]["open_questions"]) + len(run["domain_questions"]),
             "uncertainty_count": len(assessment["uncertainties"]),
             "unresolved_task_ids": [item["task_id"] for item in run["logical_tasks"] if item["state"] != "settled"],
+            "needs": need_records.summary(run),
             "unsatisfied_gate_ids": [item["check_id"] for item in gate_results["results"] if item["status"] != "passed"],
             "jobs": [{key: job.get(key) for key in ("job_id", "status", "completed_checks", "total_checks", "error")} for job in jobs],
             "assurance": "local-advisory", "ready": False}

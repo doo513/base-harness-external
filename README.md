@@ -103,7 +103,8 @@ changes into the user's workspace.
   acknowledged cleanup. A stale worker cannot publish into a closed/newer Run.
 
 Develop parameters are `inputs`, `artifacts`, `expectations`, `execution_checks`,
-and optional `profile` / advisory `validation_profile`. Every artifact requires a concrete expectation (`equals`,
+and optional `profile` / advisory `validation_profile`, `requirements` and `coverage`.
+Every artifact requires a concrete expectation (`equals`,
 `contains`, or `sha256`). The default `execution` profile requires at least one
 execution check and always expects exit code zero. Each entry uses `kind: command`
 with explicit `argv`, or `kind: cases` with a registered `adapter_id`, opaque
@@ -126,6 +127,30 @@ measurements even while final artifact/test criteria are incomplete. Its
 readiness; pending Domain questions still prevent `finish completed`.
 Interpretation and advisory checks can change within that Run; pinned gate checks
 and the initial policy cannot be weakened. A new policy requires a new Run.
+
+Optional [requirement conditions](POLICIES.md#requirement-conditions) describe
+input/output meaning, behavior, preservation, conflicts and failure handling.
+Each declaration has a stable ID, a statement, optional applicability (`when`),
+and explicit named Check references. The compiled GoalContract keeps these
+conditions separate from revisable design assumptions in Interpretation.
+`domain_preparation.requirements` and `resolution.requirements` expose unlinked
+requirements, absent scenario mappings and declared gaps. These summaries do not
+create checks, approval or additional completion gates. A passing Check still
+does not prove the corresponding statement adequately describes the goal.
+
+Develop also returns `domain_preparation.analysis_guidance`: a small Knowledge Map
+for compatibility, structure, runtime, recovery and verification questions. The
+Host derives Needs (what to know, observe, decide or verify) and follows only useful
+source hints with its own tools; Harness does not search, read those references or
+call a model. See the [Need protocol](skills/harness-workflow/references/protocol.md#need-analysis-and-focused-discovery).
+`observe kind=need` stores revisable caller analysis separately from GoalContract.
+It links requirements, source locators, decisions, Checks and real observations
+without changing gates, a submitted Candidate or existing measurements. Addressed
+means the caller considers the answer sufficient, not that the goal is proved.
+`records --kind needs` returns current records; `resume` and `context` include compact
+open/deferred/context-change summaries. Source freshness and semantic sufficiency
+remain Host judgments; the initial map is not a mandatory procedure or an exhaustive
+development knowledge base.
 
 ### Common semantic records
 

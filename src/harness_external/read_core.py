@@ -4,7 +4,7 @@ from . import journal, semantics
 from .errors import integer, require
 
 COLLECTIONS = {"checks": "check_records", "interpretations": "interpretations", "activity": "activity",
-               "assessments": "assessments", "tasks": "logical_tasks", "notes": "observations"}
+               "assessments": "assessments", "tasks": "logical_tasks", "notes": "observations", "needs": "needs"}
 RECENT_JOB_LIMIT = 5
 
 
@@ -27,7 +27,8 @@ def summary(api, connection, run):
     jobs = [checked_job(api, connection, run_id, row[0]) for row in connection.execute(
         "SELECT job_id FROM jobs WHERE run_id=? ORDER BY rowid DESC LIMIT ?", (run_id, RECENT_JOB_LIMIT))]
     snapshot = getattr(run, "head", None)
-    counts = {name: snapshot["collections"][key]["count"] if snapshot else len(run[key]) for name, key in COLLECTIONS.items()}
+    counts = {name: journal.collection_head(snapshot, key)["count"] if snapshot else
+              len(run.get(key, []) if key == "needs" else run[key]) for name, key in COLLECTIONS.items()}
     for name in ("measurements", "jobs"):
         counts[name] = connection.execute("SELECT count(*) FROM " + name + " WHERE run_id=?", (run_id,)).fetchone()[0]
     counts["cases"] = connection.execute("SELECT count(*) FROM case_observations WHERE run_id=?", (run_id,)).fetchone()[0]
@@ -45,13 +46,13 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
             key = COLLECTIONS[kind]
             snapshot = getattr(run, "head", None)
             if snapshot:
-                total = snapshot["collections"][key]["count"]
+                total = journal.collection_head(snapshot, key)["count"]
                 items = [journal.get(connection, run_id, ref) for ref in journal.collection_refs(connection, snapshot, key, offset=offset, limit=limit)]
                 for item in items:
-                    if key in {"interpretations", "check_records", "assessments", "activity"}:
+                    if key in {"interpretations", "check_records", "assessments", "activity", "needs"}:
                         semantics.validate(item)
             else:
-                data = run[key]
+                data = run.get(key, []) if key == "needs" else run[key]
                 total, items = len(data), data[offset:offset + limit]
         elif kind == "jobs":
             total = connection.execute("SELECT count(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]

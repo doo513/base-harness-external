@@ -35,6 +35,11 @@ class DomainModule(Protocol):
     def normalize_check(self, parameters: dict, contract: dict) -> dict: ...
 
 
+class NeedAnalysisDomain(Protocol):
+    """Optional pure extension; existing Domains need not implement analysis."""
+    def normalize_need(self, details: dict, contract: dict) -> dict: ...
+
+
 def effective_config(module, *, exclude=()):
     # Merge before filtering so overriding descriptors cannot reveal shadowed
     # parent attributes. Dynamic semantic values need an explicit identity_config.
@@ -74,6 +79,8 @@ class DomainRegistry:
         functions = [module.prepare, module.normalize_check]
         if callable(getattr(module, "prepare_acceptance", None)):
             functions.append(module.prepare_acceptance)
+        if callable(getattr(module, "normalize_need", None)):
+            functions.append(module.normalize_need)
         if callable(getattr(module, "identity_config", None)):
             functions.append(module.identity_config)
         sources, code = {}, {}

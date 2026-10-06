@@ -12,7 +12,7 @@ from .errors import require
 
 
 SCHEMA = "run-store-v2"
-COLLECTIONS = ("interpretations", "check_records", "assessments", "activity", "observations", "logical_tasks")
+COLLECTIONS = ("interpretations", "check_records", "assessments", "activity", "observations", "logical_tasks", "needs")
 DDL = """
 CREATE TABLE IF NOT EXISTS run_heads(run_id TEXT PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL, digest TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS run_records(run_id TEXT NOT NULL, ref TEXT NOT NULL, kind TEXT NOT NULL,
@@ -82,11 +82,18 @@ def collection_refs(connection, snapshot, kind, *, offset=0, limit=None):
     return [row[0] for row in connection.execute(sql, args)]
 
 
+def collection_head(snapshot, kind):
+    # Only the additive Need collection may be absent in older v2 snapshots.
+    require(kind == "needs" or kind in snapshot["collections"], "STATE_CORRUPT", "Missing Run collection")
+    return snapshot["collections"].get(kind, {"count": 0, "current": []})
+
+
 def load(connection, snapshot, *, current=False):
     run_id = snapshot["run_id"]
     value = RunData({key: get(connection, run_id, ref) for key, ref in snapshot["fields"].items()})
     for kind in COLLECTIONS:
-        refs = snapshot["collections"][kind]["current"] if current else collection_refs(connection, snapshot, kind)
+        metadata = collection_head(snapshot, kind)
+        refs = metadata["current"] if current else collection_refs(connection, snapshot, kind)
         value[kind] = [get(connection, run_id, ref) for ref in refs]
     value.head = snapshot
     value.current_only = current
@@ -112,9 +119,10 @@ def save(connection, run):
     snapshot["fields"] = {key: put(connection, run_id, seq, "field:" + key, 0, value)
                           for key, value in run.items() if key not in COLLECTIONS}
     for kind in COLLECTIONS:
-        require(previous is None or len(run[kind]) >= previous["collections"][kind]["count"],
+        values = run.get(kind, []) if kind == "needs" else run[kind]
+        require(previous is None or len(values) >= collection_head(previous, kind)["count"],
                 "HISTORY_IMMUTABLE", "Historical records cannot be removed")
-        refs = [put(connection, run_id, seq, kind, index, item) for index, item in enumerate(run[kind])]
+        refs = [put(connection, run_id, seq, kind, index, item) for index, item in enumerate(values)]
         current = refs
         if kind == "interpretations":
             current = refs[-1:]

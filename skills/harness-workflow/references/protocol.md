@@ -138,7 +138,7 @@ improved/already_passing/regressed/still_failing/inconclusive. Command compariso
 without pinned acceptance tests are inconclusive, not proof of improvement.
 
 Arguments use the CLI's option names with underscores: `run_id`, `check_workspace`,
-`test_commands` (inside Develop parameters), etc. JSON options (`parameters`, `data`,
+`execution_checks` (inside Develop parameters), etc. JSON options (`parameters`, `data`,
 `budget`, `constraints`, `provenance`, `assessment`) take real objects/arrays here,
 not paths or pre-encoded JSON strings. The helper handles encoding without a shell.
 
@@ -163,7 +163,7 @@ Every Run operation includes context to reject cross-workspace/Domain mixups:
         "inputs": ["main.py", "tests/test_main.py"],
         "artifacts": ["main.py"],
         "expectations": [{"id": "entrypoint", "path": "main.py", "operator": "contains", "expected": "def main("}],
-        "test_commands": [{"id": "behavior", "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "timeout_seconds": 60}]
+        "execution_checks": [{"kind": "command", "id": "behavior", "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "timeout_seconds": 60}]
       }
     }
   }
@@ -176,10 +176,76 @@ measures that substring, not behavioral sufficiency. Adapt tests to the task.
 Develop requires a nonempty `expectations` list, and every declared `artifact` must
 also be an `input` with at least one file expectation. Tests/fixtures may be inputs
 without being artifacts; do not label every input an artifact unnecessarily.
-The `execution` profile also needs at least one `test_commands` entry. An explicitly
+The `execution` profile also needs at least one command or case entry in `execution_checks`. An explicitly
 chosen `structural` profile excludes commands and establishes no runtime behavior.
 `assumptions` requires `{id, statement, observation_ids?}` objects, not string arrays.
 `expected_revision` is the interpretation revision, not a storage write counter.
+
+## Need analysis and focused discovery
+
+Develop returns `domain_preparation.analysis_guidance`, a versioned advisory
+Knowledge Map with question types, applicability and source hints. It neither reads
+project files nor generates questions. The Host derives the actual Needs and uses
+its own tools. A map entry is not a mandated step, source truth or completion gate.
+
+Use the existing `observe` envelope with the following `data`:
+
+```json
+{
+  "kind": "need",
+  "note": "Identify the compatibility decision before changing the transformation",
+  "interpretation_revision": 1,
+  "need": {
+    "id": "collision-policy",
+    "expected_revision": 0,
+    "state": "open",
+    "details": {
+      "kind": "decision",
+      "question": "Which value should survive a legacy/nested field collision?",
+      "reason": "Avoid silently discarding existing configuration",
+      "resolution_criterion": "Locate an applicable policy or get the user's decision",
+      "requirement_ids": [],
+      "knowledge_refs": ["compatibility"]
+    }
+  }
+}
+```
+
+`details.kind` is knowledge/observation/decision/verification. Requirement IDs must
+refer to declared requirements; leave them empty during initial discovery. Knowledge
+refs select map IDs, not required reading. They may be empty for questions outside
+the map. Core does not interpret either Domain vocabulary.
+
+Updates send the same Need ID, its returned `ref.revision` as `expected_revision`,
+and the complete current details. States are open/addressed/deferred; addressed and
+deferred require a nonblank `conclusion`. Reopening defaults the conclusion to empty
+so an old answer is not silently retained. A distinct request ID records a new
+update; replay the same envelope/ID after response loss. Concurrent stale updates
+are rejected without replacing the newer version.
+
+Top-level `references` are bounded source locators (file/symbol/section or URL),
+never fetched by Harness and never authenticated facts. Top-level `observation_ids`
+must be real Verifier observations from this Run; older Candidates remain historical
+context, not current proof. Inside `need`, optional `activity_ids` cite earlier
+decisions/activities and `check_ids` cite active Checks. Their exact revisions are
+recorded. Cite sources and state why the conclusion is sufficient, not just what
+was read. Do not use caller note IDs as measurement IDs.
+
+`records kind=needs` returns paginated current Need records; `activity` retains
+update references and context pages retain immutable snapshot versions. `resume`
+and `context.critical` include counts, open/deferred IDs and `context_changed_ids`.
+The latter only means the recorded Interpretation or Candidate differs. It does
+not inspect files for freshness or decide whether an answer is still applicable.
+Use a full context transfer after lost Host context, then deltas as usual.
+
+Need records are caller claims, not GoalContract parameters. They do not change
+the contract, Candidate, Measurement, Assessment, gates or completion policy.
+Use `revise`/`check` only when reasoning actually changes those declarations, and
+preserve existing approval boundaries. Unresolved Needs are visible advice, not a
+new mandatory finish rule. Hosts without Need support and Domains without this
+optional analysis port retain the existing workflow.
+
+## Operation arguments
 
 Use the same context with these operations/arguments:
 
