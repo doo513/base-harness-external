@@ -14,7 +14,7 @@ from .registry import effective_config
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
-DEVELOP_REVISION = "develop-external-9"
+DEVELOP_REVISION = "develop-external-10"
 PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile", "requirements", "coverage"}
 
 
@@ -245,8 +245,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
 
 class DevelopModule:
     identity_files = tuple(str(files("harness_external").joinpath(name)) for name in
-                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py"))
-    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis")
+                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py", "develop_need_compat.py"))
+    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis", "develop-need-compat")
     domain_id = "develop"
     revision = DEVELOP_REVISION
 
@@ -396,7 +396,7 @@ class DevelopModule:
         return result
 
     def normalize_need(self, details, contract):
-        from .develop_analysis import normalize
+        from .develop_need_compat import normalize
         return normalize(details, contract)
 
     def normalize_check(self, parameters, contract):

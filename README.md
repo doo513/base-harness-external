@@ -138,19 +138,18 @@ requirements, absent scenario mappings and declared gaps. These summaries do not
 create checks, approval or additional completion gates. A passing Check still
 does not prove the corresponding statement adequately describes the goal.
 
-Develop also returns `domain_preparation.analysis_guidance`: a small Knowledge Map
-for compatibility, structure, runtime, recovery and verification questions. The
-Host derives Needs (what to know, observe, decide or verify) and follows only useful
-source hints with its own tools; Harness does not search, read those references or
-call a model. See the [Need protocol](skills/harness-workflow/references/protocol.md#need-analysis-and-focused-discovery).
-`observe kind=need` stores revisable caller analysis separately from GoalContract.
-It links requirements, source locators, decisions, Checks and real observations
-without changing gates, a submitted Candidate or existing measurements. Addressed
-means the caller considers the answer sufficient, not that the goal is proved.
-`records --kind needs` returns current records; `resume` and `context` include compact
-open/deferred/context-change summaries. Source freshness and semantic sufficiency
-remain Host judgments; the initial map is not a mandatory procedure or an exhaustive
-development knowledge base.
+Develop returns `domain_preparation.analysis_guidance` (`develop-analysis-v2`):
+quality cues for useful unknowns, perspectives on outcomes, existing behavior,
+design, implementation impact and verification, and a bounded Knowledge Map.
+The map connects questions to source hints and the design/code/check decisions
+those sources can inform. The Host derives task-specific Needs in ordinary
+reasoning and inspects only useful code, documents or observations. It does not
+need to register, update or close Need records to use this advice.
+See [focused discovery](skills/harness-workflow/references/protocol.md#need-analysis-and-focused-discovery).
+Domain advice is pure data: no model/tool calls, keyword-based task router, Run
+state machine, new success criteria or Core authority. Existing Core/Verifier
+boundaries remain unchanged. The optional [legacy record API](skills/harness-workflow/references/need-records.md)
+is retained for old clients, separate from the default discovery workflow.
 
 ### Common semantic records
 

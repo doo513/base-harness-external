@@ -44,28 +44,24 @@ checkout, create a temporary production state store, or silently bypass Harness.
 
 ## Explore, execute and measure
 
-When the Domain exposes `analysis_guidance`, derive the questions needed for the
-next useful action: what must be known, observed, decided or measured? Its Knowledge
-Map is an index, not a reading list. Select relevant entries after forming a Need;
-use Host tools to inspect only the useful code/docs or run a bounded observation.
-Unknowns outside the map are allowed. Do not require every category or settle all
-questions before acting. Ask the user when a missing decision changes authority,
-scope or the intended result, rather than silently choosing it.
+Use `analysis_guidance` as Domain reasoning support. Discover task-specific unknowns
+whose answers could change a design choice, code change or verification decision;
+do not restate already settled requirements. Use relevant analysis perspectives,
+then choose useful Knowledge Map sources or other evidence with Host tools. Apply
+what you learn to the solution, revisiting assumptions when execution contradicts
+them. Skip irrelevant perspectives and stop discovery when the next action is
+sufficiently supported. Ask the user when uncertainty changes authority, scope or
+the intended result rather than silently deciding it.
 
-Record material analysis changes with `observe kind=need`; see the
-[Need record format](references/protocol.md#need-analysis-and-focused-discovery).
-State what would be sufficient to proceed and connect conclusions to source,
-decision, Check or measurement references. Reading a document alone does not address
-a Need. Conflicts or missing support remain open/deferred; addressed is your judgment,
-not verification. Reopen it when contrary evidence appears. Prefer brief conclusions
-and locators over copied documents or a record per file read. Stop searching once
-the relevant question is sufficiently answered, or preserve uncertainty at a limit.
-Avoid mirroring the same question into both a Need and `open_questions`/task notes.
-Only revise the contract/checks when their actual meaning or scope changes; routine
-Need updates must not invalidate a verified Candidate. On recovery, inspect the Need
-summary and context-change hints without rereading unchanged source material blindly.
-When recording an answer, reuse the saved question/details and the protocol's
-update example. Reword a question only when the actual uncertainty changes.
+This is ordinary reasoning, not a Need registration/closure workflow. No Need
+IDs, required question count or extra Harness calls are needed. Preserve a brief
+consequential decision and source only when useful for handoff. Do not create or
+revise records solely to demonstrate that analysis happened. Only change contract
+or check declarations when their actual meaning or scope changes.
+
+For explicitly requested legacy Need tracking, the optional
+[record protocol](references/need-records.md) remains available. It is not part
+of the default analysis path and does not decide completion.
 
 Plan, decompose, delegate when appropriate and try alternatives using the Host's
 existing capabilities and permissions. Do not add a model loop to Harness or make

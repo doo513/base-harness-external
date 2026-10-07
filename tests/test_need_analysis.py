@@ -65,7 +65,7 @@ def test_develop_guidance_is_an_index_not_generated_needs_or_a_gate():
     module = DevelopModule()
     result = module.prepare("A new kind of project", parameters(), {})
     guidance = result["analysis_guidance"]
-    assert guidance["schema_version"] == "develop-analysis-v1"
+    assert guidance["schema_version"] == "develop-analysis-v2"
     assert set(guidance["need_kinds"]) == {"knowledge", "observation", "decision", "verification"}
     assert {item["id"] for item in guidance["knowledge_map"]} == {
         "compatibility", "structure", "runtime", "recovery", "verification"}
