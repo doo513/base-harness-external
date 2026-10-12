@@ -100,7 +100,12 @@ class AdapterRegistry:
         arguments = inspect.signature(factory).bind(**copy.deepcopy(entry.config))
         arguments.apply_defaults()
         source = Path(inspect.getsourcefile(factory))
-        sources, methods = {}, {}
+        sources, methods, source_hashes = {}, {}, {}
+        def source_hash(filename):
+            path = Path(filename).resolve(strict=True)
+            if path not in source_hashes:
+                source_hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+            return source_hashes[path]
         for name in (*METHODS, *(name for name in SCHEMA_METHODS if callable(getattr(adapter, name, None)))):
             function = getattr(adapter, name)
             target = getattr(function, "__func__", function)
@@ -108,13 +113,13 @@ class AdapterRegistry:
             methods[name] = canonical_hash(code_identity(target.__code__))
             filename = inspect.getsourcefile(target)
             require(filename and Path(filename).is_file(), "ADAPTER_IDENTITY_UNAVAILABLE", "Adapter source is unavailable")
-            sources[name] = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+            sources[name] = source_hash(filename)
         identity_files = tuple(getattr(adapter, "identity_files", ()))
         file_ids = tuple(getattr(adapter, "identity_file_ids", [str(i) for i in range(len(identity_files))]))
         require(len(file_ids) == len(identity_files) and all(isinstance(key, str) for key in file_ids) and len(set(file_ids)) == len(file_ids),
                 "ADAPTER_IDENTITY_UNAVAILABLE", "Identity files need unique logical IDs")
         for key, filename in zip(file_ids, identity_files):
-            sources["dependency:" + key] = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+            sources["dependency:" + key] = source_hash(filename)
         config = getattr(adapter, "identity_config", None)
         if config is None:
             effective = {}
@@ -125,7 +130,7 @@ class AdapterRegistry:
                       and key not in {"identity_files", "identity_file_ids", "identity_config"} and not callable(value)
                       and not isinstance(value, (property, classmethod, staticmethod))}
         body = {"schema_version": "execution-adapter-identity-v1", "id": adapter_id, "revision": adapter.revision,
-                "factory": entry.factory, "factory_source_hash": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "factory": entry.factory, "factory_source_hash": source_hash(source),
                 "implementation_hash": canonical_hash({"sources": sources, "methods": methods}),
                 "configuration_hash": canonical_hash({"registration": arguments.arguments, "effective": config, "identity_file_ids": file_ids,
                                                       "parameter_alias": entry.parameter_alias})}

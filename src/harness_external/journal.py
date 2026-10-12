@@ -30,6 +30,200 @@ class RunData(dict):
     head = None
     current_only = False
 
+    def track(self, refs):
+        self._dirty_fields, self._dirty_collections = set(), {}
+        self._loaded_refs = refs
+        for key, value in list(self.items()):
+            dict.__setitem__(self, key, self._wrap(key, value))
+
+    def _wrap(self, key, value):
+        if key in COLLECTIONS:
+            return _Collection(value, lambda position: self._dirty_collections.setdefault(key, set()).add(position))
+        return _tracked(value, lambda: self._dirty_fields.add(key))
+
+    def __setitem__(self, key, value):
+        if hasattr(self, "_dirty_fields"):
+            value = self._wrap(key, value)
+            if key in COLLECTIONS:
+                self._dirty_collections[key] = set(range(len(value)))
+            else:
+                self._dirty_fields.add(key)
+        dict.__setitem__(self, key, value)
+
+    def __delitem__(self, key):
+        if hasattr(self, "_dirty_fields"):
+            self._dirty_fields.add(key)
+        dict.__delitem__(self, key)
+
+    def update(self, *args, **kwargs):
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *default):
+        if key not in self and default:
+            return default[0]
+        value = self[key]
+        del self[key]
+        return value
+
+    def clear(self):
+        for key in list(self):
+            del self[key]
+
+    def popitem(self):
+        if not self:
+            raise KeyError("popitem(): dictionary is empty")
+        key = next(reversed(self))
+        return key, self.pop(key)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __deepcopy__(self, memo):
+        # Detached application copies must not retain callbacks into this Run.
+        return copy.deepcopy(dict(self), memo)
+
+
+def _tracked(value, changed):
+    if isinstance(value, dict):
+        return _Dict(value, changed)
+    if isinstance(value, list):
+        return _List(value, changed)
+    return value
+
+
+class _Dict(dict):
+    def __init__(self, value, changed):
+        self._changed = changed
+        dict.__init__(self, ((key, _tracked(item, changed)) for key, item in value.items()))
+
+    def __setitem__(self, key, value):
+        dict.__setitem__(self, key, _tracked(value, self._changed))
+        self._changed()
+
+    def __delitem__(self, key):
+        dict.__delitem__(self, key)
+        self._changed()
+
+    update = RunData.update
+    setdefault = RunData.setdefault
+    pop = RunData.pop
+
+    def clear(self):
+        dict.clear(self)
+        self._changed()
+
+    def popitem(self):
+        value = dict.popitem(self)
+        self._changed()
+        return value
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def __deepcopy__(self, memo):
+        return copy.deepcopy(dict(self), memo)
+
+
+class _List(list):
+    def __init__(self, value, changed):
+        self._changed = changed
+        list.__init__(self, (_tracked(item, changed) for item in value))
+
+    def __setitem__(self, key, value):
+        value = [_tracked(item, self._changed) for item in value] if isinstance(key, slice) else _tracked(value, self._changed)
+        list.__setitem__(self, key, value)
+        self._changed()
+
+    def __delitem__(self, key):
+        list.__delitem__(self, key)
+        self._changed()
+
+    def append(self, value):
+        list.append(self, _tracked(value, self._changed))
+        self._changed()
+
+    def extend(self, values):
+        list.extend(self, (_tracked(value, self._changed) for value in list(values)))
+        self._changed()
+
+    def insert(self, index, value):
+        list.insert(self, index, _tracked(value, self._changed))
+        self._changed()
+
+    def pop(self, index=-1):
+        value = list.pop(self, index)
+        self._changed()
+        return value
+
+    def remove(self, value):
+        list.remove(self, value)
+        self._changed()
+
+    def clear(self):
+        list.clear(self)
+        self._changed()
+
+    def reverse(self):
+        list.reverse(self)
+        self._changed()
+
+    def sort(self, *args, **kwargs):
+        list.sort(self, *args, **kwargs)
+        self._changed()
+
+    def __iadd__(self, values):
+        self.extend(values)
+        return self
+
+    def __imul__(self, count):
+        self[:] = list(self) * count
+        return self
+
+    def __deepcopy__(self, memo):
+        return copy.deepcopy(list(self), memo)
+
+
+class _Collection(_List):
+    """Stable record positions; appending never dirties historical bodies."""
+    def __init__(self, values, changed):
+        self._position_changed = changed
+        self._changed = self._all_changed
+        list.__init__(self, (self._record(value, index) for index, value in enumerate(values)))
+
+    def _record(self, value, index):
+        return _tracked(value, lambda: self._position_changed(index))
+
+    def _all_changed(self):
+        for index, value in enumerate(list(self)):
+            list.__setitem__(self, index, self._record(value, index))
+            self._position_changed(index)
+
+    def append(self, value):
+        index = len(self)
+        list.append(self, self._record(value, index))
+        self._position_changed(index)
+
+    def extend(self, values):
+        for value in list(values):
+            self.append(value)
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            list.__setitem__(self, key, value)
+            self._all_changed()
+        else:
+            index = key if key >= 0 else len(self) + key
+            list.__setitem__(self, key, self._record(value, index))
+            self._position_changed(index)
+
 
 def head(connection, run_id, seq=None):
     if seq is None:
@@ -70,15 +264,16 @@ def get(connection, run_id, ref):
 
 def collection_refs(connection, snapshot, kind, *, offset=0, limit=None):
     # Position is stable; task updates append a version instead of overwriting it.
+    bounds = " AND position>=? AND position<?" if limit is not None else ""
     sql = """SELECT r.ref FROM run_records r JOIN
         (SELECT position,MAX(created_seq) AS last FROM run_records
-         WHERE run_id=? AND kind=? AND created_seq<=? GROUP BY position) latest
+         WHERE run_id=? AND kind=? AND created_seq<=?""" + bounds + """ GROUP BY position) latest
         ON r.position=latest.position AND r.created_seq=latest.last
         WHERE r.run_id=? AND r.kind=? ORDER BY r.position"""
-    args = [snapshot["run_id"], kind, snapshot["seq"], snapshot["run_id"], kind]
+    args = [snapshot["run_id"], kind, snapshot["seq"]]
     if limit is not None:
-        sql += " LIMIT ? OFFSET ?"
-        args += [limit, offset]
+        args += [offset, offset + limit]
+    args += [snapshot["run_id"], kind]
     return [row[0] for row in connection.execute(sql, args)]
 
 
@@ -91,12 +286,16 @@ def collection_head(snapshot, kind):
 def load(connection, snapshot, *, current=False):
     run_id = snapshot["run_id"]
     value = RunData({key: get(connection, run_id, ref) for key, ref in snapshot["fields"].items()})
+    loaded_refs = {}
     for kind in COLLECTIONS:
         metadata = collection_head(snapshot, kind)
         refs = metadata["current"] if current else collection_refs(connection, snapshot, kind)
+        loaded_refs[kind] = refs
         value[kind] = [get(connection, run_id, ref) for ref in refs]
     value.head = snapshot
     value.current_only = current
+    if not current:
+        value.track(loaded_refs)
     return value
 
 
@@ -112,17 +311,43 @@ def save(connection, run):
     require(not getattr(run, "current_only", False), "INCOMPLETE_RUN_WRITE", "A summary cannot replace complete Run state")
     run_id = run["run_id"]
     previous = head(connection, run_id)
+    incremental = isinstance(run, RunData) and hasattr(run, "_dirty_fields") and run.head is not None
+    if incremental:
+        require(previous is not None and previous["fields"] == run.head["fields"]
+                and all(collection_head(previous, kind) == collection_head(run.head, kind) for kind in COLLECTIONS),
+                "STALE_RUN_WRITE", "Run state changed since this complete read")
     snapshot = copy.deepcopy(previous) if previous else {"schema_version": SCHEMA, "run_id": run_id, "seq": 0,
                                                         "fields": {}, "collections": {}, "jobs": {}, "measurement_count": 0}
     snapshot["seq"] += 1
     seq = snapshot["seq"]
-    snapshot["fields"] = {key: put(connection, run_id, seq, "field:" + key, 0, value)
-                          for key, value in run.items() if key not in COLLECTIONS}
+    if incremental:
+        snapshot["fields"] = dict(previous["fields"])
+        for key in run._dirty_fields:
+            if key not in run:
+                snapshot["fields"].pop(key, None)
+            else:
+                snapshot["fields"][key] = put(connection, run_id, seq, "field:" + key, 0, run[key])
+    else:
+        snapshot["fields"] = {key: put(connection, run_id, seq, "field:" + key, 0, value)
+                              for key, value in run.items() if key not in COLLECTIONS}
+    saved_refs = {}
     for kind in COLLECTIONS:
         values = run.get(kind, []) if kind == "needs" else run[kind]
         require(previous is None or len(values) >= collection_head(previous, kind)["count"],
                 "HISTORY_IMMUTABLE", "Historical records cannot be removed")
-        refs = [put(connection, run_id, seq, kind, index, item) for index, item in enumerate(values)]
+        if incremental:
+            refs = list(run._loaded_refs[kind])
+            changed = run._dirty_collections.get(kind, set()) | set(range(len(refs), len(values)))
+            for index in sorted(changed):
+                require(index < len(values), "HISTORY_IMMUTABLE", "Historical records cannot be removed")
+                ref = put(connection, run_id, seq, kind, index, values[index])
+                if index < len(refs):
+                    refs[index] = ref
+                else:
+                    refs.append(ref)
+        else:
+            refs = [put(connection, run_id, seq, kind, index, item) for index, item in enumerate(values)]
+        saved_refs[kind] = refs
         current = refs
         if kind == "interpretations":
             current = refs[-1:]
@@ -136,6 +361,11 @@ def save(connection, run):
             current = []
         snapshot["collections"][kind] = {"count": len(refs), "current": current}
     publish(connection, snapshot)
+    if incremental:
+        run.head = snapshot
+        run._loaded_refs = saved_refs
+        run._dirty_fields.clear()
+        run._dirty_collections.clear()
 
 
 def save_job(connection, job):

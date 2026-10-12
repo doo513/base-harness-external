@@ -335,16 +335,16 @@ def test_snapshot_rechecks_source_before_sealing(case, monkeypatch):
     from harness_external import snapshots
     api, workspace, _ = case
     run_id = start(case)
-    original_read = snapshots.read_file
+    original_read = snapshots.stream_file
     edited = False
-    def racing_read(root, relative):
+    def racing_read(root, relative, sink=None):
         nonlocal edited
-        result = original_read(root, relative)
+        result = original_read(root, relative, sink)
         if root == workspace and not edited:
             edited = True
             (workspace / relative).write_text("changed during capture")
         return result
-    monkeypatch.setattr(snapshots, "read_file", racing_read)
+    monkeypatch.setattr(snapshots, "stream_file", racing_read)
     with pytest.raises(HarnessError) as error:
         api.submit(run_id, "submit")
     assert error.value.code == "INPUT_CHANGED"

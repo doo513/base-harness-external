@@ -8,7 +8,7 @@ from harness.common import canonical_hash
 # Changes to these files can change admission, measurements or their bindings.
 # Query rendering, CLI/caller transport and documentation are not executors.
 EXECUTION_FILES = (
-    "harness/measurement_v5.py", "harness/common.py", "harness/json_codec.py",
+    "harness/measurement_v5.py", "harness/common.py", "harness/json_codec.py", "harness/snapshot_io.py",
     "harness_external/service.py", "harness_external/worker.py",
     "harness_external/snapshots.py", "harness_external/store.py",
     "harness_external/journal.py", "harness_external/read_core.py",

@@ -387,6 +387,7 @@ class Harness:
                                            "related_activity_id": related, "relation": relation,
                                            "origin": "caller", "trust": "untrusted",
                                            **({"need_ref": need["ref"]} if observation["kind"] == "need" else {})}))
+            run["observations"][-1] = item
             self.store.save_run(connection, run)
             result = response(run_id=run_id, observation=item)
             if observation.get("kind"):
@@ -759,23 +760,23 @@ class Harness:
     def list_runs(self, *, offset=0, limit=20):
         return response(**queries.list_runs(self, offset=offset, limit=limit))
 
-    def resume(self, run_id):
-        return response(**queries.resume(self, run_id))
+    def resume(self, run_id, *, view="summary"):
+        return response(**queries.resume(self, run_id, view=view))
 
     def context(self, run_id, *, after=None, page=None, limit=20):
         from .context import read
         return response(**read(self, run_id, after=after, page=page, limit=limit))
 
-    def records(self, run_id, kind, *, offset=0, limit=20, job_id=None):
-        return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id))
+    def records(self, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None):
+        return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id, view=view, detail=detail))
 
     def cleanup(self, run_id, *, apply=False, min_age_seconds=3600):
         return response(**maintenance.cleanup(self.store, run_id, apply=apply, min_age_seconds=min_age_seconds))
 
     def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False, view="full"):
-        require(view in {"summary", "full"}, "INVALID_VIEW", "Status view is summary or full")
-        if view == "summary":
-            result = self.resume(run_id) if not job_id else response(**queries.job_summary(self, run_id, job_id))
+        require(view in {"summary", "compact", "full"}, "INVALID_VIEW", "Status view is summary, compact or full")
+        if view in {"summary", "compact"}:
+            result = self.resume(run_id, view=view) if not job_id else response(**queries.job_summary(self, run_id, job_id, compact=view == "compact"))
             if check_workspace:
                 expected = (result.get("candidate") or result.get("job") or {}).get("candidate_hash")
                 result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, expected)
@@ -921,6 +922,9 @@ class Harness:
             run.update(status="finished", phase="finished", record=record, termination_reason=reason)
             record["resolution"] = semantics.resolution(run, gate_results)
             record["record_hash"] = canonical_hash(record)
+            # Run containers detach caller-owned values for dirty tracking. Pin
+            # the completed body, not the earlier pre-resolution draft.
+            run["record"] = record
             self.store.save_run(connection, run)
             result = response(run_id=run_id, record=record, resolution=record["resolution"])
             self.store.remember(connection, run_id, request_id, fingerprint, result)

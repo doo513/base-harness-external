@@ -18,7 +18,19 @@ from .adapter_registry import builtin_adapter_registry, validate_binding
 
 MAX_REPORT_BYTES = 8 * 1024 * 1024
 MAX_CASES = 30000
+MAX_PENDING_EVENTS = 64
 OUTCOMES = {"passed", "failed", "skipped", "error", "xfail", "xpass", "not_selected", "not_run", "incomplete"}
+
+
+def _offer(messages, message, shutdown, abort):
+    """Bound backpressure without leaving a producer stuck after cancellation."""
+    while not shutdown.is_set() and not abort.is_set():
+        try:
+            messages.put(message, timeout=.05)
+            return True
+        except queue.Full:
+            continue
+    return False
 
 
 def command(check, registry=None):
@@ -109,12 +121,13 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
     def emit(case):
         case = _case(case)
         key = case["case_id"]
+        digest = canonical_hash(case)
         if key in emitted:
-            require(emitted[key] == case, "CASE_REPORT_PROTOCOL", "Adapter changed a checkpointed case")
+            require(emitted[key] == digest, "CASE_REPORT_PROTOCOL", "Adapter changed a checkpointed case")
             return
         require(len(emitted) < MAX_CASES, "CASE_REPORT_LIMIT", "Too many case observations")
         on_case(copy.deepcopy(case), copy.deepcopy(binding))
-        emitted[key] = case
+        emitted[key] = digest
     with tempfile.TemporaryDirectory(prefix="adapter-resource-", dir=state_root) as temporary:
         resources = Path(temporary)
         adapter.stage(state_root, copy.deepcopy(binding["runtime"]), resources, token)
@@ -130,31 +143,42 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
                                  stderr=subprocess.PIPE, env=environment, start_new_session=True)
         child.stdin.write(canonical_bytes(request))
         child.stdin.close()
-        messages = queue.Queue()
+        messages = queue.Queue(maxsize=MAX_PENDING_EVENTS)
+        shutdown = threading.Event()
+        stdout_done, stderr_done = object(), object()
+        def put(message):
+            return _offer(messages, message, shutdown, abort)
         def read():
             try:
                 total = 0
                 while line := child.stdout.readline(MAX_REPORT_BYTES + 1):
                     total += len(line)
                     require(len(line) <= MAX_REPORT_BYTES and total <= MAX_REPORT_BYTES * 2, "CASE_REPORT_LIMIT", "Adapter transport exceeded bounds")
-                    messages.put(json.loads(line))
+                    if not put(json.loads(line)):
+                        break
             except Exception as error:
-                messages.put(error)
+                put(error)
             finally:
-                messages.put(None)
+                put(stdout_done)
         reader = threading.Thread(target=read, daemon=True)
         reader.start()
         def drain_errors():
-            total = 0
-            while chunk := child.stderr.read(4096):
-                total += len(chunk)
-                if total > MAX_REPORT_BYTES:
-                    messages.put(HarnessError("CASE_REPORT_LIMIT", "Adapter stderr exceeded bounds"))
-                    return
+            try:
+                total = 0
+                while chunk := child.stderr.read(4096):
+                    total += len(chunk)
+                    if total > MAX_REPORT_BYTES:
+                        put(HarnessError("CASE_REPORT_LIMIT", "Adapter stderr exceeded bounds"))
+                        return
+            except Exception as error:
+                put(error)
+            finally:
+                put(stderr_done)
         errors = threading.Thread(target=drain_errors, daemon=True)
         errors.start()
         capture = None
         failure = None
+        completed_streams = set()
         try:
             while True:
                 if abort.is_set() or time.monotonic() >= deadline:
@@ -165,8 +189,11 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
                     message = messages.get(timeout=.1)
                 except queue.Empty:
                     continue
-                if message is None:
-                    break
+                if message is stdout_done or message is stderr_done:
+                    completed_streams.add(message)
+                    if len(completed_streams) == 2:
+                        break
+                    continue
                 if isinstance(message, Exception):
                     raise message
                 if message.get("type") == "adapter_event":
@@ -180,6 +207,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
         except Exception as error:
             failure = getattr(error, "code", "CASE_REPORT_PROTOCOL")
         finally:
+            shutdown.set()
             if child.poll() is None:
                 stop_child(child)
             reader.join(timeout=2)

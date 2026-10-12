@@ -76,12 +76,13 @@ def report(links, checks, case_observations, job):
     by_check = {item["check_id"]: item for item in checks if current(item)}
     by_case = {(item["check_id"], item["case"]["case_id"]): item for item in case_observations if current(item)
                and item.get("adapter_identity") == job.get("adapter_bindings", {}).get(item["check_id"])}
+    scenarios_by_requirement = {}
+    for scenario in links["scenarios"]:
+        scenarios_by_requirement.setdefault(scenario["requirement_id"], []).append(scenario)
     requirements = []
     for requirement in links["requirements"]:
         scenarios = []
-        for declared in links["scenarios"]:
-            if declared["requirement_id"] != requirement["requirement_id"]:
-                continue
+        for declared in scenarios_by_requirement.get(requirement["requirement_id"], ()):
             found = by_case.get((declared["check_id"], declared["case_id"]))
             measured = by_check.get(declared["check_id"])
             if found and measured and found.get("execution_observation_id") != measured["observation_id"]:

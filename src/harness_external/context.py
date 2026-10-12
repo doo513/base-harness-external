@@ -100,15 +100,83 @@ def inventory(connection, snapshot, base):
     return items
 
 
+def inventory_page(connection, snapshot, base, offset, limit):
+    """Select only this immutable page; collection bodies and refs stay in SQL."""
+    fields = [("field:" + key, ref) for key, ref in snapshot["fields"].items()
+              if base is None or base["fields"].get(key) != ref]
+    jobs = [("job:" + key, ref) for key, ref in snapshot["jobs"].items()
+            if base is None or base["jobs"].get(key) != ref]
+    counts = []
+    for kind in (*journal.COLLECTIONS, "measurements", "cases"):
+        if base is None:
+            count = (snapshot.get("measurement_count", 0) if kind == "measurements" else
+                     snapshot.get("case_count", 0) if kind == "cases" else journal.collection_head(snapshot, kind)["count"])
+        elif base["seq"] == snapshot["seq"]:
+            count = 0
+        else:
+            count = connection.execute("""SELECT count(DISTINCT position) FROM run_records
+                WHERE run_id=? AND kind=? AND created_seq>? AND created_seq<=?""",
+                (snapshot["run_id"], kind, base["seq"], snapshot["seq"])).fetchone()[0]
+        counts.append((kind, count))
+    total = len(fields) + sum(count for _, count in counts) + len(jobs)
+    selected, start = [], 0
+    groups = [("fields", len(fields)), *counts, ("jobs", len(jobs))]
+    for kind, count in groups:
+        local_start, local_end = max(0, offset - start), min(count, offset + limit - start)
+        start += count
+        if local_start >= local_end:
+            continue
+        if kind in {"fields", "jobs"}:
+            selected.extend((fields if kind == "fields" else jobs)[local_start:local_end])
+            continue
+        # Restrict the positions BEFORE GROUP BY on full pages. OFFSET over the
+        # complete history is unnecessary because positions are contiguous.
+        where = "run_id=? AND kind=? AND created_seq<=?"
+        args = [snapshot["run_id"], kind, snapshot["seq"]]
+        if base is None:
+            where += " AND position>=? AND position<?"
+            args += [local_start, local_end]
+        else:
+            where += " AND created_seq>?"
+            args += [base["seq"]]
+        sql = """SELECT r.position,r.ref FROM run_records r JOIN
+            (SELECT position,MAX(created_seq) AS last FROM run_records WHERE """ + where + """ GROUP BY position) latest
+            ON r.position=latest.position AND r.created_seq=latest.last
+            WHERE r.run_id=? AND r.kind=? ORDER BY r.position"""
+        args += [snapshot["run_id"], kind]
+        if base is not None:
+            sql += " LIMIT ? OFFSET ?"
+            args += [local_end - local_start, local_start]
+        rows = list(connection.execute(sql, args))
+        require(len(rows) == local_end - local_start, "SEMANTIC_RECORD_CORRUPT", "Incomplete context page")
+        selected.extend((kind + ":" + str(position), ref) for position, ref in rows)
+    return selected, total
+
+
 def facts_at(api, connection, snapshot):
+    run = journal.load(connection, snapshot, current=True)
+    if not run.get("candidate"):
+        return []
+    # A projection must not turn a deleted canonical observation into an
+    # innocent 'not measured'. Check journal links without hydrating history.
+    missing = connection.execute("""SELECT 1 FROM run_records r LEFT JOIN measurements m
+        ON m.observation_id=json_extract(r.data,'$.observation_id') AND m.run_id=r.run_id
+        WHERE r.run_id=? AND r.kind='measurements' AND r.created_seq<=? AND m.observation_id IS NULL LIMIT 1""",
+        (snapshot["run_id"], snapshot["seq"])).fetchone()
+    require(missing is None, "RESULT_BINDING", "Context measurement is missing")
     facts = []
-    for ref in journal.collection_refs(connection, snapshot, "measurements"):
-        link = journal.get(connection, snapshot["run_id"], ref)
-        rows = connection.execute("SELECT data FROM measurements WHERE run_id=? AND observation_id=? AND job_id=?",
-                                  (snapshot["run_id"], link["observation_id"], link["job_id"]))
-        items = api.store._measurement_rows(rows, snapshot["run_id"])
-        require(len(items) == 1 and items[0]["record_hash"] == link["record_hash"], "RESULT_BINDING", "Context measurement is missing or changed")
-        facts.extend(items)
+    for check in run["gate_bindings"].values():
+        rows = connection.execute("""SELECT m.data,r.ref FROM measurements m JOIN run_records r
+            ON json_extract(r.data,'$.observation_id')=m.observation_id AND r.run_id=m.run_id
+            WHERE m.run_id=? AND json_extract(m.data,'$.check_ref')=? AND json_extract(m.data,'$.subject')=?
+            AND r.kind='measurements' AND r.created_seq<=? ORDER BY r.position DESC LIMIT 1""",
+            (snapshot["run_id"], canonical_bytes(check).decode(), canonical_bytes(run["candidate"]["subject"]).decode(), snapshot["seq"]))
+        for data, ref in rows:
+            link = journal.get(connection, snapshot["run_id"], ref)
+            items = api.store._measurement_rows([(data,)], snapshot["run_id"])
+            require(items[0]["record_hash"] == link["record_hash"] and items[0]["observation_id"] == link["observation_id"]
+                    and items[0]["job_id"] == link["job_id"], "RESULT_BINDING", "Context measurement is missing or changed")
+            facts.extend(items)
     return facts
 
 
@@ -163,13 +231,13 @@ def read(api, run_id, *, after=None, page=None, limit=20):
         facts = None if snapshot["seq"] == latest["seq"] else facts_at(api, connection, snapshot)
         gates = live_gates if facts is None else semantics.gates(run, facts)
         selected_jobs = [journal.get(connection, run_id, ref) for ref in list(snapshot["jobs"].values())[-5:]]
-        entries = inventory(connection, snapshot, base)
-        if offset > len(entries):
+        entries, total = inventory_page(connection, snapshot, base, offset, limit)
+        if offset > total:
             snapshot, base, offset, reset = latest, None, 0, "invalid_page"
             run, gates, selected_jobs = current, live_gates, jobs
-            entries = inventory(connection, snapshot, None)
+            entries, total = inventory_page(connection, snapshot, None, offset, limit)
         items, texts = [], {}
-        for key, ref in entries[offset:offset + limit]:
+        for key, ref in entries:
             value = journal.get(connection, run_id, ref)
             if key.startswith("measurements:"):
                 rows = connection.execute("SELECT data FROM measurements WHERE run_id=? AND observation_id=? AND job_id=?",
@@ -186,7 +254,7 @@ def read(api, run_id, *, after=None, page=None, limit=20):
                 value = measured[0]
             items.append({"key": key, "ref": ref, "digest": canonical_hash(value), **pack(value, texts)})
         end = offset + len(items)
-        more = end < len(entries)
+        more = end < total
         target = cursor(snapshot)
         return {"schema_version": VERSION, "run_id": run_id, "delivery": "delta" if base else "full",
                 "offset": offset, "items": items, "texts": texts, "snapshot": target,

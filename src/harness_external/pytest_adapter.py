@@ -228,14 +228,16 @@ class Collector:
         elif kind == "collection_finish":
             require(not self.collection_finished and not any(c["started"] for c in self.cases.values()), "CASE_REPORT_PROTOCOL", "Repeated/late collection")
             selected = event["selected"]
-            require(isinstance(selected, list) and all(isinstance(x, str) for x in selected)
-                    and len(set(selected)) == len(selected) and set(selected) <= self.cases.keys()
+            require(isinstance(selected, list) and all(isinstance(x, str) for x in selected),
+                    "CASE_REPORT_PROTOCOL", "Selection references unknown/duplicate cases")
+            selected_ids = set(selected)
+            require(len(selected_ids) == len(selected) and selected_ids <= self.cases.keys()
                     and type(event.get("errors")) is int and event["errors"] >= 0,
                     "CASE_REPORT_PROTOCOL", "Selection references unknown/duplicate cases")
             self.collection_finished = True
             self.collection_complete = event["errors"] == 0 and not self.collection_issues
             for case in self.cases.values():
-                case["selected"] = case["case_id"] in selected
+                case["selected"] = case["case_id"] in selected_ids
                 if not case["selected"]:
                     case["outcome"] = "not_selected"
         elif kind == "deselected":

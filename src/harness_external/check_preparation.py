@@ -26,7 +26,7 @@ class AdapterCheckPreparation:
         self.adapters = adapters
 
     def identity(self):
-        methods, sources = {}, {}
+        methods, sources, source_hashes = {}, {}, {}
         for name in ("parameters", "selection", "reference"):
             method = getattr(self, name)
             target = getattr(method, "__func__", method)
@@ -34,7 +34,10 @@ class AdapterCheckPreparation:
             require(hasattr(target, "__code__") and source and Path(source).is_file(),
                     "DOMAIN_IDENTITY_UNAVAILABLE", "Preparation methods must expose implementation identity")
             methods[name] = canonical_hash(code_identity(target.__code__))
-            sources[name] = hashlib.sha256(Path(source).read_bytes()).hexdigest()
+            path = Path(source).resolve()
+            if path not in source_hashes:
+                source_hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+            sources[name] = source_hashes[path]
         # Registry instances contain runtime objects. Used adapter implementations
         # are pinned separately; alias dispatch is part of this input bridge.
         return {"schema_version": "check-preparation-identity-v1", "methods": methods, "sources": sources,

@@ -1,7 +1,10 @@
 """Validated read boundary; rendering cannot waive evidence/reference checks."""
-from harness.common import canonical_hash
+import base64
+import hashlib
+
+from harness.common import canonical_bytes, canonical_hash
 from . import journal, semantics
-from .errors import integer, require
+from .errors import fields, integer, require
 
 COLLECTIONS = {"checks": "check_records", "interpretations": "interpretations", "activity": "activity",
                "assessments": "assessments", "tasks": "logical_tasks", "notes": "observations", "needs": "needs"}
@@ -35,10 +38,15 @@ def summary(api, connection, run):
     return jobs, counts, semantics.gates(run, api.store.gate_measurements(connection, run))
 
 
-def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
+def records(api, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None):
     offset, limit = page_bounds(offset, limit)
     require(isinstance(kind, str) and kind in {*COLLECTIONS, "measurements", "jobs", "cases"}, "INVALID_PARAMETERS", "Unknown history kind")
     require(job_id is None or kind in {"measurements", "cases"}, "INVALID_PARAMETERS", "job_id only filters observations")
+    require(view in {"full", "references"}, "INVALID_VIEW", "Records view is full or references")
+    if detail is not None:
+        require(view == "full" and job_id is None and offset == 0 and limit == 20,
+                "DETAIL_ARGUMENTS", "A detail request cannot include record-page selectors")
+        return read_detail(api, run_id, kind, detail)
     with api._read_run(run_id) as (connection, run):
         if job_id:
             checked_job(api, connection, run_id, job_id)
@@ -67,5 +75,66 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None):
             table = "case_observations" if kind == "cases" else "measurements"
             total = connection.execute("SELECT count(*) FROM " + table + " WHERE " + where, args).fetchone()[0]
             items = api.store.cases(connection, run_id, job_id, limit=limit, offset=offset) if kind == "cases" else api.store.measurements(connection, run_id, job_id, limit=limit, offset=offset)
-    return {"run_id": run_id, "kind": kind, "items": items, "total": total,
-            "next_offset": offset + len(items) if offset + len(items) < total else None}
+        if view == "references":
+            from .detail_projection import project
+            items = [project(item, {"run_id": run_id, "kind": kind,
+                      "record_id": item["observation_id"] if kind in {"measurements", "cases"} else
+                                   item["job_id"] if kind == "jobs" else offset + index}) for index, item in enumerate(items)]
+    result = {"run_id": run_id, "kind": kind, "items": items, "total": total,
+              "next_offset": offset + len(items) if offset + len(items) < total else None}
+    if view != "full":
+        result["view"] = view
+    return result
+
+
+def read_detail(api, run_id, kind, request):
+    """Read a bounded JSON byte range from a digest-bound existing record."""
+    fields(request, {"record_id", "record_digest", "path", "sha256", "offset", "limit"},
+           {"record_id", "record_digest", "path", "sha256"})
+    position, limit = integer(request.get("offset", 0), 0, 2**31 - 1, "detail offset"), integer(request.get("limit", 4096), 1, 16384, "detail limit")
+    path = request["path"]
+    require(isinstance(path, list) and len(path) <= 64 and all(type(key) in {str, int} for key in path),
+            "DETAIL_PATH", "Use a bounded JSON field/index path")
+    record_id = request["record_id"]
+    with api._read_run(run_id) as (connection, run):
+        if kind in {"measurements", "cases"}:
+            require(isinstance(record_id, str), "DETAIL_REFERENCE", "Observation ID is required")
+            table = "measurements" if kind == "measurements" else "case_observations"
+            rows = connection.execute("SELECT data FROM " + table + " WHERE run_id=? AND observation_id=?", (run_id, record_id))
+            values = api.store._measurement_rows(rows, run_id) if kind == "measurements" else api.store._case_rows(rows, run_id)
+            require(len(values) == 1, "DETAIL_REFERENCE", "Observation does not belong to this Run")
+            value = values[0]
+            job = checked_job(api, connection, run_id, value["job_id"])
+            if kind == "cases":
+                api.store.validate_case_binding(value, job)
+        elif kind == "jobs":
+            from .views import job_view
+            value = job_view(checked_job(api, connection, run_id, record_id))
+        else:
+            position_id = integer(record_id, 0, 2**31 - 1, "record position")
+            key = COLLECTIONS[kind]
+            snapshot = getattr(run, "head", None)
+            if snapshot:
+                refs = journal.collection_refs(connection, snapshot, key, offset=position_id, limit=1)
+                require(len(refs) == 1, "DETAIL_REFERENCE", "Unknown record position")
+                value = journal.get(connection, run_id, refs[0])
+            else:
+                data = run.get(key, [])
+                require(position_id < len(data), "DETAIL_REFERENCE", "Unknown record position")
+                value = data[position_id]
+        require(canonical_hash(value) == request["record_digest"], "DETAIL_CHANGED", "Record changed since projection; read a new projection")
+        try:
+            for key in path:
+                require(isinstance(value, dict) and isinstance(key, str) and key in value or
+                        isinstance(value, list) and type(key) is int and 0 <= key < len(value), "DETAIL_PATH", "Unknown JSON field/index")
+                value = value[key]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError("Invalid detail path") from error
+        encoded = canonical_bytes(value)
+        require(hashlib.sha256(encoded).hexdigest() == request["sha256"], "DETAIL_CHANGED", "Detail digest changed")
+        require(position <= len(encoded), "DETAIL_OFFSET", "Detail offset exceeds its byte length")
+        end = min(position + limit, len(encoded))
+        return {"schema_version": "record-detail-chunk-v1", "run_id": run_id, "kind": kind, "record_id": record_id,
+                "record_digest": request["record_digest"], "path": path, "sha256": request["sha256"],
+                "encoding": "base64-canonical-json", "data": base64.b64encode(encoded[position:end]).decode("ascii"),
+                "offset": position, "total_bytes": len(encoded), "next_offset": end if end < len(encoded) else None}

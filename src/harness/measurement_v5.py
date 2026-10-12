@@ -7,17 +7,27 @@ sandbox and process cancellation. This engine has no subprocess execution path.
 from __future__ import annotations
 
 import hashlib
+import codecs
+from collections import OrderedDict
+import io
 import json
-import os
 import re
-import stat
-import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from .json_codec import MAX_BYTES, MeasurementProtocolError, decode, _pairs
+from .common import canonical_bytes
+from .snapshot_io import path_parts, read_snapshot, iter_snapshot_chunks
 
 PROTOCOL_VERSION = 5
+MAX_CACHED_REPLY_BYTES = 256 * 1024
+
+
+class _ReplyRef(NamedTuple):
+    offset: int
+    size: int
+    sha256: str
 
 
 def _object(value: Any, fields: set[str]) -> dict[str, Any]:
@@ -70,67 +80,15 @@ def _now() -> str:
 
 
 def _safe_parts(relative: str) -> list[str]:
-    if "\\" in relative or "\x00" in relative:
-        raise MeasurementProtocolError("invalid snapshot path")
-    parts = relative.split("/")
-    if any(part in {"", ".", ".."} or ":" in part for part in parts):
-        raise MeasurementProtocolError("invalid snapshot path")
-    return parts
+    try:
+        return path_parts(relative)
+    except ValueError as error:
+        raise MeasurementProtocolError(str(error)) from error
 
 
 def _snapshot_bytes(root: Path, relative: str) -> bytes:
-    """Walk pinned directory descriptors; refuse symlinks and multi-link files.
-
-    Fail closed on platforms without dir_fd/O_NOFOLLOW; the app must provide a
-    supported containment adapter rather than silently losing this protection.
-    """
-    parts = _safe_parts(relative)
-    if sys.platform == "win32":
-        resolved_root = root.resolve()
-        target = (root / Path(*parts)).resolve()
-        try:
-            target.relative_to(resolved_root)
-        except ValueError:
-            raise OSError("snapshot must remain within root")
-        if not target.exists():
-            raise FileNotFoundError(f"snapshot file not found: {relative}")
-        curr = target
-        while curr != resolved_root and curr != curr.parent:
-            if curr.is_symlink():
-                raise OSError("symlink snapshot not permitted")
-            curr = curr.parent
-        st = target.stat(follow_symlinks=False)
-        if not stat.S_ISREG(st.st_mode) or getattr(st, "st_nlink", 1) != 1 or st.st_size > MAX_BYTES:
-            raise OSError("snapshot must be a bounded single-link regular file")
-        data = target.read_bytes()
-        after = target.stat(follow_symlinks=False)
-        if len(data) > MAX_BYTES or st.st_size != after.st_size or st.st_mtime_ns != after.st_mtime_ns:
-            raise OSError("snapshot changed during measurement")
-        return data
-    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
-        raise OSError("SNAPSHOT_CONTAINMENT_UNSUPPORTED")
-    descriptors: list[int] = []
-    try:
-        parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        descriptors.append(parent)
-        for part in parts[:-1]:
-            parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-            descriptors.append(parent)
-        descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-        with os.fdopen(descriptor, "rb") as stream:
-            before = os.fstat(stream.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_BYTES:
-                raise OSError("snapshot must be a bounded single-link regular file")
-            data = stream.read(MAX_BYTES + 1)
-            after = os.fstat(stream.fileno())
-        current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
-        identity = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
-        if len(data) > MAX_BYTES or identity(before) != identity(after) or identity(after) != identity(current):
-            raise OSError("snapshot changed during measurement")
-        return data
-    finally:
-        for descriptor in reversed(descriptors):
-            os.close(descriptor)
+    _safe_parts(relative)
+    return read_snapshot(root, relative)
 
 
 def _value(name: str, observed: Any) -> dict[str, Any]:
@@ -147,9 +105,17 @@ class MeasurementEngine:
     def __init__(self) -> None:
         self.run_id: str | None = None
         self.root: Path | None = None
-        self.requests: dict[str, tuple[str, dict[str, Any]]] = {}
+        self.requests: dict[str, tuple[str, bytes | _ReplyRef]] = {}
+        self.reply_bytes = 0
+        self.reply_file = None
+        self.closed = False
+        # Only immutable manifest metadata is cached, never file bytes/results.
+        self.manifests = OrderedDict()
+        self.manifest_bytes = 0
 
     def handle(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        if self.closed:
+            raise MeasurementProtocolError("measurement engine is closed")
         _object(envelope, {"version", "id", "runId", "scopeId", "type", "payload"})
         if type(envelope["version"]) is not int or envelope["version"] != PROTOCOL_VERSION:
             raise MeasurementProtocolError("MEASUREMENT_PROTOCOL_VERSION")
@@ -170,15 +136,84 @@ class MeasurementEngine:
             raise MeasurementProtocolError("run binding mismatch")
         if kind != "measure":
             raise MeasurementProtocolError("unsupported measurement operation")
-        fingerprint = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        fingerprint = hashlib.sha256(json.dumps(envelope, ensure_ascii=False, sort_keys=True,
+                                               separators=(",", ":")).encode("utf-8")).hexdigest()
         previous = self.requests.get(envelope["id"])
         if previous:
             if previous[0] != fingerprint:
                 raise MeasurementProtocolError("MEASUREMENT_REQUEST_CONFLICT")
-            return previous[1]
+            cached = previous[1]
+            if isinstance(cached, _ReplyRef):
+                self.reply_file.seek(cached.offset)
+                encoded = self.reply_file.read(cached.size)
+                if len(encoded) != cached.size or hashlib.sha256(encoded).hexdigest() != cached.sha256:
+                    raise MeasurementProtocolError("MEASUREMENT_CACHE_CORRUPT")
+            else:
+                encoded = cached
+            return json.loads(encoded.decode("utf-8"), object_pairs_hook=_pairs)
         result = self._measure(envelope)
-        self.requests[envelope["id"]] = (fingerprint, result)
+        encoded = canonical_bytes(result)
+        if self.reply_bytes + len(encoded) <= MAX_CACHED_REPLY_BYTES:
+            cached = encoded
+            self.reply_bytes += len(encoded)
+        else:
+            # Anonymous, engine-scoped replay storage is NOT another Run store.
+            # Do not evict IDs or reread changed inputs to reconstruct old facts.
+            if self.reply_file is None:
+                self.reply_file = tempfile.TemporaryFile(mode="w+b")
+            self.reply_file.seek(0, 2)
+            offset = self.reply_file.tell()
+            self.reply_file.write(encoded)
+            cached = _ReplyRef(offset, len(encoded), hashlib.sha256(encoded).hexdigest())
+        self.requests[envelope["id"]] = (fingerprint, cached)
         return result
+
+    def close(self):
+        if self.reply_file is not None:
+            self.reply_file.close()
+        self.requests.clear()
+        self.closed = True
+
+    def __del__(self):
+        stream = getattr(self, "reply_file", None)
+        if stream is not None:
+            stream.close()
+
+    def _manifest(self, subject, manifest_json):
+        encoded = manifest_json.encode("utf-8")
+        if len(encoded) > MAX_BYTES or hashlib.sha256(encoded).hexdigest() != subject["sha256"]:
+            raise MeasurementProtocolError("subject manifest digest mismatch")
+        key = (subject["kind"], subject["id"], subject["revision"], subject["sha256"])
+        if key in self.manifests:
+            self.manifests.move_to_end(key)
+            return self.manifests[key][0]
+        manifest = _object(decode(manifest_json), {"kind", "files", "dependencies"})
+        if manifest["kind"] != subject["kind"] or not isinstance(manifest["files"], list) or not isinstance(manifest["dependencies"], list):
+            raise MeasurementProtocolError("invalid subject manifest")
+        paths, entries, total = set(), [], 0
+        for entry in manifest["files"]:
+            _object(entry, {"path", "sha256", "size"})
+            _safe_parts(_text(entry["path"]))
+            _digest(entry["sha256"])
+            _integer(entry["size"])
+            total += entry["size"]
+            if total > MAX_BYTES:
+                raise MeasurementProtocolError("manifest input exceeds measurement limit")
+            if entry["path"] in paths:
+                raise MeasurementProtocolError("duplicate manifest path")
+            paths.add(entry["path"])
+            entries.append((entry["path"], entry["sha256"], entry["size"]))
+        for dependency in manifest["dependencies"]:
+            _ref(dependency, True)
+        compiled = tuple(entries)
+        budget = 1024 * 1024
+        if len(encoded) <= budget:
+            while self.manifests and (len(self.manifests) >= 16 or self.manifest_bytes + len(encoded) > budget):
+                _, (_, size) = self.manifests.popitem(last=False)
+                self.manifest_bytes -= size
+            self.manifests[key] = (compiled, len(encoded))
+            self.manifest_bytes += len(encoded)
+        return compiled
 
     def _measure(self, envelope: dict[str, Any]) -> dict[str, Any]:
         payload = envelope["payload"]
@@ -189,26 +224,7 @@ class MeasurementEngine:
             raise MeasurementProtocolError("unexpected measurement fields")
         subject = _ref(payload["subject"], True)
         manifest_json = _text(payload["manifestJson"])
-        if len(manifest_json.encode("utf-8")) > MAX_BYTES or hashlib.sha256(manifest_json.encode("utf-8")).hexdigest() != subject["sha256"]:
-            raise MeasurementProtocolError("subject manifest digest mismatch")
-        manifest = _object(decode(manifest_json), {"kind", "files", "dependencies"})
-        if manifest["kind"] != subject["kind"] or not isinstance(manifest["files"], list) or not isinstance(manifest["dependencies"], list):
-            raise MeasurementProtocolError("invalid subject manifest")
-        paths: set[str] = set()
-        total_bytes = 0
-        for entry in manifest["files"]:
-            _object(entry, {"path", "sha256", "size"})
-            _safe_parts(_text(entry["path"]))
-            _digest(entry["sha256"])
-            _integer(entry["size"])
-            total_bytes += entry["size"]
-            if total_bytes > MAX_BYTES:
-                raise MeasurementProtocolError("manifest input exceeds measurement limit")
-            if entry["path"] in paths:
-                raise MeasurementProtocolError("duplicate manifest path")
-            paths.add(entry["path"])
-        for dependency in manifest["dependencies"]:
-            _ref(dependency, True)
+        manifest = self._manifest(subject, manifest_json)
         check = _object(payload["check"], {"schemaVersion", "ref", "author", "executorId", "supportedSubjects", "parameters", "requiredCapabilities", "timeoutMs"})
         _ref(check["ref"])
         if check["schemaVersion"] != "check-spec-v1" or check["author"] not in {"application", "user", "model", "unknown"}:
@@ -232,22 +248,43 @@ class MeasurementEngine:
             # Validate every local input, not only the selected file. Never report
             # mismatched bytes as if they belonged to the pinned subject version.
             files = {}
-            for entry in manifest["files"]:
-                data = _snapshot_bytes(self.root, entry["path"])
-                if len(data) != entry["size"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            selected_text = None
+            text_error = None
+            for path, expected_hash, expected_size in manifest:
+                selected = params.get("kind") == "file" and params.get("path") == path
+                text = io.StringIO() if selected and params.get("operator") != "sha256" else None
+                decoder = codecs.getincrementaldecoder("utf-8")("strict") if text is not None else None
+                digest, size = hashlib.sha256(), 0
+                for data in iter_snapshot_chunks(self.root, path):
+                    size += len(data)
+                    digest.update(data)
+                    if text is not None:
+                        try:
+                            text.write(decoder.decode(data))
+                        except UnicodeError as error:
+                            text_error, text = error, None
+                if text is not None:
+                    try:
+                        text.write(decoder.decode(b"", final=True))
+                        selected_text = text.getvalue()
+                    except UnicodeError as error:
+                        text_error = error
+                actual_hash = digest.hexdigest()
+                if size != expected_size or actual_hash != expected_hash:
                     raise OSError("SUBJECT_BYTES_CHANGED")
-                files[entry["path"]] = data
+                files[path] = (actual_hash, size)
+            if text_error is not None:
+                raise text_error
             if params.get("kind") == "file":
                 _object(params, {"kind", "path", "operator", "expected"})
                 if "capture" in payload or params["path"] not in files or params["operator"] not in {"equals", "contains", "sha256"}:
                     raise MeasurementProtocolError("invalid file measurement")
                 if not isinstance(params["expected"], str):
                     raise MeasurementProtocolError("file comparison expected string")
-                data = files[params["path"]]
-                digest = hashlib.sha256(data).hexdigest()
-                actual = digest if params["operator"] == "sha256" else data.decode("utf-8", errors="strict")
+                digest, size = files[params["path"]]
+                actual = digest if params["operator"] == "sha256" else selected_text
                 result = {"execution": "completed", "findings": [
-                    _value("sha256", digest), _value("size", len(data)),
+                    _value("sha256", digest), _value("size", size),
                     _comparison("file_content", params["expected"], actual, "contains" if params["operator"] == "contains" else "equals"),
                 ]}
             elif params.get("kind") == "command":

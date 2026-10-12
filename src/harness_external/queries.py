@@ -3,12 +3,13 @@ from . import semantics, need_records
 from . import read_core
 from .read_core import COLLECTIONS, RECENT_JOB_LIMIT, page_bounds, records
 from .views import job_view, run_view
+from .errors import require
 
 
-def job_summary(api, run_id, job_id):
+def job_summary(api, run_id, job_id, *, compact=False):
     with api._read_run(run_id) as (connection, run):
         job = read_core.checked_job(api, connection, run_id, job_id)
-        return {"run_id": run_id, "view": "summary", "job": job_view(job),
+        return {"run_id": run_id, "view": "compact" if compact else "summary", "job": job_view(job, compact=compact),
                 "measurement_count": connection.execute("SELECT count(*) FROM measurements WHERE run_id=? AND job_id=?", (run_id, job_id)).fetchone()[0]}
 
 
@@ -25,11 +26,17 @@ def list_runs(api, *, offset=0, limit=20):
     return {"items": items, "total": total, "next_offset": offset + len(items) if offset + len(items) < total else None}
 
 
-def resume(api, run_id):
+def resume(api, run_id, *, view="summary"):
+    require(view in {"summary", "compact"}, "INVALID_VIEW", "Resume view is summary or compact")
     with api._read_run(run_id) as (connection, run):
         latest = run["interpretations"][-1]
         checks = semantics.current_checks(run)
         checked, counts, gate_results = read_core.summary(api, connection, run)
+        if view == "compact":
+            from .context import cursor
+            from .views import compact_resume
+            snapshot = getattr(run, "head", None)
+            return compact_resume(run, checked, counts, gate_results, cursor(snapshot) if snapshot else None)
         jobs = [job_view(job) for job in checked]
         return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
                 "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),

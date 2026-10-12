@@ -1,7 +1,8 @@
-"""Explicit-file candidate snapshots using the existing v5 bounded file reader."""
+"""Explicit-file candidate snapshots using shared bounded streaming I/O."""
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import uuid
 
 from harness.json_codec import MAX_BYTES
 from harness.common import atomic_json, canonical_bytes, canonical_hash
+from harness.snapshot_io import iter_snapshot_chunks
 from .errors import HarnessError, relative_path, require
 
 
@@ -21,17 +23,27 @@ def no_links(path: Path) -> None:
                     "LINK_UNSUPPORTED", "Symlinks and Windows reparse points are not supported")
 
 
-def read_file(root: Path, relative: str) -> tuple[bytes, bool]:
-    from harness.measurement_v5 import _snapshot_bytes
+def stream_file(root: Path, relative: str, sink=None) -> tuple[str, int, bool]:
     relative_path(relative)
     target = root / relative
     no_links(target)
     before = target.stat(follow_symlinks=False)
-    data = _snapshot_bytes(root, relative)
+    digest, size = hashlib.sha256(), 0
+    for data in iter_snapshot_chunks(root, relative):
+        digest.update(data)
+        size += len(data)
+        if sink is not None:
+            sink.write(data)
     after = target.stat(follow_symlinks=False)
     identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
     require(identity(before) == identity(after), "INPUT_CHANGED", "Input changed while capturing")
-    return data, bool(before.st_mode & 0o111)
+    return digest.hexdigest(), size, bool(before.st_mode & 0o111)
+
+
+def read_file(root: Path, relative: str) -> tuple[bytes, bool]:
+    stream = io.BytesIO()
+    _, _, executable = stream_file(root, relative, stream)
+    return stream.getvalue(), executable
 
 
 def capture(workspace: Path, inputs: list[str], directory: Path, *, overlays: dict[str, Path] | None = None) -> dict:
@@ -45,23 +57,22 @@ def capture(workspace: Path, inputs: list[str], directory: Path, *, overlays: di
     total = 0
     try:
         for relative in inputs:
-            data, execute = read_file(overlays.get(relative, workspace), relative)
-            total += len(data)
-            require(total <= MAX_BYTES, "SNAPSHOT_TOO_LARGE", "Combined input exceeds the v5 10 MiB limit")
             target = payload / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("xb") as stream:
-                stream.write(data)
+                digest, size, execute = stream_file(overlays.get(relative, workspace), relative, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             target.chmod(0o555 if execute else 0o444)
-            entries.append({"path": relative, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)})
+            total += size
+            require(total <= MAX_BYTES, "SNAPSHOT_TOO_LARGE", "Combined input exceeds the v5 10 MiB limit")
+            entries.append({"path": relative, "sha256": digest, "size": size})
             executable[relative] = execute
         # Detect ordinary concurrent editor changes before sealing the copied set.
         # This is not a filesystem-wide atomic snapshot or a hostile-user barrier.
         for entry in entries:
-            current, mode = read_file(overlays.get(entry["path"], workspace), entry["path"])
-            require(hashlib.sha256(current).hexdigest() == entry["sha256"] and mode == executable[entry["path"]],
+            current, _, mode = stream_file(overlays.get(entry["path"], workspace), entry["path"])
+            require(current == entry["sha256"] and mode == executable[entry["path"]],
                     "INPUT_CHANGED", "Workspace changed during snapshot capture; submit again with a new request ID")
         manifest = {"kind": "candidate", "files": entries, "dependencies": []}
         manifest_json = canonical_bytes(manifest).decode("utf-8")
@@ -96,7 +107,7 @@ def validate_candidate(candidate: dict, payload: Path) -> None:
     require(found == listed and set(candidate["executable"]) == listed, "CANDIDATE_CORRUPT", "Snapshot file set changed")
     total = 0
     for entry in candidate["manifest"]["files"]:
-        data, executable = read_file(payload, entry["path"])
-        total += len(data)
-        require(total <= MAX_BYTES and len(data) == entry["size"] and hashlib.sha256(data).hexdigest() == entry["sha256"]
+        digest, size, executable = stream_file(payload, entry["path"])
+        total += size
+        require(total <= MAX_BYTES and size == entry["size"] and digest == entry["sha256"]
                 and executable == candidate["executable"][entry["path"]], "CANDIDATE_CORRUPT", "Snapshot bytes or executable mode changed")

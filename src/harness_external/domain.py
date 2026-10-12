@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from contextvars import ContextVar
 import re
 from importlib.resources import files
 
@@ -16,6 +17,40 @@ from .registry import effective_config
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
 DEVELOP_REVISION = "develop-external-10"
 PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile", "requirements", "coverage"}
+_COMPILATION = ContextVar("develop_compilation", default=None)
+
+
+def _memo(kind, value, inputs=(), preparation=None):
+    cache = _COMPILATION.get()
+    if cache is None:
+        return None, None
+    try:
+        key = (kind, canonical_hash(value), tuple(inputs), id(preparation))
+    except (TypeError, ValueError):
+        return None, None  # Invalid inputs still go through normal validation.
+    return cache, key
+
+
+def _parameters(parameters, preparation):
+    cache, key = _memo("parameters", parameters, preparation=preparation)
+    if cache is not None and key in cache:
+        return copy.deepcopy(cache[key])
+    result = preparation.parameters(parameters)
+    if cache is not None:
+        cache[key] = copy.deepcopy(result)
+        _, normalized_key = _memo("parameters", result, preparation=preparation)
+        cache[normalized_key] = copy.deepcopy(result)
+    return result
+
+
+def input_scope(inputs, *, partial=False):
+    """Compile membership and detect prefixes by path components, not all pairs."""
+    require(len(inputs) <= 128 and len({p.casefold() for p in inputs}) == len(inputs),
+            "INVALID_PATH", "Invalid partial input file scope" if partial else "Duplicate/case-colliding input paths")
+    ordered = sorted(tuple(path.split("/")) for path in inputs)
+    require(not any(current[:len(previous)] == previous for previous, current in zip(ordered, ordered[1:])),
+            "INVALID_PATH", "Invalid partial input file scope" if partial else "A file cannot also be a directory")
+    return frozenset(inputs)
 
 
 def normalize_file(expectation, inputs):
@@ -27,8 +62,14 @@ def normalize_file(expectation, inputs):
             "INVALID_PARAMETERS", "Use equals, contains or sha256 with a bounded string")
     require(operator != "contains" or bool(expected), "INVALID_PARAMETERS", "Empty substring checks are vacuous")
     require(operator != "sha256" or bool(re.fullmatch(r"[a-f0-9]{64}", expected)), "INVALID_PARAMETERS", "Expected sha256 is invalid")
-    return {"kind": "file", **{k: v for k, v in copy.deepcopy(expectation).items() if k != "id"},
-            **check_identity(expectation, "file", {"path": target, "operator": operator})}
+    cache, key = _memo("file", expectation, sorted(inputs))
+    if cache is not None and key in cache:
+        return copy.deepcopy(cache[key])
+    result = {"kind": "file", **{k: v for k, v in copy.deepcopy(expectation).items() if k != "id"},
+              **check_identity(expectation, "file", {"path": target, "operator": operator})}
+    if cache is not None:
+        cache[key] = copy.deepcopy(result)
+    return result
 
 
 def check_identity(value, kind, semantic_key):
@@ -59,6 +100,7 @@ def compile_coverage_inventory(coverage, requirements, eligible_check_ids, check
     test code, count executed test cases, or assert that a test proves its label.
     """
     requirement_by_id = {item["id"]: item for item in requirements}
+    requirement_checks = {key: frozenset(item["check_ids"]) for key, item in requirement_by_id.items()}
     entries = {key: {"scenario_ids": [], "known_gap_ids": []} for key in requirement_by_id}
     scenarios, gaps, entry_ids = [], [], set()
     profile_id = profile_revision = None
@@ -91,7 +133,7 @@ def compile_coverage_inventory(coverage, requirements, eligible_check_ids, check
             require(isinstance(requirement_id, str) and requirement_id in requirement_by_id,
                     "COVERAGE_REQUIREMENT", "Coverage scenario references an unknown requirement")
             require(isinstance(check_id, str) and check_id in eligible_check_ids
-                    and check_id in requirement_by_id[requirement_id]["check_ids"] and check_id in check_index,
+                    and check_id in requirement_checks[requirement_id] and check_id in check_index,
                     "COVERAGE_CHECK", "Coverage scenario check must be admitted and mapped to its requirement")
             require(isinstance(kind, str) and kind in COVERAGE_KINDS,
                     "COVERAGE_KIND", "Unknown Develop coverage scenario kind")
@@ -170,15 +212,22 @@ def compile_coverage_inventory(coverage, requirements, eligible_check_ids, check
 
 def normalize_execution(value, inputs, preparation):
     require(isinstance(value, dict), "INVALID_PARAMETERS", "Execution check must be an object")
+    cache, key = _memo("execution", value, inputs, preparation)
+    if cache is not None and key in cache:
+        return copy.deepcopy(cache[key])
     if value.get("kind") == "command":
-        return normalize_command({key: item for key, item in value.items() if key != "kind"})
-    require(value.get("kind") == "cases", "INVALID_PARAMETERS", "Execution check kind must be command or cases")
-    return develop_cases.normalize(value, inputs, preparation)
+        result = normalize_command({key: item for key, item in value.items() if key != "kind"})
+    else:
+        require(value.get("kind") == "cases", "INVALID_PARAMETERS", "Execution check kind must be command or cases")
+        result = develop_cases.normalize(value, inputs, preparation)
+    if cache is not None:
+        cache[key] = copy.deepcopy(result)
+    return result
 
 
 def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, *, check_preparation=None) -> dict:
     preparation = check_preparation if check_preparation is not None else AdapterCheckPreparation()
-    parameters = preparation.parameters(parameters)
+    parameters = _parameters(parameters, preparation)
     require(domain_id == "develop", "DOMAIN_UNSUPPORTED", "Only develop is supported")
     # Packaged extraction of the existing Develop manifest, not a second model
     # policy loader. Execution permissions from that manifest are NOT granted.
@@ -191,9 +240,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
     artifacts = parameters["artifacts"]
     require(isinstance(inputs, list) and 1 <= len(inputs) <= 128, "INPUTS_REQUIRED", "List 1..128 input files, including tests/fixtures")
     inputs = [relative_path(item) for item in inputs]
-    require(len({p.casefold() for p in inputs}) == len(inputs), "INVALID_PATH", "Duplicate/case-colliding input paths")
-    require(not any(b.startswith(a + "/") for a in inputs for b in inputs if a != b), "INVALID_PATH", "A file cannot also be a directory")
-    require(isinstance(artifacts, list) and artifacts and all(isinstance(p, str) and p in inputs for p in artifacts),
+    admitted_inputs = input_scope(inputs)
+    require(isinstance(artifacts, list) and artifacts and all(isinstance(p, str) and p in admitted_inputs for p in artifacts),
             "ARTIFACTS_REQUIRED", "Artifacts must be included in inputs")
     require(len(set(artifacts)) == len(artifacts), "INVALID_PARAMETERS", "Duplicate artifacts")
     profile = parameters.get("profile", "execution")
@@ -203,7 +251,7 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
     checks = []
     covered = set()
     for expectation in expectations:
-        check = normalize_file(expectation, inputs)
+        check = normalize_file(expectation, admitted_inputs)
         covered.add(check["path"])
         checks.append(check)
     require(set(artifacts) <= covered, "NEEDS_INPUT", "Every artifact needs at least one explicit expectation")
@@ -268,13 +316,20 @@ class DevelopModule:
                 "check_preparation": self._checks.identity()}
 
     def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
+        token = _COMPILATION.set({})
+        try:
+            return self._compile_acceptance(goal, parameters, verifier, policy=policy, intent=intent)
+        finally:
+            _COMPILATION.reset(token)
+
+    def _compile_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
         """Compile configured acceptance plus revisable caller exploration.
 
         Requirements and evidence kinds are Develop semantics. Core receives
         normalized checks/IDs and pins them without deciding what the goal means.
         """
-        base = self._checks.parameters(policy["parameters"])
-        parameters = self._checks.parameters(parameters)
+        base = _parameters(policy["parameters"], self._checks)
+        parameters = _parameters(parameters, self._checks)
         require(not {"requirements", "coverage"}.intersection(base), "ACCEPTANCE_DECLARATION_SOURCE",
                 "Configured requirements and coverage belong at the policy top level")
         require(not {"requirements", "coverage"}.intersection(parameters), "ACCEPTANCE_DECLARATION_PINNED",
@@ -303,9 +358,12 @@ class DevelopModule:
         require(mapped == set(required), "REQUIREMENT_REFERENCE", "Every mandatory check must map to a requirement")
         coverage_inventory, coverage_summary = compile_coverage_inventory(
             policy.get("coverage"), requirements, set(required), indexed, bundle_paths, self._checks)
-        base = develop_cases.apply_required_scenarios(base, policy.get("coverage"))
-        if policy.get("coverage", {}).get("schema_version") == "develop-coverage-v2":
-            checks = self.prepare(goal, base, verifier, exploratory=False, intent=intent)["contract"]["checks"]
+        promoted = develop_cases.apply_required_scenarios(base, policy.get("coverage"))
+        if promoted.get("execution_checks", []) != base.get("execution_checks", []):
+            checks = [item for item in checks if item["kind"] == "file"] + [
+                normalize_execution(item, base["inputs"], self._checks) for item in promoted.get("execution_checks", [])]
+        base = promoted
+        checks_by_key = {check["check_key"]: check for check in checks}
         fields(parameters, PARAMETERS)
         require(not (base["profile"] == "execution" and parameters.get("profile") == "structural"),
                 "ACCEPTANCE_SCOPE", "Configured command acceptance cannot be downgraded to structural checks")
@@ -320,9 +378,10 @@ class DevelopModule:
             extra = parameters.get(key, [])
             require(isinstance(extra, list), "INVALID_PARAMETERS", key + " must be a list")
             originals = list(base.get(key, []))
+            admitted_inputs = frozenset(merged["inputs"])
             for proposal in extra:
-                normalized = normalize_file(proposal, merged["inputs"]) if key == "expectations" else normalize_execution(proposal, merged["inputs"], self._checks)
-                old = next((c for c in checks if c["check_key"] == normalized["check_key"]), None)
+                normalized = normalize_file(proposal, admitted_inputs) if key == "expectations" else normalize_execution(proposal, merged["inputs"], self._checks)
+                old = checks_by_key.get(normalized["check_key"])
                 require(old is None or old == normalized, "ACCEPTANCE_CHECK_CHANGED", "Configured checks cannot be replaced by caller proposals")
                 if old is None:
                     originals.append(proposal)
@@ -346,7 +405,7 @@ class DevelopModule:
         if intent is not None:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-        parameters = self._checks.parameters(parameters)
+        parameters = _parameters(parameters, self._checks)
         fields(parameters, PARAMETERS)
         requirements = develop_requirements.normalize(parameters.get("requirements", []))
         require(parameters.get("coverage") is None or isinstance(parameters["coverage"], dict),
@@ -362,8 +421,7 @@ class DevelopModule:
         for item in parameters.get("inputs", []) + parameters.get("artifacts", []):
             relative_path(item)
         inputs = parameters.get("inputs", [])
-        require(len(inputs) <= 128 and len({p.casefold() for p in inputs}) == len(inputs)
-                and not any(b.startswith(a + "/") for a in inputs for b in inputs if a != b), "INVALID_PATH", "Invalid partial input file scope")
+        input_scope(inputs, partial=True)
         missing = [key for key in ("inputs", "artifacts", "expectations") if not parameters.get(key)]
         if profile == "execution" and not parameters.get("execution_checks"):
             missing.append("execution_checks")

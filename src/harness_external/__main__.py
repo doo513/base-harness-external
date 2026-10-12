@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         if name == "status":
             cmd.add_argument("--job-id")
             cmd.add_argument("--check-workspace", action="store_true")
-            cmd.add_argument("--view", choices=("summary", "full"), default="summary", help="v2 defaults to bounded summary; request full history explicitly")
+            cmd.add_argument("--view", choices=("summary", "compact", "full"), default="summary", help="compact for polling; summary is compatible; full includes history")
         elif name == "verify":
             cmd.add_argument("--compare-baseline", action="store_true", help="measure the pinned original and current Candidate with identical checks")
             cmd.add_argument("--expected-candidate-hash", help="reject a concurrent or superseding submission")
@@ -85,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--job-id")
             cmd.add_argument("--offset", type=int, default=0)
             cmd.add_argument("--limit", type=int, default=20)
+            cmd.add_argument("--view", choices=("full", "references"), default="full", help="references is a bounded lossless projection")
+            cmd.add_argument("--detail", help=JSON_HELP + "; digest-bound detail reference and optional byte offset/limit")
+        elif name == "resume":
+            cmd.add_argument("--view", choices=("summary", "compact"), default="summary")
         elif name == "cleanup":
             cmd.add_argument("--apply", action="store_true", help="quarantine abandoned captures; default is preview")
             cmd.add_argument("--min-age-seconds", type=int, default=3600)
@@ -101,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance")) > 1:
+        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
@@ -117,9 +121,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "list-runs":
             result = api.list_runs(offset=args.offset, limit=args.limit)
         elif args.command == "resume":
-            result = api.resume(args.run_id)
+            result = api.resume(args.run_id, view=args.view)
         elif args.command == "records":
-            result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id)
+            result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id,
+                                 view=args.view, detail=load_json(args.detail) if args.detail else None)
         elif args.command == "cleanup":
             result = api.cleanup(args.run_id, apply=args.apply, min_age_seconds=args.min_age_seconds)
         elif args.command == "cancel":

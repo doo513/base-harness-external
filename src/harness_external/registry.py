@@ -83,7 +83,12 @@ class DomainRegistry:
             functions.append(module.normalize_need)
         if callable(getattr(module, "identity_config", None)):
             functions.append(module.identity_config)
-        sources, code = {}, {}
+        sources, code, source_hashes = {}, {}, {}
+        def source_hash(filename):
+            path = Path(filename).resolve(strict=True)
+            if path not in source_hashes:
+                source_hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+            return source_hashes[path]
         for function in functions:
             target = getattr(function, "__func__", function)
             require(hasattr(target, "__code__"), "DOMAIN_IDENTITY_UNAVAILABLE", "Domain methods must expose Python implementation identity")
@@ -91,10 +96,10 @@ class DomainRegistry:
             code[method_id] = canonical_hash(code_identity(target.__code__))
             filename = inspect.getsourcefile(target)
             if filename and Path(filename).is_file():
-                sources["domain-method:" + method_id] = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+                sources["domain-method:" + method_id] = source_hash(filename)
         for logical_id, filename in zip(identity_file_ids, identity_files):
             path = Path(filename).resolve(strict=True)
-            sources["identity-file:" + logical_id] = hashlib.sha256(path.read_bytes()).hexdigest()
+            sources["identity-file:" + logical_id] = source_hash(path)
         config = getattr(module, "identity_config", None)
         if callable(config):
             config = config()

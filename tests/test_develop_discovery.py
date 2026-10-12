@@ -54,7 +54,7 @@ def test_discovery_module_does_not_import_core_or_the_legacy_record_validator():
     tree = ast.parse(source)
     imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     imports.update(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
-    assert imports <= {"copy", "harness.common"}
+    assert imports <= {"types", "harness.common", "harness.json_codec"}
     assert {node.name for node in tree.body if isinstance(node, ast.FunctionDef)} == {"guidance"}
 
 

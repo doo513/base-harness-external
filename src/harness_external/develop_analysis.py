@@ -3,9 +3,10 @@
 This module returns advice only. It does not generate task answers, persist Needs,
 route by goal keywords, fetch sources or make Core lifecycle/gate decisions.
 """
-import copy
+from types import MappingProxyType
 
-from harness.common import canonical_hash
+from harness.common import canonical_bytes, canonical_hash
+from harness.json_codec import decode
 
 
 KINDS = ("knowledge", "observation", "decision", "verification")
@@ -56,11 +57,18 @@ KNOWLEDGE_MAP = (
 )
 
 
-def guidance():
-    body = {"schema_version": "develop-analysis-v2", "revision": "2", "need_kinds": list(KINDS),
+# Keep the shared map immutable. Each returned document remains caller-owned.
+NEED_QUALITY = MappingProxyType(NEED_QUALITY)
+PERSPECTIVES = tuple(MappingProxyType({key: tuple(value) if isinstance(value, list) else value
+                                     for key, value in item.items()}) for item in PERSPECTIVES)
+KNOWLEDGE_MAP = tuple(MappingProxyType({key: tuple(value) if isinstance(value, list) else value
+                                      for key, value in item.items()}) for item in KNOWLEDGE_MAP)
+PERSPECTIVE_INDEX = MappingProxyType({item["id"]: item for item in PERSPECTIVES})
+KNOWLEDGE_INDEX = MappingProxyType({item["id"]: item for item in KNOWLEDGE_MAP})
+_BODY = {"schema_version": "develop-analysis-v2", "revision": "2", "need_kinds": list(KINDS),
             "meaning": "advisory_reasoning_support_not_workflow", "persistence_required": False, "minimum_need_count": 0,
-            "need_quality": copy.deepcopy(NEED_QUALITY), "analysis_perspectives": copy.deepcopy(list(PERSPECTIVES)),
-            "knowledge_map": copy.deepcopy(list(KNOWLEDGE_MAP)),
+            "need_quality": dict(NEED_QUALITY), "analysis_perspectives": [dict(item) for item in PERSPECTIVES],
+            "knowledge_map": [dict(item) for item in KNOWLEDGE_MAP],
             "discovery": {
                 "select": "Form a task-specific question first, then choose a useful map entry or another source. Skip irrelevant perspectives; no category quota or goal-keyword routing.",
                 "inspect": "Locate the relevant symbol, caller, configuration or assertion and inspect only enough context to answer the question. Use a focused observation if reading cannot distinguish alternatives.",
@@ -68,4 +76,27 @@ def guidance():
                 "revisit": "When implementation or measurement contradicts an assumption, refine the question or approach. Stop exploration when the next action is supported; do not read the entire map or treat an answer as goal proof.",
             },
             "boundary": "The Host reasons and uses its existing tools. Domain advice neither executes tools nor changes permissions, budgets, Run state, GoalContract, gates or Verifier observations."}
-    return {**body, "map_hash": canonical_hash(body)}
+_GUIDANCE_JSON = canonical_bytes({**_BODY, "map_hash": canonical_hash(_BODY)}).decode("utf-8")
+del _BODY
+
+
+def guidance(*, perspectives=None, knowledge=None):
+    """Default stays complete; optional explicit IDs do not route by goal text."""
+    body = decode(_GUIDANCE_JSON)
+    if perspectives is None and knowledge is None:
+        return body
+    for selection, index in ((perspectives, PERSPECTIVE_INDEX), (knowledge, KNOWLEDGE_INDEX)):
+        if selection is not None and (not isinstance(selection, (list, tuple))
+                or any(not isinstance(key, str) or key not in index for key in selection)
+                or len(set(selection)) != len(selection)):
+            raise ValueError("Unknown or duplicate advisory map ID")
+    if perspectives is not None:
+        selected = set(perspectives)
+        body["analysis_perspectives"] = [item for item in body["analysis_perspectives"] if item["id"] in selected]
+    if knowledge is None and perspectives is not None:
+        knowledge = {key for item in body["analysis_perspectives"] for key in item["knowledge_refs"]}
+    if knowledge is not None:
+        selected = set(knowledge)
+        body["knowledge_map"] = [item for item in body["knowledge_map"] if item["id"] in selected]
+    body["map_hash"] = canonical_hash({key: value for key, value in body.items() if key != "map_hash"})
+    return body
