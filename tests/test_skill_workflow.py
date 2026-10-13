@@ -1,5 +1,7 @@
 """Caller packaging and lifecycle tests; no new Core/domain semantics."""
 import copy
+import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -380,16 +382,72 @@ def test_installed_copy_and_fresh_process_resume_the_same_state(caller, tmp_path
     assert (installed / "SKILL.md").is_file()
     assert (installed / "references" / "protocol.md").is_file()
     moved_helper = installed / "scripts" / "harness_client.py"
-    code, started = invoke_cli(moved_helper, config, start_request(workspace), tmp_path)
+    payload = start_request(workspace)
+    payload["arguments"]["analysis_selection"] = {"perspectives": ["change"]}
+    code, started = invoke_cli(moved_helper, config, payload, tmp_path)
     assert code == 0, started
     run = started["run_id"]
+    assert started["domain_preparation"]["analysis_guidance"]["selection"]["perspectives"] == ["change"]
     code, state = invoke_cli(moved_helper, config, request(workspace, run, "resume"), ROOT)
     assert code == 0 and state["run"]["run_id"] == run
     assert state["run"]["workspace"] == str(workspace)
     assert state["candidate"] is None
+    code, focused = invoke_cli(moved_helper, config, request(workspace, run, "resume", view="compact",
+        analysis_selection={"perspectives": [], "knowledge": ["runtime"]}), ROOT)
+    assert code == 0 and focused["view"] == "compact"
+    assert focused["domain_preparation"]["analysis_guidance"]["selection"] == {"perspectives": [], "knowledge": ["runtime"]}
     with pytest.raises(FileExistsError):
         installer.install(tmp_path / "host-skills")
     assert client.call(request(workspace, run, "resume"))["history_counts"]["jobs"] == 0
+
+
+def test_helper_compact_resume_uses_binding_and_does_not_consume_an_action(caller):
+    client, _, _ = caller
+    binding = bound_run(caller)
+    before = client.validate_binding(binding)
+    envelope = client.make_request("resume", {"view": "compact", "analysis_selection": {"perspectives": ["change"]}}, binding=binding)["request"]
+    assert "request_id" not in envelope
+    result = client.call(envelope)
+    assert result["ok"] and result["view"] == "compact"
+    assert result["domain_preparation"]["analysis_guidance"]["selection"]["perspectives"] == ["change"]
+    assert client.validate_binding(binding)["usage"] == before["usage"]
+    wrong = copy.deepcopy(envelope)
+    wrong["context"]["workspace"] += "-foreign"
+    with pytest.raises(helper.ClientError) as error:
+        client.call(wrong)
+    assert error.value.code == "RUN_CONTEXT_MISMATCH"
+
+
+def test_helper_reads_measured_reference_and_reassembles_unicode_detail(caller):
+    client, workspace, config = caller
+    text = "ready " + "한글" * 1000
+    (workspace / "payload.txt").write_text(text, encoding="utf-8")
+    payload = start_request(workspace)
+    payload["arguments"]["parameters"]["expectations"][0]["operator"] = "contains"
+    started = client.call(payload)
+    binding = client.bind(started["run_id"], str(workspace), "develop", config.parent / "detail-binding.json")["binding"]
+    checked = client.checkpoint(binding, "check", wait_seconds=15)
+    assert checked["job"]["result"]["status"] == "passed"
+    usage = client.validate_binding(binding)["usage"]
+    envelope = client.make_request("records", {"kind": "measurements", "job_id": checked["job"]["job_id"], "view": "references"}, binding=binding)["request"]
+    projection = client.call(envelope)["items"][0]
+    ref = next(item for item in projection["detail_refs"] if item["path"] == ["report", "observation", "result", "findings", 2, "observed"])
+    detail = {key: projection["source"][key] for key in ("record_id", "record_digest")}
+    detail.update(path=ref["path"], sha256=ref["sha256"], limit=4093, offset=0)
+    data = bytearray()
+    while True:
+        envelope = client.make_request("records", {"kind": "measurements", "detail": detail}, binding=binding)["request"]
+        response = client.call(envelope)
+        assert response["ok"] and response["encoding"] == "base64-canonical-json"
+        data.extend(base64.b64decode(response["data"]))
+        if response["next_offset"] is None:
+            break
+        detail["offset"] = response["next_offset"]
+    assert hashlib.sha256(data).hexdigest() == ref["sha256"]
+    assert json.loads(data.decode("utf-8")) == text
+    assert client.validate_binding(binding)["usage"] == usage
+    bad = client.make_request("records", {"kind": "measurements", "view": "references", "detail": detail}, binding=binding)["request"]
+    assert client.call(bad)["error"]["code"] == "DETAIL_ARGUMENTS"
 
 
 def test_timeout_does_not_automatically_retry_or_claim_verification_failed(caller, monkeypatch):

@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--goal", required=True)
     start.add_argument("--workspace", required=True)
     start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/execution_checks/profile; optional requirements/coverage")
+    start.add_argument("--analysis-selection", help=JSON_HELP + "; optional Domain advice view, separate from contract parameters")
     start.add_argument("--mode", choices=("strict", "exploratory", "acceptance"), help="default: configured acceptance when present, otherwise legacy strict")
     start.add_argument("--policy-id", help="registered acceptance profile; cannot override an operator Domain default")
     start.add_argument("--predecessor-run-id", help="terminal Run replaced after an explicit policy change")
@@ -89,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--detail", help=JSON_HELP + "; digest-bound detail reference and optional byte offset/limit")
         elif name == "resume":
             cmd.add_argument("--view", choices=("summary", "compact"), default="summary")
+            cmd.add_argument("--analysis-selection", help=JSON_HELP + "; select stored Domain advice without revising the Run")
         elif name == "cleanup":
             cmd.add_argument("--apply", action="store_true", help="quarantine abandoned captures; default is preview")
             cmd.add_argument("--min-age-seconds", type=int, default=3600)
@@ -105,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail")) > 1:
+        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "list-runs":
             result = api.list_runs(offset=args.offset, limit=args.limit)
         elif args.command == "resume":
-            result = api.resume(args.run_id, view=args.view)
+            result = api.resume(args.run_id, view=args.view, analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None)
         elif args.command == "records":
             result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id,
                                  view=args.view, detail=load_json(args.detail) if args.detail else None)
@@ -138,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
                                deferred_checks=args.deferred_check, provenance=load_json(args.provenance) if args.provenance else None,
                                constraints=load_json(args.constraints) if args.constraints else None,
                                policy_id=args.policy_id, predecessor_run_id=args.predecessor_run_id, policy_change_reason=args.policy_change_reason,
-                               capture_baseline=args.capture_baseline, continuation_reason=args.continuation_reason)
+                               capture_baseline=args.capture_baseline, continuation_reason=args.continuation_reason,
+                               analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
         elif args.command == "revise":

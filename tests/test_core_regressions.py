@@ -34,7 +34,8 @@ def test_dynamic_check_timeout_covers_new_and_revised_commands(case, monkeypatch
     monkeypatch.setattr(service.time, "time", lambda: clock[0])
     def controlled_capture(check, *args):
         clock[0] += 80  # Elapsed execution, without a slow real process.
-        return {"status": "completed", "capture": {
+        from execution_input_fixtures import receipt
+        return {"status": "completed", "input_receipt": receipt(args[-1]), "capture": {
             "argv": check["argv"], "cwd": check["cwd"], "startedAt": "2026-10-01T00:00:00Z",
             "finishedAt": "2026-10-01T00:01:20Z", "execution": "completed",
             "stdout": "", "stderr": "", "exitCode": 0}}

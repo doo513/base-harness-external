@@ -8,6 +8,7 @@ import tempfile
 import threading
 
 from .worker import execute_sandbox
+from .execution_inputs import make_binding
 
 
 def doctor(store, *, sandbox=False):
@@ -28,7 +29,8 @@ def doctor(store, *, sandbox=False):
             workspace = Path(temporary) / "workspace"
             workspace.mkdir()
             check = {"argv": ["python3", "-c", "print('harness-sandbox-probe')"], "cwd": ".", "timeout_seconds": 10}
-            receipt = execute_sandbox(check, workspace, store.root, threading.Event(), 30)
+            receipt = execute_sandbox(check, workspace, store.root, threading.Event(), 30,
+                                      make_binding([], {"operation": "doctor", "workspace": str(workspace), "command": check}))
             capture = receipt.get("capture") or {}
             passed = (receipt["status"] == "completed" and capture.get("execution") == "completed"
                       and capture.get("exitCode") == 0 and capture.get("stdout", "").strip() == "harness-sandbox-probe")

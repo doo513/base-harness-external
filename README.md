@@ -40,7 +40,7 @@ base-harness-external --help
 
 Without installation, use `PYTHONPATH=src python3 -m harness_external` on Linux,
 or set `PYTHONPATH` to this checkout's `src` in your platform's shell. Command
-checks reuse the existing Bun/WSL-or-Linux-namespace Sandbox through a small
+checks reuse the existing Bun/Linux-namespace Sandbox (also inside WSL) through a small
 adapter; file-only structural checks do not need Bun. In this first release,
 command checks require this source checkout and Bun on PATH (or `BUN`). A missing
 adapter/Sandbox returns incomplete verification, never an unsandboxed fallback.
@@ -413,6 +413,31 @@ Ready issuer. A passing check does not prove goal coverage or test independence.
 
 Results describe the submitted snapshot, not later workspace edits or unlisted
 files. Command observations retain v5's environment/input-closure limitations.
+For each new command invocation, Worker now sends a pinned file inventory
+(path, SHA-256, size and executable bit) and an invocation scope digest to the
+common Sandbox transport. The namespace backend freshly checks its **actual
+copied execution directory before starting the command**, then compares the
+post-execution copy against that frozen pre-execution inventory. Worker admits
+the resulting input receipt only for the same Run/Job/owner/Check/subject and
+materialized command; it is retained in measurement Sandbox provenance.
+Generated output files are allowed; changing or deleting a submitted file,
+including its executable bit, yields an execution error. Missing receipts cannot
+promote a zero process exit to a successful measurement. Ordinary and registered
+adapter commands follow the same input admission path.
+
+This does not make filesystem reads and database publication atomic, prevent
+every transient modification between scans, or protect against same-user
+rewriting of the verifier/state. Existing Worker pre/post/final checks and
+`finish` snapshot validation remain. The final Worker scan occurs after resource
+cleanup, without holding SQLite's writer lock; its lease remains active through
+publication. Historical records remain readable, but pinned implementation
+identities are not silently migrated to the new implementation.
+
+Bound command execution currently requires the Linux namespace backend (including
+a Harness process running inside WSL). Native-Windows-to-WSL Sandbox dispatch
+does not yet implement execution-side input admission and therefore fails closed
+as `not_run`, rather than silently returning an unbound success. Run `doctor
+--sandbox` in the environment that will actually execute Harness.
 For tamper-resistant certification, use a separately protected verifier/state/key
 and an independent consumer (for example CI); that protected mode is not included.
 

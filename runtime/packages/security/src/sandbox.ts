@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { promises as fs, constants as fsConstants } from "node:fs"
+import type { BigIntStats } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -54,6 +55,25 @@ export interface SandboxRequest {
   readonlyResource?: string
   /** Bounded structured telemetry from a new file in the throwaway workspace. */
   observationArtifact?: { path: string; maxBytes: number; onLine: (line: string) => void }
+  /** Pinned by the caller before copying. Never derived from a later source scan. */
+  inputBinding?: ExecutionInputBinding
+}
+
+export interface InputFile { path: string; sha256: string; size: number; executable: boolean }
+export interface ExecutionInputBinding {
+  schema_version: "execution-input-v1"
+  scope_hash: string
+  input_hash: string
+  files: InputFile[]
+}
+export interface ExecutionInputReceipt {
+  schema_version: "execution-input-receipt-v1"
+  scope_hash: string
+  input_hash: string
+  checked_at: string
+  post_checked_at: string
+  unchanged: boolean
+  changed_inputs: string[]
 }
 
 export interface SandboxFileChange {
@@ -71,6 +91,7 @@ export interface SandboxResult {
   stderr: string
   provenance: SandboxProvenance
   changes?: SandboxFileChange[]
+  inputReceipt?: ExecutionInputReceipt
 }
 
 export class SandboxError extends Error {
@@ -79,7 +100,9 @@ export class SandboxError extends Error {
       | "SANDBOX_UNAVAILABLE"
       | "SANDBOX_POLICY_DENIED"
       | "SANDBOX_LIMIT_EXCEEDED"
-      | "SANDBOX_ESCAPE_ATTEMPT",
+      | "SANDBOX_ESCAPE_ATTEMPT"
+      | "EXECUTION_INPUT_INVALID"
+      | "EXECUTION_INPUT_MISMATCH",
     message: string,
     readonly provenance?: Partial<SandboxProvenance>,
   ) {
@@ -223,7 +246,34 @@ exec chroot "$root" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/
 `
 
 const safeId = () => randomUUID().replaceAll("-", "")
-const fileDigest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+const byteOrder = (left: string, right: string) => Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"))
+
+/** Fixed keys match Python canonical_bytes, including Unicode paths. */
+export const inputDigest = (files: InputFile[]) => createHash("sha256").update(JSON.stringify(
+  files.map(({ path, sha256, size, executable }) => ({ executable, path, sha256, size })),
+), "utf8").digest("hex")
+
+export function validateInputBinding(value: unknown): ExecutionInputBinding {
+  const invalid = (): never => { throw new SandboxError("EXECUTION_INPUT_INVALID", "Missing or invalid pinned execution input binding") }
+  if (!value || typeof value !== "object") return invalid()
+  const binding = value as ExecutionInputBinding
+  if (Object.keys(binding).sort().join(",") !== "files,input_hash,schema_version,scope_hash" ||
+      binding.schema_version !== "execution-input-v1" || typeof binding.scope_hash !== "string" || !/^[0-9a-f]{64}$/.test(binding.scope_hash) ||
+      typeof binding.input_hash !== "string" || !/^[0-9a-f]{64}$/.test(binding.input_hash) || !Array.isArray(binding.files) || binding.files.length > 128) return invalid()
+  let total = 0
+  let previous: string | undefined
+  for (const file of binding.files) {
+    if (!file || Object.keys(file).sort().join(",") !== "executable,path,sha256,size" ||
+        typeof file.path !== "string" || file.path.length === 0 || [...file.path].length > 512 ||
+        /[\x00-\x1f\x7f\\:]/.test(file.path) || file.path.split("/").some(part => !part || part === "." || part === ".." || /[ .]$/.test(part)) ||
+        typeof file.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(file.sha256) || typeof file.executable !== "boolean" ||
+        !Number.isSafeInteger(file.size) || file.size < 0 || (previous !== undefined && byteOrder(previous, file.path) >= 0)) return invalid()
+    previous = file.path
+    total += file.size
+  }
+  if (total > 10 * 1024 * 1024 || inputDigest(binding.files) !== binding.input_hash || Buffer.byteLength(JSON.stringify(binding)) > 512 * 1024) return invalid()
+  return structuredClone(binding)
+}
 
 function watchArtifact(workspace: string, artifact: SandboxRequest["observationArtifact"]) {
   if (!artifact) return async () => {}
@@ -275,32 +325,87 @@ function watchArtifact(workspace: string, artifact: SandboxRequest["observationA
   }
 }
 
-async function captureWorkspaceChanges(beforeRoot: string, afterRoot: string, maxBytes: number): Promise<SandboxFileChange[]> {
-  type Entry = { hash: string; bytes: Buffer }
+type WorkspaceScan = { files: Map<string, InputFile & { bytes?: Buffer }>; links: Map<string, string> }
+const statIdentity = (info: BigIntStats) => [info.dev, info.ino, info.mode, info.nlink, info.size, info.mtimeNs, info.ctimeNs].join(":")
+
+/** Fresh bounded reads of the copy. Pre-execution state keeps hashes, not bodies. */
+async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceScan): Promise<WorkspaceScan> {
   const scan = async (root: string) => {
-    const files = new Map<string, Entry>()
+    const files: WorkspaceScan["files"] = new Map()
     const links = new Map<string, string>()
     let bytes = 0
     const visit = async (directory: string): Promise<void> => {
+      const directoryBefore = await fs.lstat(directory, { bigint: true })
+      if (!directoryBefore.isDirectory() || directoryBefore.isSymbolicLink()) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Snapshot directory changed")
       for (const item of await fs.readdir(directory, { withFileTypes: true })) {
         const target = path.join(directory, item.name)
         const relative = path.relative(root, target).split(path.sep).join("/")
-        const stat = await fs.lstat(target)
+        const stat = await fs.lstat(target, { bigint: true })
         if (stat.isDirectory()) await visit(target)
         else if (stat.isSymbolicLink()) links.set(relative, await fs.readlink(target))
         else if (stat.isFile()) {
-          if (stat.nlink !== 1) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Sandbox output contains a hard-linked file: ${relative}`)
-          bytes += stat.size
-          if (bytes > maxBytes) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox captured output exceeds maxInputBytes")
-          const content = await fs.readFile(target)
-          files.set(relative, { hash: fileDigest(content), bytes: content })
+          if (stat.nlink !== 1n) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Snapshot has a hard link: ${relative}`)
+          if (Number(stat.size) > maxBytes - bytes) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Snapshot exceeds maxInputBytes")
+          const handle = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK)
+          try {
+            const opened = await handle.stat({ bigint: true })
+            if (statIdentity(stat) !== statIdentity(opened)) throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Snapshot changed before reading")
+            const digest = createHash("sha256")
+            const buffer = Buffer.alloc(64 * 1024)
+            const chunks: Buffer[] = []
+            let size = 0
+            while (true) {
+              const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, maxBytes - bytes + 1), null)
+              if (!bytesRead) break
+              bytes += bytesRead
+              size += bytesRead
+              if (bytes > maxBytes) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Snapshot exceeds maxInputBytes")
+              digest.update(buffer.subarray(0, bytesRead))
+              if (before) chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
+            }
+            const after = await handle.stat({ bigint: true })
+            const named = await fs.lstat(target, { bigint: true })
+            if (statIdentity(opened) !== statIdentity(after) || statIdentity(after) !== statIdentity(named)) {
+              throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Snapshot changed during reading")
+            }
+            const sha256 = digest.digest("hex")
+            files.set(relative, { path: relative, sha256, size, executable: Boolean(stat.mode & 0o111n),
+              ...(before && before.files.get(relative)?.sha256 !== sha256 ? { bytes: Buffer.concat(chunks) } : {}) })
+          } finally { await handle.close() }
         } else throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Unsupported sandbox output entry: ${relative}`)
+      }
+      if (statIdentity(directoryBefore) !== statIdentity(await fs.lstat(directory, { bigint: true }))) {
+        throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Snapshot directory changed during reading")
       }
     }
     await visit(root)
     return { files, links }
   }
-  const [before, after] = await Promise.all([scan(beforeRoot), scan(afterRoot)])
+  return scan(root)
+}
+
+function scanInventory(scan: WorkspaceScan): InputFile[] {
+  return [...scan.files.values()].sort((a, b) => byteOrder(a.path, b.path))
+    .map(({ path, sha256, size, executable }) => ({ path, sha256, size, executable }))
+}
+
+function admitInputs(scan: WorkspaceScan, binding: ExecutionInputBinding) {
+  if (scan.links.size || inputDigest(scanInventory(scan)) !== binding.input_hash) {
+    throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Actual execution copy differs from the pinned file inventory")
+  }
+}
+
+function inputReceipt(before: WorkspaceScan, after: WorkspaceScan, binding: ExecutionInputBinding, checkedAt: string): ExecutionInputReceipt {
+  const changed = [...before.files.values()].filter(left => {
+    const right = after.files.get(left.path)
+    return !right || left.sha256 !== right.sha256 || left.size !== right.size || left.executable !== right.executable
+  }).map(file => file.path).sort(byteOrder)
+  return { schema_version: "execution-input-receipt-v1", scope_hash: binding.scope_hash,
+    input_hash: inputDigest(scanInventory(before)), checked_at: checkedAt, post_checked_at: new Date().toISOString(),
+    unchanged: changed.length === 0, changed_inputs: changed }
+}
+
+function captureWorkspaceChanges(before: WorkspaceScan, after: WorkspaceScan): SandboxFileChange[] {
   if (before.links.size !== after.links.size || [...before.links].some(([key, value]) => after.links.get(key) !== value)) {
     throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Sandbox commands cannot create, remove, or retarget symbolic links")
   }
@@ -308,9 +413,9 @@ async function captureWorkspaceChanges(beforeRoot: string, afterRoot: string, ma
   return paths.flatMap((relativePath) => {
     const left = before.files.get(relativePath)
     const right = after.files.get(relativePath)
-    if (left?.hash === right?.hash) return []
-    return [{ path: relativePath, beforeHash: left?.hash ?? null, afterHash: right?.hash ?? null,
-      ...(right ? { after: new Uint8Array(right.bytes) } : {}) }]
+    if (left?.sha256 === right?.sha256) return []
+    return [{ path: relativePath, beforeHash: left?.sha256 ?? null, afterHash: right?.sha256 ?? null,
+      ...(right ? { after: new Uint8Array(right.bytes!) } : {}) }]
   })
 }
 
@@ -340,6 +445,7 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
   try {
     await checked([...prefix, "/bin/mkdir", "-p", workspace, mountRoot])
     await checked([...prefix, "/bin/cp", "-a", "--no-preserve=links", `${source}/.`, workspace], Math.max(30_000, policy.timeoutMs))
+    const before = request.captureChanges ? await scanWorkspace(root, policy.maxInputBytes) : undefined
     const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
     const result = await execute(
       [
@@ -373,7 +479,7 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
     if (captured) {
       const captureTarget = await checked([...prefix, "/usr/bin/wslpath", "-a", captured])
       await checked([...prefix, "/bin/cp", "-a", "--no-preserve=links", `${workspace}/.`, captureTarget], Math.max(30_000, policy.timeoutMs))
-      changes = await captureWorkspaceChanges(root, captured, policy.maxInputBytes)
+      changes = captureWorkspaceChanges(before!, await scanWorkspace(captured, policy.maxInputBytes, before))
     }
     return {
       exitCode: result.code,
@@ -413,10 +519,15 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
     throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Sandbox working directory is outside workspace")
   }
   await fs.mkdir(mountRoot, { recursive: true })
-  await fs.cp(root, workspace, { recursive: true, dereference: false, verbatimSymlinks: true })
-  const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
-  const stopObserving = watchArtifact(workspace, request.observationArtifact)
+  let stopObserving = async () => {}
   try {
+    await fs.cp(root, workspace, { recursive: true, dereference: false, verbatimSymlinks: true })
+    const before = request.captureChanges || request.inputBinding ? await scanWorkspace(workspace, policy.maxInputBytes) : undefined
+    if (request.inputBinding) admitInputs(before!, request.inputBinding)
+    const checkedAt = new Date().toISOString()
+    const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
+    // No command or case event runs before admitting the actual copied tree.
+    stopObserving = watchArtifact(workspace, request.observationArtifact)
     const result = await execute(
       [
         "unshare",
@@ -444,9 +555,9 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
       ],
       { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
     )
-    const changes = request.captureChanges
-      ? await captureWorkspaceChanges(root, workspace, policy.maxInputBytes)
-      : undefined
+    const after = before ? await scanWorkspace(workspace, policy.maxInputBytes, request.captureChanges ? before : undefined) : undefined
+    const changes = request.captureChanges ? captureWorkspaceChanges(before!, after!) : undefined
+    const receipt = request.inputBinding ? inputReceipt(before!, after!, request.inputBinding, checkedAt) : undefined
     return {
       exitCode: result.code,
       stdout: result.stdout,
@@ -464,6 +575,7 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
         inputBytes,
       },
       ...(changes ? { changes } : {}),
+      ...(receipt ? { inputReceipt: receipt } : {}),
     }
   } finally {
     try { await stopObserving() } finally {
@@ -476,10 +588,12 @@ export class SandboxManager {
   async run(request: SandboxRequest): Promise<SandboxResult> {
     if (request.command.includes("\0")) throw new SandboxError("SANDBOX_POLICY_DENIED", "Sandbox command contains NUL")
     const policy = isolationPolicy(request.config)
+    if (request.inputBinding !== undefined) request = { ...request, inputBinding: validateInputBinding(request.inputBinding) }
     const input = await validateSandboxWorkspace(request.workspace, policy.maxInputBytes)
     request.signal?.throwIfAborted()
     const backend = policy.strictBackend === "auto" ? (process.platform === "win32" ? "wsl2" : "namespace") : policy.strictBackend
     if (backend === "wsl2") {
+      if (request.inputBinding) throw new SandboxError("SANDBOX_UNAVAILABLE", "Pinned execution input verification requires the namespace backend")
       if (request.readonlyResource || request.observationArtifact) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
       if (process.platform !== "win32") throw new SandboxError("SANDBOX_UNAVAILABLE", "WSL2 backend requires Windows")
       return wslRun(request, policy, input.root, input.bytes)

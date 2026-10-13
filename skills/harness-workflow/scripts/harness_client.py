@@ -21,7 +21,7 @@ MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "s
 # Only CLI syntax lives here. Domain payloads and policy semantics belong to Harness.
 OPTIONS = {
     "start": {"domain": "str", "goal": "str", "workspace": "str", "mode": "str",
-              "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json",
+              "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json", "analysis_selection": "json",
               "required_check": "repeat", "deferred_check": "repeat", "policy_id": "str",
               "predecessor_run_id": "str", "policy_change_reason": "str", "continuation_reason": "str", "capture_baseline": "bool"},
     "invoke": {"request": "json"},
@@ -32,10 +32,11 @@ OPTIONS = {
     "list-runs": {"offset": "int", "limit": "int"},
     **{name: {"run_id": "str", "data": "json"} for name in ("observe", "revise", "check", "retire-check", "assess")},
     **{name: {"run_id": "str"} for name in ("submit", "verify", "resume")},
+    "resume": {"run_id": "str", "view": "str", "analysis_selection": "json"},
     "verify": {"run_id": "str", "compare_baseline": "bool", "expected_candidate_hash": "str"},
     "cancel": {"run_id": "str", "job_id": "str"},
     "status": {"run_id": "str", "job_id": "str", "check_workspace": "bool", "view": "str"},
-    "records": {"run_id": "str", "kind": "str", "job_id": "str", "offset": "int", "limit": "int"},
+    "records": {"run_id": "str", "kind": "str", "job_id": "str", "offset": "int", "limit": "int", "view": "str", "detail": "json"},
     "cleanup": {"run_id": "str", "apply": "bool", "min_age_seconds": "int"},
     "finish": {"run_id": "str", "outcome": "str", "summary": "str", "assessment": "json"},
 }

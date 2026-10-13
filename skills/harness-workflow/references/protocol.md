@@ -92,6 +92,56 @@ is returned as `legacy_full_only`, without converting old records to the new
 storage or issuing a delta cursor. `resume`, `status --view full` and `records`
 remain available. Do not count response bytes as billed tokens or model quality.
 
+After restoring context, use `resume` arguments `{"view":"compact"}` for repeated
+progress checks. `summary` remains the default and includes fuller working
+context. Compact `details.snapshot` identifies the source; it is not a cursor
+proving that the Host has received the omitted context.
+
+For large records, `records` with `view: "references"` returns
+`record-projection-v1` items. Each has `source` (`run_id`, `kind`, `record_id`,
+`record_digest`), `data` and `detail_refs`. Null placeholders in `data` are
+replaced by details identified by a JSON `path` and `sha256`. Request only the
+details needed for the next decision, instead of automatically downloading all
+records. Normal `view: "full"` reads remain available.
+
+To read a detail, keep the same Run and kind, combine `record_id`/`record_digest`
+from `source` with `path`/`sha256` from that detail reference, and send them as a
+JSON object in `detail`. For example, create a binding-aware request with:
+
+```sh
+python3 <skill>/scripts/harness_client.py request --binding /absolute/task-binding.json \
+  --operation records --arguments 'json:{"kind":"measurements","view":"references","limit":5}' \
+  --output /absolute/measurement-refs.json
+```
+
+After calling that request, the next request's arguments can be:
+
+```json
+{
+  "kind": "measurements",
+  "detail": {
+    "record_id": "OBSERVATION_ID_FROM_SOURCE",
+    "record_digest": "DIGEST_FROM_SOURCE",
+    "path": ["report", "observation", "result", "findings", 0, "observed"],
+    "sha256": "HASH_FROM_DETAIL_REFERENCE",
+    "offset": 0,
+    "limit": 4096
+  }
+}
+```
+
+Use the exact returned path, not the example path. A detail request omits the
+outer `view`, `job_id`, `offset` and `limit`; its byte range belongs inside
+`detail`. Responses use `record-detail-chunk-v1` with `base64-canonical-json`
+encoding. Decode chunks to bytes and append them at their returned offsets;
+follow `next_offset` only if the complete detail is needed. UTF-8/JSON decoding
+and SHA-256 verification apply to the assembled bytes, which can split a
+multibyte character or JSON token. Restore the value at its exact path. Full
+record reconstruction must also match `record_digest` (the Python reference
+decoder is `harness_external.detail_projection.restore`). If Core returns
+`DETAIL_CHANGED`, discard partial bytes and inspect a fresh projection; never
+combine chunks from different versions. Read requests use no action/request ID.
+
 For configured pytest checks, read `records` with `kind: "cases"` and the Job ID.
 Job results include `requirement_observations`. Check whether declared cases were
 discovered, selected and executed; preserve missing, skipped, errored and incomplete
@@ -152,7 +202,7 @@ without pinned acceptance tests are inconclusive, not proof of improvement.
 
 Arguments use the CLI's option names with underscores: `run_id`, `check_workspace`,
 `execution_checks` (inside Develop parameters), etc. JSON options (`parameters`, `data`,
-`budget`, `constraints`, `provenance`, `assessment`) take real objects/arrays here,
+`budget`, `constraints`, `provenance`, `assessment`, `analysis_selection`, `detail`) take real objects/arrays here,
 not paths or pre-encoded JSON strings. The helper handles encoding without a shell.
 
 ## Existing Run, revisions and measurements
@@ -201,6 +251,36 @@ Knowledge Map with question types, applicability and source hints. It neither re
 project files nor generates questions. The Host derives the actual Needs and uses
 its own tools. A map entry is not a mandated step, source truth or completion gate.
 
+`analysis_selection` is an optional top-level argument of `start` and `resume`,
+separate from contract `parameters`. For example, a binding-aware read can use:
+
+```sh
+python3 <skill>/scripts/harness_client.py request --binding /absolute/task-binding.json \
+  --operation resume --arguments 'json:{"view":"compact","analysis_selection":{"perspectives":["change"]}}' \
+  --output /absolute/change-advice.json
+```
+
+Call that saved request normally. It returns the selected advice under
+`domain_preparation.analysis_guidance`, including with `view: compact`.
+Develop perspective IDs are `outcome`, `existing_behavior`, `design`, `change`,
+`verification`; knowledge IDs are `compatibility`, `structure`, `runtime`,
+`recovery`, `verification`. Select useful IDs from the task, not a fixed quota.
+If perspectives are supplied and knowledge is omitted, their linked knowledge
+is included. To request only knowledge, use e.g.
+`{"perspectives":[],"knowledge":["runtime"]}`. Explicit lists are respected;
+empty lists omit those entries, while `{}` or no selection returns the full map.
+Unknown/duplicate IDs fail explicitly.
+
+Selection changes only the response. Core keeps the canonical map for lossless
+`context` restoration; subsequent reads can choose another subset without a
+revision, verification attempt or action budget charge. `source_map_hash`
+identifies that stored map and `map_hash` identifies the selected view. A resumed
+selection uses the Run's recorded advice, even when the installed map has changed.
+Legacy Domains without this optional capability retain their default responses
+and return `DOMAIN_ANALYSIS_UNSUPPORTED` for a requested selection. A `start`
+request still needs its normal action ID; changing its selection changes its
+replay payload. Use read-only `resume` to choose a different view of that Run.
+
 Need discovery uses the Host's ordinary reasoning, not a registration API.
 Use the Domain's quality cues and analysis perspectives to identify an unresolved
 question that affects a concrete decision, select relevant knowledge sources, and
@@ -225,8 +305,8 @@ Use the same context with these operations/arguments:
 | `submit` | none | required |
 | `verify` | optional `compare_baseline`, `expected_candidate_hash`; returns `job_id` | required |
 | `status` | optional `job_id`, `check_workspace: true`, `view: "summary"` | omit |
-| `resume` | none; query only, does not restart a worker | omit |
-| `records` | `kind`, optional `job_id` (measurements only), `offset`, `limit` | omit |
+| `resume` | optional `view: "summary" / "compact"`, `analysis_selection`; query only | omit |
+| `records` | `kind`; page: optional `job_id` (measurements/cases), `offset`, `limit`, `view: "full" / "references"`; detail: `detail` object | omit |
 | `observe` | `data: {"note": "Decision and next step"}` | required |
 | `assess` | `data` below | required |
 | `finish` | `outcome: "completed" / "partial" / "abandoned"`, optional `summary`, `assessment` | required |

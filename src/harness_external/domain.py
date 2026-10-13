@@ -315,10 +315,13 @@ class DevelopModule:
         return {"effective": effective_config(self, exclude={"_check_preparation"}), "identity_file_ids": list(self.identity_file_ids),
                 "check_preparation": self._checks.identity()}
 
-    def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None):
+    def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None, analysis_selection=None):
         token = _COMPILATION.set({})
         try:
-            return self._compile_acceptance(goal, parameters, verifier, policy=policy, intent=intent)
+            result = self._compile_acceptance(goal, parameters, verifier, policy=policy, intent=intent)
+            if analysis_selection is not None:
+                result["analysis_guidance"] = self.select_analysis_guidance(result["analysis_guidance"], analysis_selection)
+            return result
         finally:
             _COMPILATION.reset(token)
 
@@ -400,8 +403,11 @@ class DevelopModule:
         result["contract"]["contract_hash"] = canonical_hash({k: v for k, v in result["contract"].items() if k != "contract_hash"})
         return result
 
-    def prepare(self, goal, parameters, verifier, *, exploratory=False, intent=None):
+    def prepare(self, goal, parameters, verifier, *, exploratory=False, intent=None, analysis_selection=None):
         from . import develop_analysis
+        advice = develop_analysis.guidance()
+        if analysis_selection is not None:
+            advice = self.select_analysis_guidance(advice, analysis_selection)
         if intent is not None:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
@@ -428,7 +434,7 @@ class DevelopModule:
         if not exploratory or not missing:
             contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks)
             result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"],
-                      "analysis_guidance": develop_analysis.guidance()}
+                      "analysis_guidance": advice}
             if "requirement_summary" in contract:
                 result["requirements_summary"] = copy.deepcopy(contract["requirement_summary"])
             if perspective:
@@ -445,13 +451,22 @@ class DevelopModule:
                               "caller_observations_are_evidence": False, "ready_attestation": False},
                     "limitations": ["Local unsigned record; same-user tampering is outside this assurance.",
                                     "Goal interpretation and caller-authored tests do not prove goal coverage or independence."]}
-        result = {"status": "needs_input", "questions": questions, "contract": contract, "analysis_guidance": develop_analysis.guidance(),
+        result = {"status": "needs_input", "questions": questions, "contract": contract, "analysis_guidance": advice,
                   "available_operations": ["submit", "verify"] if inputs else []}
         if "requirements" in parameters or "coverage" in parameters:
             result["requirements_summary"] = develop_requirements.attach(contract, requirements, None,
                                                                          source="caller_proposal", pending=True)
         contract["contract_hash"] = canonical_hash(contract)
         return result
+
+    def select_analysis_guidance(self, guidance, selection):
+        """Pure optional view capability; no contract, Run or execution input."""
+        from .develop_analysis import select_guidance
+        fields(selection, {"perspectives", "knowledge"})
+        try:
+            return select_guidance(guidance, **selection)
+        except ValueError as error:
+            raise HarnessError("ANALYSIS_SELECTION_INVALID", str(error)) from error
 
     def normalize_need(self, details, contract):
         from .develop_need_compat import normalize

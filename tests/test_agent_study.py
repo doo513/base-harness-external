@@ -73,7 +73,10 @@ def test_study_grader_measures_only_sandbox_observations(tmp_path, monkeypatch, 
         assert argv[-1].endswith("external-harness-sandbox.ts")
         transported = json.loads((Path(request["workspace"]) / "_study_requests.json").read_text())
         assert transported == [{"operation": "probe"}]  # no expected answers in subject environment
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "completed", "capture": {"exitCode": 0, "stdout": stdout}}), "")
+        binding = request["inputBinding"]
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "completed", "input_receipt": {
+            "scope_hash": binding["scope_hash"], "input_hash": binding["input_hash"], "unchanged": True},
+            "capture": {"exitCode": 0, "stdout": stdout}}), "")
     monkeypatch.setattr(study.subprocess, "run", captured)
     result = study.grade(tmp_path, task, workspace, tmp_path / "grade.json")
     assert result["all_passed"] is expected and len(calls) == 1

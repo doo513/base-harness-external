@@ -26,22 +26,26 @@ def list_runs(api, *, offset=0, limit=20):
     return {"items": items, "total": total, "next_offset": offset + len(items) if offset + len(items) < total else None}
 
 
-def resume(api, run_id, *, view="summary"):
+def resume(api, run_id, *, view="summary", analysis_selection=None):
     require(view in {"summary", "compact"}, "INVALID_VIEW", "Resume view is summary or compact")
     with api._read_run(run_id) as (connection, run):
         latest = run["interpretations"][-1]
         checks = semantics.current_checks(run)
         checked, counts, gate_results = read_core.summary(api, connection, run)
+        preparation = api._analysis_view(run["intent"]["domain_id"], run["domain_preparation"], analysis_selection)
         if view == "compact":
             from .context import cursor
             from .views import compact_resume
             snapshot = getattr(run, "head", None)
-            return compact_resume(run, checked, counts, gate_results, cursor(snapshot) if snapshot else None)
+            result = compact_resume(run, checked, counts, gate_results, cursor(snapshot) if snapshot else None)
+            if analysis_selection is not None:
+                result["domain_preparation"] = preparation
+            return result
         jobs = [job_view(job) for job in checked]
         return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
                 "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),
                 "interpretation": {key: latest[key] for key in ("ref", "goal_summary", "assumptions", "open_questions")},
-                "domain_questions": run["domain_questions"], "domain_preparation": run["domain_preparation"],
+                "domain_questions": run["domain_questions"], "domain_preparation": preparation,
                 "limits": run["limits"], "usage": {"actions": run["actions"], "verification_attempts": run["verification_attempts"]},
                 "candidate": {key: run["candidate"][key] for key in ("candidate_id", "candidate_hash", "subject")} if run["candidate"] else None,
                 "baseline": {key: run["baseline"][key] for key in ("candidate_id", "candidate_hash", "subject")} if run.get("baseline") else None,

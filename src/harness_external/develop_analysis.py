@@ -85,18 +85,43 @@ def guidance(*, perspectives=None, knowledge=None):
     body = decode(_GUIDANCE_JSON)
     if perspectives is None and knowledge is None:
         return body
-    for selection, index in ((perspectives, PERSPECTIVE_INDEX), (knowledge, KNOWLEDGE_INDEX)):
+    return select_guidance(body, perspectives=perspectives, knowledge=knowledge)
+
+
+def select_guidance(source, *, perspectives=None, knowledge=None):
+    """Project a supplied map so resumed reads use their stored advice version."""
+    body = decode(canonical_bytes(source).decode("utf-8"))
+    if (not isinstance(body, dict) or body.get("schema_version") != "develop-analysis-v2"
+            or body.get("map_hash") != canonical_hash({key: value for key, value in body.items() if key != "map_hash"})):
+        raise ValueError("Invalid or unsupported analysis guidance source")
+    if perspectives is None and knowledge is None:
+        return body
+    indexes = []
+    for name in ("analysis_perspectives", "knowledge_map"):
+        items = body.get(name)
+        if (not isinstance(items, list) or any(not isinstance(item, dict) or not isinstance(item.get("id"), str) for item in items)
+                or len({item["id"] for item in items}) != len(items)):
+            raise ValueError("Invalid analysis guidance inventory")
+        indexes.append({item["id"]: item for item in items})
+    for selection, index in ((perspectives, indexes[0]), (knowledge, indexes[1])):
         if selection is not None and (not isinstance(selection, (list, tuple))
                 or any(not isinstance(key, str) or key not in index for key in selection)
                 or len(set(selection)) != len(selection)):
             raise ValueError("Unknown or duplicate advisory map ID")
+    source_hash = body["map_hash"]
     if perspectives is not None:
         selected = set(perspectives)
         body["analysis_perspectives"] = [item for item in body["analysis_perspectives"] if item["id"] in selected]
     if knowledge is None and perspectives is not None:
-        knowledge = {key for item in body["analysis_perspectives"] for key in item["knowledge_refs"]}
+        references = [item.get("knowledge_refs") for item in body["analysis_perspectives"]]
+        if any(not isinstance(refs, list) or any(not isinstance(key, str) or key not in indexes[1] for key in refs) for refs in references):
+            raise ValueError("Invalid analysis guidance knowledge references")
+        knowledge = {key for refs in references for key in refs}
     if knowledge is not None:
         selected = set(knowledge)
         body["knowledge_map"] = [item for item in body["knowledge_map"] if item["id"] in selected]
+    body["source_map_hash"] = source_hash
+    body["selection"] = {"perspectives": [item["id"] for item in body["analysis_perspectives"]],
+                         "knowledge": [item["id"] for item in body["knowledge_map"]]}
     body["map_hash"] = canonical_hash({key: value for key, value in body.items() if key != "map_hash"})
     return body

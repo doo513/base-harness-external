@@ -56,6 +56,19 @@ class Harness:
             result["analysis_guidance"] = copy.deepcopy(preparation["analysis_guidance"])
         return result
 
+    def _analysis_view(self, domain_id, preparation, selection):
+        if selection is None:
+            return preparation
+        require(isinstance(selection, dict) and len(canonical_bytes(selection)) <= 16000,
+                "ANALYSIS_SELECTION_INVALID", "Analysis selection must be a bounded object")
+        project = getattr(self.domains.resolve(domain_id), "select_analysis_guidance", None)
+        require(callable(project) and isinstance(preparation.get("analysis_guidance"), dict),
+                "DOMAIN_ANALYSIS_UNSUPPORTED", "Domain has no selectable analysis guidance")
+        selected = project(copy.deepcopy(preparation["analysis_guidance"]), copy.deepcopy(selection))
+        require(isinstance(selected, dict) and len(canonical_bytes(selected)) <= 32000,
+                "DOMAIN_ANALYSIS_GUIDANCE", "Selected Domain guidance must be a bounded object")
+        return {**preparation, "analysis_guidance": selected}
+
     def _reconcile(self, connection, run):
         job_id = run.get("active_job")
         if not job_id:
@@ -176,7 +189,7 @@ class Harness:
               mode: str | None = None, required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
               constraints: list[str] | None = None, provenance: dict | None = None, policy_id: str | None = None,
               predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False,
-              continuation_reason: str | None = None):
+              continuation_reason: str | None = None, analysis_selection: dict | None = None):
         # Request identity does not depend on mutable registry contents. A replay
         # returns the originally selected policy, even after operator revision.
         requested_mode = mode
@@ -203,6 +216,8 @@ class Harness:
                 "STATE_WORKSPACE_OVERLAP", "Run state and workspace must be disjoint directories")
         request = {"operation": "start", "domain_id": domain_id, "goal": goal,
                    "workspace": str(source), "parameters": parameters, "budget": budget}
+        if analysis_selection is not None:
+            request["analysis_selection"] = analysis_selection
         if mode not in (None, "strict") or required_checks:
             request.update(mode=mode, required_checks=required_checks or [])
         if constraints:
@@ -260,6 +275,8 @@ class Harness:
             require(contract["original_goal"] == goal and contract["domain_id"] == domain_id, "DOMAIN_RESULT_BINDING", "Domain changed intent identity")
             observation_links.validate(contract.get("observation_links"), [check.get("check_id") for check in contract["checks"]])
             adapter_implementations = self.adapters.pin_implementations(contract["checks"])
+            canonical_preparation = self._domain_preparation_view(preparation)
+            preparation_view = self._analysis_view(domain_id, canonical_preparation, analysis_selection)
             bound = limits(budget)
         require(not capture_baseline or bool(contract["inputs"]), "NEEDS_INPUT", "Declare baseline input files before capturing the original")
         # File I/O must not block checkpoints in unrelated Runs. Only publish the
@@ -292,12 +309,12 @@ class Harness:
                              deferred_checks=deferred_checks, domain_identity=self.domains.identity(domain_id), policy_provenance=provenance,
                              questions=preparation["questions"], domain_revision=module.revision, initial_intent=original_intent,
                              acceptance_binding=binding)
-            run["domain_preparation"] = self._domain_preparation_view(preparation)
+            run["domain_preparation"] = canonical_preparation
             if preparation["status"] == "needs_input":
                 run["phase"] = "waiting_input"
             result = response(run_id=run_id, contract=contract, phase=run["phase"], limits=bound,
                               interpretation=run["interpretations"][-1], policy=run["policy"], questions=run["domain_questions"],
-                              domain_preparation=run["domain_preparation"],
+                              domain_preparation=preparation_view,
                               acceptance=acceptance.view(binding),
                               baseline={key: run["baseline"][key] for key in ("candidate_id", "candidate_hash", "subject")} if capture_baseline else None)
             published = []
@@ -760,8 +777,8 @@ class Harness:
     def list_runs(self, *, offset=0, limit=20):
         return response(**queries.list_runs(self, offset=offset, limit=limit))
 
-    def resume(self, run_id, *, view="summary"):
-        return response(**queries.resume(self, run_id, view=view))
+    def resume(self, run_id, *, view="summary", analysis_selection=None):
+        return response(**queries.resume(self, run_id, view=view, analysis_selection=analysis_selection))
 
     def context(self, run_id, *, after=None, page=None, limit=20):
         from .context import read

@@ -33,7 +33,8 @@ def test_outer_sandbox_timeout_uses_monotonic_clock_and_closes_streams(tmp_path,
     started = time.monotonic()
     with pytest.raises(HarnessError) as error:
         worker.execute_sandbox({"argv": ["python3", "-c", "pass"], "cwd": ".", "timeout_seconds": 1},
-                               tmp_path, tmp_path, threading.Event(), .05)
+                               tmp_path, tmp_path, threading.Event(), .05,
+                               worker.execution_inputs.make_binding([], {"test": "outer-timeout"}))
     assert error.value.code == "VERIFICATION_CANCELLED"
     assert time.monotonic() - started < 1
     assert child.stopped and all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
@@ -83,3 +84,39 @@ def test_post_measurement_integrity_failure_never_publishes_success(tmp_path, mo
     assert state["job"]["status"] == "error"
     assert not api.records(run, "measurements")["items"]
     assert api.resume(run)["gates"]["status"] == "unsatisfied"
+
+
+def test_changed_snapshot_before_first_check_is_rejected(tmp_path, monkeypatch):
+    api, run, job = setup(tmp_path, monkeypatch)
+    candidate = api.status(run)["run"]["candidate"]
+    target = api.store.directory(run) / candidate["candidate_id"] / "payload/data"
+    target.chmod(0o644)
+    target.write_text("changed before checking", encoding="utf-8")
+    worker.execute_job(api.store.root, job)
+    assert api.status(run, job)["job"]["status"] == "error"
+    assert api.records(run, "measurements")["items"] == []
+
+
+@pytest.mark.parametrize("after_check", [1, 2])
+def test_change_after_checkpoint_is_detected_before_next_check_or_final_result(tmp_path, monkeypatch, after_check):
+    api, run, job = setup(tmp_path, monkeypatch)
+    candidate = api.status(run)["run"]["candidate"]
+    target = api.store.directory(run) / candidate["candidate_id"] / "payload/data"
+    original = worker.Store.checkpoint
+    completed = 0
+    def change_after_checkpoint(store, *args, **kwargs):
+        nonlocal completed
+        result = original(store, *args, **kwargs)
+        completed += 1
+        if completed == after_check:
+            target.chmod(0o644)
+            target.write_text("changed between integrity boundaries", encoding="utf-8")
+        return result
+    monkeypatch.setattr(worker.Store, "checkpoint", change_after_checkpoint)
+    worker.execute_job(api.store.root, job)
+    status = api.status(run, job)["job"]
+    assert status["status"] == "error" and status["result"]["status"] == "incomplete"
+    assert len(api.records(run, "measurements")["items"]) == after_check
+    with pytest.raises(HarnessError):
+        api.finish(run, "finish", outcome="completed")
+    assert api.status(run)["run"]["status"] != "finished"

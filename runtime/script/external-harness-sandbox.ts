@@ -1,7 +1,7 @@
 // Narrow reuse adapter. No Host, model provider, session, plugin, or UI imports.
 import { randomUUID } from "node:crypto"
 import path from "node:path"
-import { SandboxError, StrictSandbox } from "../packages/security/src/sandbox"
+import { SandboxError, StrictSandbox, validateInputBinding } from "../packages/security/src/sandbox"
 
 const controller = new AbortController()
 process.once("SIGTERM", () => controller.abort())
@@ -9,9 +9,9 @@ process.once("SIGINT", () => controller.abort())
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 try {
   const raw = await Bun.stdin.text()
-  if (Buffer.byteLength(raw) > 128 * 1024) throw new Error("SANDBOX_REQUEST_LIMIT")
+  if (Buffer.byteLength(raw) > 640 * 1024) throw new Error("SANDBOX_REQUEST_LIMIT")
   const input = JSON.parse(raw)
-  const required = ["argv", "cwd", "timeoutMs", "workspace"]
+  const required = ["argv", "cwd", "timeoutMs", "workspace", "inputBinding"]
   if (!required.every(key => key in input) || Object.keys(input).some(key => ![...required, "readonlyResource", "observationArtifact"].includes(key)) ||
       typeof input.workspace !== "string" || typeof input.cwd !== "string" ||
       !Array.isArray(input.argv) || !input.argv.length || !input.argv.every((v: unknown) => typeof v === "string" && !v.includes("\0")) ||
@@ -24,6 +24,7 @@ try {
   const startedAt = new Date().toISOString()
   const result = await StrictSandbox.run({
     workspace: input.workspace, cwd: path.resolve(input.workspace, input.cwd),
+    inputBinding: validateInputBinding(input.inputBinding),
     // A trusted trailing marker distinguishes a command that deliberately exits
     // 124 from the surrounding GNU timeout stopping the command/shell group.
     command: "printf '%s\\n' " + quote(marker) + "; " + input.argv.map(quote).join(" ") +
@@ -40,17 +41,19 @@ try {
   if (!result.stdout.startsWith(marker + "\n")) {
     process.stdout.write(JSON.stringify({ status: "not_run", reason: "SANDBOX_SETUP_FAILED", provenance: result.provenance }) + "\n")
   } else {
-    const changedInputs = result.changes?.filter((change) => change.beforeHash !== null && change.afterHash !== change.beforeHash).map((change) => change.path) ?? []
+    if (!result.inputReceipt) throw new Error("EXECUTION_INPUT_RECEIPT_MISSING")
+    const changedInputs = result.inputReceipt.changed_inputs
     const altered = changedInputs.length > 0
     const ending = "\n" + endMarker + ":" + result.exitCode + "\n"
     const returned = result.stdout.endsWith(ending)
     const timedOut = !returned && result.exitCode === 124
     const error = altered ? { code: "TEST_MODIFIED_INPUT", message: "Submitted inputs changed in the test sandbox: " + changedInputs.join(", ") }
       : !returned ? { code: timedOut ? "COMMAND_TIMEOUT" : "COMMAND_INTERRUPTED", message: "Command did not return through its Sandbox wrapper" } : undefined
-    process.stdout.write(JSON.stringify({ status: error ? "error" : "completed", provenance: result.provenance, capture: {
-      argv: input.argv, cwd: input.cwd, startedAt, finishedAt: new Date().toISOString(), execution: "completed",
+    process.stdout.write(JSON.stringify({ status: error ? "error" : "completed", provenance: result.provenance,
+      input_receipt: result.inputReceipt, capture: {
+      argv: input.argv, cwd: input.cwd, startedAt, finishedAt: new Date().toISOString(),
       stdout: result.stdout.slice(marker.length + 1, returned ? -ending.length : undefined), stderr: result.stderr,
-      ...(error ? { execution: "error", error } : { exitCode: result.exitCode }),
+      ...(error ? { execution: "error", error } : { execution: "completed", exitCode: result.exitCode }),
     } }) + "\n")
   }
 } catch (error) {

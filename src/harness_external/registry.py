@@ -40,6 +40,11 @@ class NeedAnalysisDomain(Protocol):
     def normalize_need(self, details: dict, contract: dict) -> dict: ...
 
 
+class AnalysisGuidanceDomain(Protocol):
+    """Optional pure view over a stored map; Core does not interpret selectors."""
+    def select_analysis_guidance(self, guidance: dict, selection: dict) -> dict: ...
+
+
 def effective_config(module, *, exclude=()):
     # Merge before filtering so overriding descriptors cannot reveal shadowed
     # parent attributes. Dynamic semantic values need an explicit identity_config.

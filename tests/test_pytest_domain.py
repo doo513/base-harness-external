@@ -14,6 +14,7 @@ from harness_external.errors import HarnessError
 from harness_external.pytest_adapter import Collector, PytestAdapter
 from harness_external.service import Harness
 from harness_external.worker import execute_job
+from execution_input_fixtures import inputs as input_binding
 
 
 def normalize(value, inputs):
@@ -115,7 +116,7 @@ def test_live_adapter_collects_and_executes_without_host_pytest_in_sandbox(tmp_p
     state.mkdir()
     check = normalize({"id": "tests", "paths": ["test_cases.py"]}, ["test_cases.py"])
     observed = []
-    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda case, _: observed.append(case))
+    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda case, _: observed.append(case), input_binding=input_binding(payload))
     assert capture["status"] == "completed", capture
     assert summary["collection_complete"] and summary["session_complete"], summary
     assert {case["outcome"] for case in observed} == {"passed", "failed", "skipped"}
@@ -279,7 +280,7 @@ def test_live_runtime_is_readonly_and_candidate_cannot_shadow_pytest(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
     check = normalize({"id": "runtime", "paths": ["test_runtime.py"]}, ["test_runtime.py", "pytest.py"])
-    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda *args: None)
+    capture, summary = execute(check, payload, state, threading.Event(), 30, bind_check(check, state), lambda *args: None, input_binding=input_binding(payload))
     assert capture["capture"]["exitCode"] == 0, capture
     assert summary["cases"][0]["outcome"] == "passed"
 

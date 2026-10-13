@@ -253,12 +253,23 @@ def grade(root, task, workspace, destination):
         shutil.copy2(root / "private/subject_driver.py", payload / "_study_driver.py")
         write_json(payload / "_study_requests.json", [item["request"] for item in task["cases"]])
         request = {"workspace": str(payload), "cwd": ".", "argv": ["python3", "_study_driver.py", "_study_requests.json"], "timeoutMs": 60000}
+        # The independent grader pins its prepared inputs too; the shared bridge
+        # deliberately does not support an unbound success fallback.
+        files = [{"path": name, "sha256": value, "size": (payload / name).stat().st_size,
+                  "executable": bool((payload / name).stat().st_mode & 0o111)}
+                 for name, value in sorted(file_set(payload).items(), key=lambda pair: pair[0].encode("utf-8"))]
+        request["inputBinding"] = {"schema_version": "execution-input-v1", "files": files,
+                                   "scope_hash": digest(str(payload).encode("utf-8")), "input_hash": digest(encoded(files))}
         process = subprocess.run([shutil.which("bun"), "run", str(root / "sources/after/runtime/script/external-harness-sandbox.ts")],
                                  input=json.dumps(request), capture_output=True, text=True, timeout=90)
         receipt = json.loads(process.stdout)
+        input_receipt = receipt.get("input_receipt") or {}
         capture = receipt.get("capture", {})
         observed = None
-        if receipt.get("status") == "completed" and capture.get("exitCode") == 0:
+        bound = (input_receipt.get("scope_hash") == request["inputBinding"]["scope_hash"]
+                 and input_receipt.get("input_hash") == request["inputBinding"]["input_hash"]
+                 and input_receipt.get("unchanged") is True)
+        if bound and receipt.get("status") == "completed" and capture.get("exitCode") == 0:
             marker = "__STUDY_OBSERVATIONS__"
             lines = [line[len(marker):] for line in capture.get("stdout", "").splitlines() if line.startswith(marker)]
             if len(lines) == 1:

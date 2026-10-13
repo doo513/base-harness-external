@@ -15,6 +15,7 @@ from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, fields, integer, relative_path, require
 from .adapter_ports import AdapterUnavailable
 from .adapter_registry import builtin_adapter_registry, validate_binding
+from . import execution_inputs
 
 MAX_REPORT_BYTES = 8 * 1024 * 1024
 MAX_CASES = 30000
@@ -94,7 +95,7 @@ def _case(case):
     return copy.deepcopy(case)
 
 
-def execute(check, payload, state_root, abort, remaining, binding, on_case, registry=None, *, execution=None):
+def execute(check, payload, state_root, abort, remaining, binding, on_case, registry=None, *, execution=None, input_binding=None):
     from .worker import clean_environment, stop_child
     deadline = time.monotonic() + remaining
     registry = registry if registry is not None else builtin_adapter_registry()
@@ -136,6 +137,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
         require(not abort.is_set() and remaining > 0, "VERIFICATION_CANCELLED", "Verification expired during resource preparation")
         request = {"workspace": str(payload), "argv": execution["argv"], "cwd": execution["cwd"],
                    "timeoutMs": max(1, min(int(remaining * 1000), execution["timeout_seconds"] * 1000)),
+                   "inputBinding": execution_inputs.validate_binding(input_binding),
                    "readonlyResource": str(resources), "observationArtifact": {"path": artifact_path, "maxBytes": MAX_REPORT_BYTES}}
         environment = clean_environment()
         environment["XDG_STATE_HOME"] = str(Path(state_root) / "sandbox-state")
@@ -202,6 +204,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
                         emit(case)
                 else:
                     require(capture is None and message.get("status") in {"completed", "error", "not_run"}, "CASE_REPORT_PROTOCOL", "Invalid final Sandbox receipt")
+                    execution_inputs.validate_receipt(message, input_binding)
                     capture = message
             child.wait(timeout=5)
         except Exception as error:

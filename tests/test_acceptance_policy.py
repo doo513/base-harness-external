@@ -54,7 +54,8 @@ def fake_sandbox(check, payload, *args):
     # actual adapter and proves the positive and negative process outcomes.
     assert "class SumTest" in (payload / "acceptance_tests/test_sum.py").read_text()
     correct = "return a + b" in (payload / "calculator.py").read_text()
-    return {"status": "completed", "provenance": {"fixture": True}, "capture": {
+    from execution_input_fixtures import receipt
+    return {"status": "completed", "input_receipt": receipt(args[-1]), "provenance": {"fixture": True}, "capture": {
         "argv": check["argv"], "cwd": check["cwd"], "startedAt": "2026-10-01T00:00:00Z",
         "finishedAt": "2026-10-01T00:00:01Z", "execution": "completed", "exitCode": 0 if correct else 1,
         "stdout": "", "stderr": ""}}
@@ -434,10 +435,12 @@ def test_live_command_timeout_is_not_an_ordinary_exit_124(tmp_path, monkeypatch)
     payload.mkdir()
     abort = threading.Event()
     command = {"argv": ["python3", "-c", "import time; time.sleep(10)"], "cwd": ".", "timeout_seconds": 1}
-    timed = execute_sandbox(command, payload, tmp_path / "state", abort, 15)
+    from harness_external.execution_inputs import make_binding
+    binding = make_binding([], {"test": "explicit-runtime-outcomes"})
+    timed = execute_sandbox(command, payload, tmp_path / "state", abort, 15, binding)
     assert timed["status"] == "error"
     assert timed["capture"]["error"]["code"] == "COMMAND_TIMEOUT"
     command["argv"] = ["python3", "-c", "import sys; sys.exit(124)"]
-    returned = execute_sandbox(command, payload, tmp_path / "state", abort, 15)
+    returned = execute_sandbox(command, payload, tmp_path / "state", abort, 15, binding)
     assert returned["status"] == "completed" and returned["capture"]["exitCode"] == 124
     assert returned["capture"]["stdout"] == ""

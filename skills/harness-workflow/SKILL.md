@@ -22,6 +22,10 @@ On a new session, use `context --binding ...` without a cursor and read every
 If the Host loses context, request a full transfer again; a saved binding is not
 evidence that the model remembers earlier pages. Inspect `critical` even when the
 delta is empty. The protocol explains lossless text references and snapshot pages.
+For repeated progress checks after restoring context, `resume` with `view: compact`
+returns a smaller view. Use `records` with `view: references` and fetch only needed
+`detail` references for large observations; the protocol describes chunk decoding
+and digest checks. Compact views do not replace context restoration after memory loss.
 If configuration/runtime is absent, report the missing setup. Do not guess another
 checkout, create a temporary production state store, or silently bypass Harness.
 
@@ -52,6 +56,14 @@ what you learn to the solution, revisiting assumptions when execution contradict
 them. Skip irrelevant perspectives and stop discovery when the next action is
 sufficiently supported. Ask the user when uncertainty changes authority, scope or
 the intended result rather than silently deciding it.
+
+When a useful perspective is known, pass `analysis_selection` on `start` or a
+read-only `resume` to request just those perspectives/knowledge entries. Develop
+selects linked knowledge by default. Omitting selection keeps the complete map;
+an empty object (`{}`) restores it. See the protocol for IDs and request examples.
+Advice selection is a read preference: it does not require `revise`, Need records
+or a new action ID. Original goals, constraints and verification criteria remain
+available through the normal context/contract views.
 
 This is ordinary reasoning, not a Need registration/closure workflow. No Need
 IDs, required question count or extra Harness calls are needed. Preserve a brief
