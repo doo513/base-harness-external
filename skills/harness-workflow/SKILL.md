@@ -12,20 +12,31 @@ Installation alone does not opt every unrelated task into Harness.
 
 ## Connect and prepare
 
-Read [the caller protocol](references/protocol.md) for setup and first use. Run the
-bundled `scripts/harness_client.py` with the persistent installation config. Use
+Run bundled `scripts/harness_client.py` with the persistent installation config.
+Read [the caller protocol](references/protocol.md) when setting up a connection,
+recovering an unknown outcome, or using advanced read references. Use
 `preflight` when execution capability is unknown, `bind` once for an explicitly
 selected Run, and `checkpoint` for submit/verify/wait. These helpers make no task,
-assessment or closeout decisions. Use saved `request` envelopes for other actions.
-On a new session, use `context --binding ...` without a cursor and read every
-`next_page`. Afterwards, use the returned `next_cursor` with `--after` for changes.
+assessment or closeout decisions. For other actions, `call --operation ...
+--arguments json:{...}` constructs and sends one request. Supply `--binding` for
+an existing Run; omit `run_id` from those arguments. Mutations also need an
+intentional `--action-id` and `--output REQUEST_FILE`, saved before dispatch.
+Use `call --request REQUEST_FILE` to replay that exact intent after response loss.
+On a new session, use `context --binding ... --complete` without a cursor. The
+helper validates all pages and returns lossless `data`, `texts` and `text_refs`;
+read their contents. Afterwards, use `--complete --after CURSOR` for changes.
 If the Host loses context, request a full transfer again; a saved binding is not
 evidence that the model remembers earlier pages. Inspect `critical` even when the
-delta is empty. The protocol explains lossless text references and snapshot pages.
+delta is empty. `--complete` delivers a cursor only after every page validates;
+it does not mean the model retained the delivered text.
 For repeated progress checks after restoring context, `resume` with `view: compact`
 returns a smaller view. Use `records` with `view: references` and fetch only needed
-`detail` references for large observations; the protocol describes chunk decoding
-and digest checks. Compact views do not replace context restoration after memory loss.
+`detail` references for large observations. `call --operation records --binding ...
+--arguments json:{"kind":...,"detail":...} --resolve-detail` retrieves and validates
+only the selected detail. Compact views do not replace context restoration after memory loss.
+For failure investigation, `call --operation status --binding ... --arguments
+json:{"job_id":...} --format attention` returns bounded exceptions and requirement
+links. Check its pagination, known gaps and `not_queried`; fetch details when needed.
 If configuration/runtime is absent, report the missing setup. Do not guess another
 checkout, create a temporary production state store, or silently bypass Harness.
 

@@ -784,8 +784,9 @@ class Harness:
         from .context import read
         return response(**read(self, run_id, after=after, page=page, limit=limit))
 
-    def records(self, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None):
-        return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id, view=view, detail=detail))
+    def records(self, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None, outcomes=None, subject_role=None):
+        return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id, view=view, detail=detail,
+                                        outcomes=outcomes, subject_role=subject_role))
 
     def cleanup(self, run_id, *, apply=False, min_age_seconds=3600):
         return response(**maintenance.cleanup(self.store, run_id, apply=apply, min_age_seconds=min_age_seconds))

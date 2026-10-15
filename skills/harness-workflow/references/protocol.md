@@ -39,7 +39,25 @@ mutations return `CALLER_BUSY`; Core still enforces concurrency for all clients.
 to observe that same job. `terminal` means the job ended; inspect its result, scope
 and error. Failed checks and unavailable execution are not passing evidence.
 
-For other operations, `request --binding ... --operation observe --arguments
+For other operations, one helper invocation can construct and send a request:
+
+```sh
+python3 <skill>/scripts/harness_client.py --config /absolute/client.json call \
+  --binding /absolute/task-binding.json --operation observe \
+  --arguments 'json:{"data":{"note":"Decision and next step"}}' \
+  --action-id note-1 --output /absolute/note-1.json
+```
+
+Mutations require `--output`: the normalized exact request is saved before dispatch.
+An existing identical file is reused; different content is rejected without sending.
+Responses include `caller_request` so the same file can be replayed with `call
+--request`, including after a timeout. A killed foreground process can also leave
+that known output file; do not invent a new action ID. Read operations need neither
+an action ID nor an output file. This removes a helper process, not necessarily a
+model turn: a Host could already batch shell commands. The helper does not retry
+automatically or store another authoritative Run ledger.
+
+The original two-step form remains available: `request --binding ... --operation observe --arguments
 'json:{"data":{"note":"Decision and next step"}}' --action-id note-1 --output
 /absolute/note-1.json` saves the exact envelope. Send it with `call --request` and
 reuse that file after response loss. Existing files are never overwritten. Bindings
@@ -68,6 +86,19 @@ python3 <skill>/scripts/harness_client.py context --binding /absolute/task-bindi
 python3 <skill>/scripts/harness_client.py context --binding /absolute/task-binding.json --page PAGE_TOKEN
 python3 <skill>/scripts/harness_client.py context --binding /absolute/task-binding.json --after CURSOR
 ```
+
+For a single validated transfer, add `--complete` (no `--page`): the helper follows
+all pages, validates restored entry/text hashes and coalesces long strings across
+pages. The result is `harness-client-context-v1`: `data`, `text_refs` and `texts`
+use short local aliases (`t0`, `t1`, ...), which are not Core IDs. `data_hash` covers
+the exact restored dictionary. Read the referenced texts; machine consumers may
+use the bundled `expand_context()` decoder. Goals, constraints, checks and history
+are preserved. `critical` remains the latest returned Core status; an older
+`snapshot_critical` remains distinct. `--complete --after CURSOR` contains only
+changes, not a complete historical document. The helper stores no cursor or data
+cache in the binding and returns no complete cursor on corruption, byte/page limit
+or changed snapshot. `--max-pages` bounds the sequence; legacy full-only transfers
+retain a null cursor. Plain page mode remains available.
 
 Omit the cursor on a new Host session or after context loss. Follow `next_page`
 until it is null; only the last page issues `next_cursor`. Pages share one immutable
@@ -141,6 +172,31 @@ record reconstruction must also match `record_digest` (the Python reference
 decoder is `harness_external.detail_projection.restore`). If Core returns
 `DETAIL_CHANGED`, discard partial bytes and inspect a fresh projection; never
 combine chunks from different versions. Read requests use no action/request ID.
+
+The helper can perform that selected-detail assembly directly:
+
+```sh
+python3 <skill>/scripts/harness_client.py call --binding /absolute/task-binding.json \
+  --operation records --arguments /absolute/selected-detail-arguments.json --resolve-detail
+```
+
+The arguments contain only `kind` and `detail`. Resolution starts at byte zero,
+decodes UTF-8/JSON only after the full SHA-256 matches, and returns
+`harness-client-detail-v1` with `value` plus source identity. It does not resolve
+every reference automatically. A changed source returns an error, not mixed bytes.
+
+For exception-focused progress reads, use `call --operation status --binding ...
+--arguments json:{"job_id":...} --format attention`. The helper uses existing
+summary data and a bounded case query with `outcomes` and `subject_role: candidate`.
+`harness-client-attention-v1` includes observed nonpassing states, linked requirement
+IDs, error excerpts and exact detail arguments. Excerpts are not root-cause claims;
+arbitrary adapter phase data remains available by reference. `case_query.next_offset`
+and `attention_page_complete` describe pagination, not verified completion.
+Skipped/xfail/xpass outcomes are attention items, not necessarily failed policy
+checks. `not_queried` explicitly identifies omitted Run gates/assessment/limits;
+Job-only reads do not invent them. A selected historical Job is not automatically
+current evidence. This projection is for follow-up after context restoration and
+does not silently finish, repair, change criteria or hide known gaps.
 
 For configured pytest checks, read `records` with `kind: "cases"` and the Job ID.
 Job results include `requirement_observations`. Check whether declared cases were
@@ -306,7 +362,7 @@ Use the same context with these operations/arguments:
 | `verify` | optional `compare_baseline`, `expected_candidate_hash`; returns `job_id` | required |
 | `status` | optional `job_id`, `check_workspace: true`, `view: "summary"` | omit |
 | `resume` | optional `view: "summary" / "compact"`, `analysis_selection`; query only | omit |
-| `records` | `kind`; page: optional `job_id` (measurements/cases), `offset`, `limit`, `view: "full" / "references"`; detail: `detail` object | omit |
+| `records` | `kind`; page: optional `job_id` (measurements/cases), `offset`, `limit`, `view: "full" / "references"`; cases only: `outcomes` string list, `subject_role: "candidate" / "baseline"`; detail: `detail` object | omit |
 | `observe` | `data: {"note": "Decision and next step"}` | required |
 | `assess` | `data` below | required |
 | `finish` | `outcome: "completed" / "partial" / "abandoned"`, optional `summary`, `assessment` | required |

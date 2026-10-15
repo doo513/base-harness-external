@@ -38,11 +38,18 @@ def summary(api, connection, run):
     return jobs, counts, semantics.gates(run, api.store.gate_measurements(connection, run))
 
 
-def records(api, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None):
+def records(api, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", detail=None, outcomes=None, subject_role=None):
     offset, limit = page_bounds(offset, limit)
     require(isinstance(kind, str) and kind in {*COLLECTIONS, "measurements", "jobs", "cases"}, "INVALID_PARAMETERS", "Unknown history kind")
     require(job_id is None or kind in {"measurements", "cases"}, "INVALID_PARAMETERS", "job_id only filters observations")
     require(view in {"full", "references"}, "INVALID_VIEW", "Records view is full or references")
+    if outcomes is not None:
+        require(kind == "cases" and detail is None and isinstance(outcomes, list) and 1 <= len(outcomes) <= 16
+                and all(isinstance(item, str) and 0 < len(item) <= 64 for item in outcomes)
+                and len(set(outcomes)) == len(outcomes), "INVALID_FILTER", "outcomes is a bounded case-only string filter")
+    if subject_role is not None:
+        require(kind == "cases" and detail is None and isinstance(subject_role, str) and subject_role in {"candidate", "baseline"},
+                "INVALID_FILTER", "subject_role is candidate or baseline on case pages")
     if detail is not None:
         require(view == "full" and job_id is None and offset == 0 and limit == 20,
                 "DETAIL_ARGUMENTS", "A detail request cannot include record-page selectors")
@@ -72,9 +79,15 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", 
             if job_id:
                 where += " AND job_id=?"
                 args.append(job_id)
+            if outcomes is not None:
+                where += " AND json_extract(data,'$.case.outcome') IN (" + ",".join("?" for _ in outcomes) + ")"
+                args.extend(outcomes)
+            if subject_role is not None:
+                where += " AND json_extract(data,'$.subject_role')=?"
+                args.append(subject_role)
             table = "case_observations" if kind == "cases" else "measurements"
             total = connection.execute("SELECT count(*) FROM " + table + " WHERE " + where, args).fetchone()[0]
-            items = api.store.cases(connection, run_id, job_id, limit=limit, offset=offset) if kind == "cases" else api.store.measurements(connection, run_id, job_id, limit=limit, offset=offset)
+            items = api.store.cases(connection, run_id, job_id, limit=limit, offset=offset, outcomes=outcomes, subject_role=subject_role) if kind == "cases" else api.store.measurements(connection, run_id, job_id, limit=limit, offset=offset)
         if view == "references":
             from .detail_projection import project
             items = [project(item, {"run_id": run_id, "kind": kind,

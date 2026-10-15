@@ -85,7 +85,7 @@ class Store:
         if db.is_file():
             with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as existing:
                 names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master")}
-                if {"runs", "jobs", "job_heartbeats", "requests", "measurements", "measurements_job", "measurements_check_subject", "run_heads", "run_records", "run_events", "case_observations"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+                if {"runs", "jobs", "job_heartbeats", "requests", "measurements", "measurements_job", "measurements_check_subject", "run_heads", "run_records", "run_events", "case_observations", "case_observations_outcome"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
                     self._initialized = True
                     return
         with sqlite3.connect(db) as connection:
@@ -106,6 +106,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS case_observations(observation_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL, job_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS case_observations_run_job ON case_observations(run_id,job_id);
+                CREATE INDEX IF NOT EXISTS case_observations_outcome ON case_observations(
+                    run_id,job_id,json_extract(data,'$.subject_role'),json_extract(data,'$.case.outcome'));
             """)
             connection.executescript(journal.DDL)
         db.chmod(0o600)
@@ -329,11 +331,17 @@ class Store:
                 "CASE_OBSERVATION_BINDING", "Case observation does not belong to its execution")
 
     @staticmethod
-    def cases(connection, run_id, job_id=None, *, limit=None, offset=0):
+    def cases(connection, run_id, job_id=None, *, limit=None, offset=0, outcomes=None, subject_role=None):
         sql, args = "SELECT data FROM case_observations WHERE run_id=?", [run_id]
         if job_id:
             sql += " AND job_id=?"
             args.append(job_id)
+        if outcomes is not None:
+            sql += " AND json_extract(data,'$.case.outcome') IN (" + ",".join("?" for _ in outcomes) + ")"
+            args.extend(outcomes)
+        if subject_role is not None:
+            sql += " AND json_extract(data,'$.subject_role')=?"
+            args.append(subject_role)
         sql += " ORDER BY rowid"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"

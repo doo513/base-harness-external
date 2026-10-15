@@ -88,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--limit", type=int, default=20)
             cmd.add_argument("--view", choices=("full", "references"), default="full", help="references is a bounded lossless projection")
             cmd.add_argument("--detail", help=JSON_HELP + "; digest-bound detail reference and optional byte offset/limit")
+            cmd.add_argument("--outcomes", help=JSON_HELP + "; cases only: observed outcome strings to include")
+            cmd.add_argument("--subject-role", choices=("candidate", "baseline"), help="cases only: filter the measured subject")
         elif name == "resume":
             cmd.add_argument("--view", choices=("summary", "compact"), default="summary")
             cmd.add_argument("--analysis-selection", help=JSON_HELP + "; select stored Domain advice without revising the Run")
@@ -107,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection")) > 1:
+        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection", "outcomes")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
@@ -126,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             result = api.resume(args.run_id, view=args.view, analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None)
         elif args.command == "records":
             result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id,
-                                 view=args.view, detail=load_json(args.detail) if args.detail else None)
+                                 view=args.view, detail=load_json(args.detail) if args.detail else None,
+                                 outcomes=load_json(args.outcomes) if args.outcomes else None, subject_role=args.subject_role)
         elif args.command == "cleanup":
             result = api.cleanup(args.run_id, apply=args.apply, min_age_seconds=args.min_age_seconds)
         elif args.command == "cancel":
