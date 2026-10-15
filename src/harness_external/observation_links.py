@@ -88,26 +88,32 @@ def report(links, checks, case_observations, job):
             if found and measured and found.get("execution_observation_id") != measured["observation_id"]:
                 found = None
             summary = (measured or {}).get("case_summary") or {}
+            boundary = (found or {}).get("observation_boundary", summary.get("observation_boundary", "unknown"))
             status = found["case"]["outcome"] if found else "missing" if summary.get("collection_complete") is True else "unconfirmed"
             scenarios.append({"scenario_id": declared["scenario_id"], "check_id": declared["check_id"],
                               "case_id": declared["case_id"], "test_ref": copy.deepcopy(declared.get("test_ref", {})),
                               "required": declared["required"], "status": status,
+                              "observation_boundary": boundary,
                               "selected": found["case"]["selected"] if found else None,
                               "finished": found["case"]["finished"] if found else False,
                               "executed": found["case"]["executed"] if found else False if status == "missing" else None,
                               "observation_id": found["observation_id"] if found else None,
                               "check_observation_id": measured.get("observation_id") if measured else None})
         failed = [key for key in requirement["check_ids"] if by_check.get(key, {}).get("comparison_status") == "failed"]
-        seen = bool(scenarios) and all(s["selected"] is True and s["finished"] is True
+        reported_seen = bool(scenarios) and all(s["selected"] is True and s["finished"] is True
                 and s["status"] not in {"missing", "unconfirmed", "not_run", "not_selected", "incomplete"} for s in scenarios)
-        passed = bool(scenarios) and all(s["selected"] is True and s["executed"] is True and s["finished"] is True and s["status"] == "passed" for s in scenarios)
-        checks_passed = bool(requirement["check_ids"]) and all(by_check.get(key, {}).get("comparison_status") == "passed" for key in requirement["check_ids"])
+        reported_passed = bool(scenarios) and all(s["selected"] is True and s["executed"] is True and s["finished"] is True and s["status"] == "passed" for s in scenarios)
+        independent = bool(scenarios) and all(s["observation_boundary"] == "external_capture" for s in scenarios)
+        seen, passed = reported_seen and independent, reported_passed and independent
+        checks_passed = bool(requirement["check_ids"]) and all(by_check.get(key, {}).get("comparison_status") == "passed"
+            and by_check.get(key, {}).get("trust") != "framework_reported" for key in requirement["check_ids"])
         requirements.append({"requirement_id": requirement["requirement_id"], "scenarios": scenarios,
                              "declared_scenarios_observed": seen, "linked_cases_passed": passed, "linked_checks_passed": checks_passed,
+                             "reported_scenarios_observed": reported_seen, "reported_cases_passed": reported_passed,
                              "known_gap_ids": list(requirement["known_gap_ids"]), "failed_check_ids": failed,
                              "status": "no_declared_scenarios" if not scenarios else "linked_checks_failed" if failed else
                                        "linked_checks_passed" if passed and checks_passed else
-                                       "declared_scenarios_observed" if seen else "declared_scenarios_unconfirmed"})
+                                       "declared_scenarios_observed" if seen else "framework_reported_only" if reported_seen and not independent else "declared_scenarios_unconfirmed"})
     return {"schema_version": "requirement-observations-v1", "requirements": requirements,
             "links_hash": canonical_hash(links), "meaning": "declared_links_and_observed_execution_not_goal_proof",
             "scope": {key: job.get(key) for key in ("run_id", "job_id", "candidate_hash", "check_set_hash", "contract_hash", "acceptance_binding_hash")}}

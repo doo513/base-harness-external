@@ -48,6 +48,21 @@ def policy_fixture(tmp_path, source, *, required="test_cases.py::test_ok", args=
     return api, workspace, definition
 
 
+def advisory_fixture(tmp_path, source, *, required="test_cases.py::test_ok", args=None):
+    """Exercise framework reporting without treating it as independent proof."""
+    configured, workspace, definition = policy_fixture(tmp_path, source, required=required, args=args)
+    (workspace / "test_cases.py").write_text(source, encoding="utf-8")
+    return Harness(configured.store.root), workspace, definition
+
+
+def start_advisory(api, workspace, definition, *, goal="Collect auxiliary reports", request_id="start", parameters=None, **options):
+    supplied = copy.deepcopy(definition["parameters"])
+    supplied.update(requirements=copy.deepcopy(definition["requirements"]), coverage=copy.deepcopy(definition["coverage"]))
+    supplied.update(parameters or {})
+    return api.start(domain_id="develop", goal=goal, workspace=str(workspace), parameters=supplied,
+                     mode="exploratory", required_checks=["domain.entry"], request_id=request_id, **options)
+
+
 def emit(collector, event, **body):
     return collector.feed({"version": 1, "token": "session", "seq": collector.sequence + 1, "event": event, **body})
 
@@ -91,8 +106,8 @@ def test_discovery_requires_session_start():
 
 
 def test_policy_compiles_required_scenario_without_running_candidate(tmp_path, monkeypatch):
-    api, workspace, definition = policy_fixture(tmp_path, "def test_ok(): assert True\n")
-    run_id = api.start(domain_id="develop", goal="Measure test cases", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
+    api, workspace, definition = advisory_fixture(tmp_path, "def test_ok(): assert True\n")
+    run_id = start_advisory(api, workspace, definition)["run_id"]
     checks = api.records(run_id, "checks")["items"]
     rule = next(c for c in checks if c["check_id"] == "domain.tests")["spec"]["parameters"]["adapter"]["rules"]
     assert rule["required_case_ids"] == ["test_cases.py::test_ok"]
@@ -100,8 +115,8 @@ def test_policy_compiles_required_scenario_without_running_candidate(tmp_path, m
 
 
 def test_profile_is_advisory_and_node_ids_can_be_parameterized(tmp_path):
-    api, workspace, _ = policy_fixture(tmp_path, "def test_ok(): assert True\n", required="test_cases.py::test_ok[one/two]")
-    run_id = api.start(domain_id="develop", goal="Observe state", workspace=str(workspace), parameters={"validation_profile": "stateful-cli"}, request_id="start")["run_id"]
+    api, workspace, definition = advisory_fixture(tmp_path, "def test_ok(): assert True\n", required="test_cases.py::test_ok[one/two]")
+    run_id = start_advisory(api, workspace, definition, parameters={"validation_profile": "stateful-cli"})["run_id"]
     perspectives = api.resume(run_id)["domain_preparation"]["validation_perspectives"]
     assert "defaults_equivalence" in perspectives["perspectives"]
     assert perspectives["meaning"] == "advisory_not_mandatory_tests"
@@ -125,10 +140,10 @@ def test_live_adapter_collects_and_executes_without_host_pytest_in_sandbox(tmp_p
 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="actual pytest in strict namespace Sandbox")
-def test_live_requirement_binding_and_gate_rejects_missing_case(tmp_path, monkeypatch):
-    api, workspace, _ = policy_fixture(tmp_path, "from app import value\ndef test_ok(): assert value() == 1\n", required="test_cases.py::test_missing")
+def test_live_requirement_binding_preserves_missing_case_without_promoting_report(tmp_path, monkeypatch):
+    api, workspace, definition = advisory_fixture(tmp_path, "from app import value\ndef test_ok(): assert value() == 1\n", required="test_cases.py::test_missing")
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
-    run_id = api.start(domain_id="develop", goal="Observe declared cases", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
+    run_id = start_advisory(api, workspace, definition)["run_id"]
     api.submit(run_id, "submit")
     job_id = api.verify(run_id, "verify")["job_id"]
     execute_job(api.store.root, job_id)
@@ -141,16 +156,15 @@ def test_live_requirement_binding_and_gate_rejects_missing_case(tmp_path, monkey
     requirement = next(r for r in report["requirements"] if r["requirement_id"] == "value")
     assert requirement["scenarios"][0]["status"] == "missing"
     assert result["job"]["completed_checks"] == 2 and result["job"]["completed_cases"] == 1
-    with pytest.raises(HarnessError):
-        api.finish(run_id, "finish", outcome="completed")
+    assert not requirement["linked_cases_passed"]
+    assert all(gate["check_id"] != "domain.tests" for gate in api.resume(run_id)["gates"]["results"])
 
 
 def measure_fixture(tmp_path, monkeypatch, source, *, args=None, required="test_cases.py::test_ok", timeout=10):
-    api, workspace, definition = policy_fixture(tmp_path, source, required=required, args=args)
+    api, workspace, definition = advisory_fixture(tmp_path, source, required=required, args=args)
     definition["parameters"]["pytest_checks"][0]["timeout_seconds"] = timeout
-    (api.policies.root / "behavior/policy.json").write_text(json.dumps(definition))
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
-    run_id = api.start(domain_id="develop", goal="Check observable behavior", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
+    run_id = start_advisory(api, workspace, definition)["run_id"]
     api.submit(run_id, "submit")
     job_id = api.verify(run_id, "verify")["job_id"]
     execute_job(api.store.root, job_id)
@@ -170,14 +184,16 @@ def measure_fixture(tmp_path, monkeypatch, source, *, args=None, required="test_
     ("import pytest\n@pytest.mark.xfail(strict=True)\ndef test_ok(): assert True\n", [], "test_cases.py::test_ok", "xpass"),
     ("def test_ok(): assert True\n", ["--collect-only"], "test_cases.py::test_ok", "not_run"),
 ])
-def test_live_nonpassing_case_states_cannot_satisfy_default_gate(tmp_path, monkeypatch, source, args, required, expected):
+def test_live_nonpassing_case_states_remain_auxiliary_reports(tmp_path, monkeypatch, source, args, required, expected):
     api, run_id, job_id, _ = measure_fixture(tmp_path, monkeypatch, source, args=args, required=required)
     cases = api.records(run_id, "cases", job_id=job_id)["items"]
     selected = next(item for item in cases if item["case"]["case_id"] == required)
     assert selected["case"]["outcome"] == expected
-    assert api.resume(run_id)["gates"]["status"] == "unsatisfied"
-    with pytest.raises(HarnessError):
-        api.finish(run_id, "finish", outcome="completed")
+    assert selected["trust"] == "framework_reported"
+    assert selected["observation_boundary"] == "subject_process"
+    assert all(gate["check_id"] != "domain.tests" for gate in api.resume(run_id)["gates"]["results"])
+    report = api.status(run_id, job_id)["job"]["result"]["requirement_observations"]["requirements"][0]
+    assert not report["linked_cases_passed"]
 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="real pytest collection error")
@@ -200,7 +216,8 @@ def test_live_timeout_preserves_completed_cases(tmp_path, monkeypatch):
     assert next(c for c in cases if c["case"]["case_id"].endswith("::test_slow"))["case"]["executed"]
     assert api.records(run_id, "measurements", job_id=job_id)["items"][-1]["execution_status"] == "timed_out"
     assert api.resume(run_id)["measurement"]["status"] != "passed"
-    assert api.resume(run_id)["gates"]["status"] == "unsatisfied"
+    assert all(case["trust"] == "framework_reported" for case in cases)
+    assert not api.status(run_id, job_id)["job"]["result"]["requirement_observations"]["requirements"][0]["linked_cases_passed"]
 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="real pytest evidence and citations")
@@ -232,7 +249,7 @@ def test_coverage_is_validated_before_promoting_required_cases(tmp_path):
         api.start(domain_id="develop", goal="Check", workspace=str(workspace), parameters={}, request_id="bad")
 
 
-@pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="queue failure regression in real pytest")
+@pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="queue failure regression with external process observations")
 def test_live_previous_queue_defaults_defect_then_baseline_improvement(tmp_path, monkeypatch):
     import shutil
     root = Path(__file__).resolve().parents[1]
@@ -262,6 +279,8 @@ def test_live_previous_queue_defaults_defect_then_baseline_improvement(tmp_path,
     assert result["status"] == "passed", result
     assert next(c for c in result["baseline_comparison"]["changes"] if c["check_id"] == "domain.behavior")["status"] == "improved"
     assert result["measurement_scope"]["test_case_count"] == 3
+    assert result["measurement_scope"]["test_case_scope"] == "externally_observed_predicates"
+    assert result["measurement_scope"]["reported_test_case_count"] == 0
     assert len(api.records(run_id, "cases", job_id=second)["items"]) == 6
     requirement = result["requirement_observations"]["requirements"][0]
     assert requirement["linked_checks_passed"] and requirement["known_gap_ids"] == ["concurrency-not-measured"]
@@ -321,9 +340,9 @@ def test_live_case_identity_and_late_write_rejection(tmp_path, monkeypatch):
 
 def test_runtime_preparation_does_not_hold_the_writer_transaction(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
-    api, workspace, _ = policy_fixture(tmp_path, "def test_ok(): assert True\n")
-    run_id = api.start(domain_id="develop", goal="one", workspace=str(workspace), parameters={}, request_id="one")["run_id"]
-    other = api.start(domain_id="develop", goal="two", workspace=str(workspace), parameters={}, request_id="two")["run_id"]
+    api, workspace, definition = advisory_fixture(tmp_path, "def test_ok(): assert True\n")
+    run_id = start_advisory(api, workspace, definition, goal="one", request_id="one")["run_id"]
+    other = start_advisory(api, workspace, definition, goal="two", request_id="two")["run_id"]
     api.submit(run_id, "submit")
     entered, release = threading.Event(), threading.Event()
     original_bind = bind
@@ -345,12 +364,12 @@ def test_runtime_preparation_does_not_hold_the_writer_transaction(tmp_path, monk
 
 
 def test_unavailable_adapter_is_not_missing_or_passing(tmp_path, monkeypatch):
-    api, workspace, _ = policy_fixture(tmp_path, "def test_ok(): pass\n")
+    api, workspace, definition = advisory_fixture(tmp_path, "def test_ok(): pass\n")
     def missing(*args):
         raise HarnessError("PYTEST_RUNTIME_UNAVAILABLE", "fixture missing packages")
     monkeypatch.setattr("harness_external.pytest_adapter.prepare_runtime", missing)
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
-    run_id = api.start(domain_id="develop", goal="check", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
+    run_id = start_advisory(api, workspace, definition)["run_id"]
     api.submit(run_id, "submit")
     job_id = api.verify(run_id, "verify")["job_id"]
     execute_job(api.store.root, job_id)
@@ -358,4 +377,5 @@ def test_unavailable_adapter_is_not_missing_or_passing(tmp_path, monkeypatch):
     assert measured["execution_status"] == "unavailable"
     report = api.status(run_id, job_id)["job"]["result"]["requirement_observations"]
     assert report["requirements"][0]["scenarios"][0]["status"] == "unconfirmed"
-    assert api.resume(run_id)["gates"]["status"] == "unsatisfied"
+    assert not report["requirements"][0]["linked_cases_passed"]
+    assert all(gate["check_id"] != "domain.tests" for gate in api.resume(run_id)["gates"]["results"])

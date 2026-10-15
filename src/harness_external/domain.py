@@ -8,14 +8,14 @@ from importlib.resources import files
 
 from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
-from .errors import HarnessError, require, fields, relative_path, integer, limits, validate_contract
+from .errors import HarnessError, ValidationIssues, require, fields, relative_path, integer, limits, validate_contract
 from . import develop_cases, develop_requirements
 from .check_preparation import AdapterCheckPreparation, CheckPreparationPort
 from .registry import effective_config
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
-DEVELOP_REVISION = "develop-external-10"
+DEVELOP_REVISION = "develop-external-11"
 PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile", "requirements", "coverage"}
 _COMPILATION = ContextVar("develop_compilation", default=None)
 
@@ -235,7 +235,21 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
     require(source_domain["id"] == domain_id and {"artifact", "command_exit", "behavior"} <= set(source_domain["verification"]["criterionTemplates"]),
             "DOMAIN_POLICY_MISMATCH", "Unsupported source domain criteria")
     require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
-    fields(parameters, PARAMETERS, {"inputs", "artifacts", "expectations"})
+    basic = ValidationIssues()
+    basic.capture("", lambda: fields(parameters, PARAMETERS, {"inputs", "artifacts", "expectations"}))
+    for key, maximum, code, message in (
+        ("inputs", 128, "INPUTS_REQUIRED", "List 1..128 input files, including tests/fixtures"),
+        ("artifacts", 128, "ARTIFACTS_REQUIRED", "Declare at least one artifact from the input scope"),
+        ("expectations", 128, "NEEDS_INPUT", "Concrete file expectations are required; goal text alone is not a test"),
+    ):
+        if key in parameters:
+            basic.check("/" + key, isinstance(parameters[key], list) and 1 <= len(parameters[key]) <= maximum, code, message)
+    declared_execution = parameters.get("execution_checks", [])
+    if basic.check("/execution_checks", isinstance(declared_execution, list) and len(declared_execution) <= 16,
+                   "INVALID_PARAMETERS", "At most sixteen execution checks are supported"):
+        basic.check("/execution_checks", bool(declared_execution) if parameters.get("profile", "execution") == "execution" else not declared_execution,
+                    "NEEDS_INPUT", "Execution requires execution_checks; structural explicitly excludes execution")
+    basic.raise_if_any()
     inputs = parameters["inputs"]
     artifacts = parameters["artifacts"]
     require(isinstance(inputs, list) and 1 <= len(inputs) <= 128, "INPUTS_REQUIRED", "List 1..128 input files, including tests/fixtures")
@@ -250,17 +264,25 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
     require(isinstance(expectations, list) and 1 <= len(expectations) <= 128, "NEEDS_INPUT", "Concrete file expectations are required; goal text alone is not a test")
     checks = []
     covered = set()
-    for expectation in expectations:
-        check = normalize_file(expectation, admitted_inputs)
-        covered.add(check["path"])
-        checks.append(check)
-    require(set(artifacts) <= covered, "NEEDS_INPUT", "Every artifact needs at least one explicit expectation")
+    issues = ValidationIssues()
+    for index, expectation in enumerate(expectations):
+        check = issues.capture("/expectations/" + str(index), lambda: normalize_file(expectation, admitted_inputs))
+        if check is not None:
+            covered.add(check["path"])
+            checks.append(check)
+    if not issues.count:
+        issues.check("/artifacts", set(artifacts) <= covered, "NEEDS_INPUT", "Every artifact needs at least one explicit expectation")
     execution = parameters.get("execution_checks", [])
-    require(isinstance(execution, list) and len(execution) <= 16, "INVALID_PARAMETERS", "At most sixteen execution checks are supported")
-    require((profile == "execution" and bool(execution)) or (profile == "structural" and not execution),
-            "NEEDS_INPUT", "Execution requires execution_checks; structural explicitly excludes execution")
-    for item in execution:
-        checks.append(normalize_execution(item, inputs, preparation))
+    valid_execution = issues.check("/execution_checks", isinstance(execution, list) and len(execution) <= 16,
+                                   "INVALID_PARAMETERS", "At most sixteen execution checks are supported")
+    if valid_execution:
+        issues.check("/execution_checks", (profile == "execution" and bool(execution)) or (profile == "structural" and not execution),
+                     "NEEDS_INPUT", "Execution requires execution_checks; structural explicitly excludes execution")
+        for index, item in enumerate(execution):
+            check = issues.capture("/execution_checks/" + str(index), lambda: normalize_execution(item, inputs, preparation))
+            if check is not None:
+                checks.append(check)
+    issues.raise_if_any()
     require(len({c["check_key"] for c in checks}) == len(checks), "CHECK_ID_AMBIGUOUS",
             "Checks with the same target/operator or command need distinct explicit id values")
     body = {
@@ -347,12 +369,20 @@ class DevelopModule:
         indexed = {c.get("check_id"): c for c in checks}
         require(set(required) <= indexed.keys(), "ACCEPTANCE_CHECKS_REQUIRED", "Acceptance checks require explicit Domain check IDs")
         bundle_paths = set(policy["bundle"]["files"])
+        reference_paths = set(bundle_paths)
         for key in required:
             if indexed[key].get("adapter"):
-                require(set(indexed[key]["adapter"]["source_paths"]) <= bundle_paths, "ACCEPTANCE_SCOPE", "Case-aware acceptance test files must belong to the pinned bundle")
+                adapter = indexed[key]["adapter"]
+                if adapter.get("criteria_source", "files") == "selector":
+                    # Predicates are already in the pinned policy definition;
+                    # these paths describe the observed subject, not test code.
+                    reference_paths.update(adapter["source_paths"])
+                else:
+                    require(set(adapter["source_paths"]) <= bundle_paths, "ACCEPTANCE_SCOPE", "Case-aware acceptance test files must belong to the pinned bundle")
         require(bundle_paths <= set(base["inputs"]) and not bundle_paths.intersection(base["artifacts"]),
                 "ACCEPTANCE_SCOPE", "Test bundle files must be inputs, not implementation artifacts")
-        require(not any(indexed[key]["kind"] == "command" for key in required) or bool(bundle_paths),
+        require(not any(indexed[key]["kind"] == "command" and indexed[key].get("adapter", {}).get("criteria_source") != "selector"
+                        for key in required) or bool(bundle_paths),
                 "ACCEPTANCE_BUNDLE_REQUIRED", "Command acceptance requires an explicitly pinned test/fixture bundle")
         requirements = develop_requirements.normalize(policy["requirements"])
         require(bool(requirements),
@@ -360,7 +390,7 @@ class DevelopModule:
         mapped = develop_requirements.validate_bindings(requirements, indexed, eligible_ids=required, allow_unmapped=False)
         require(mapped == set(required), "REQUIREMENT_REFERENCE", "Every mandatory check must map to a requirement")
         coverage_inventory, coverage_summary = compile_coverage_inventory(
-            policy.get("coverage"), requirements, set(required), indexed, bundle_paths, self._checks)
+            policy.get("coverage"), requirements, set(required), indexed, reference_paths, self._checks)
         promoted = develop_cases.apply_required_scenarios(base, policy.get("coverage"))
         if promoted.get("execution_checks", []) != base.get("execution_checks", []):
             checks = [item for item in checks if item["kind"] == "file"] + [
@@ -412,18 +442,23 @@ class DevelopModule:
             require(intent["original_goal"] == goal and intent["domain_id"] == self.domain_id, "DOMAIN_INTENT_BINDING", "Domain preparation received the wrong intent")
         require(isinstance(goal, str) and 0 < len(goal.strip()) <= 16000, "GOAL_REQUIRED", "Provide the original task goal")
         parameters = _parameters(parameters, self._checks)
-        fields(parameters, PARAMETERS)
-        requirements = develop_requirements.normalize(parameters.get("requirements", []))
-        require(parameters.get("coverage") is None or isinstance(parameters["coverage"], dict),
-                "COVERAGE_SCHEMA", "Coverage must be a declaration object or null")
-        require(bool(requirements) or parameters.get("coverage") is None, "REQUIREMENTS_REQUIRED", "Coverage needs declared requirements")
+        issues = ValidationIssues()
+        issues.capture("", lambda: fields(parameters, PARAMETERS))
+        requirements = issues.capture("/requirements", lambda: develop_requirements.normalize(parameters.get("requirements", [])))
+        issues.check("/coverage", parameters.get("coverage") is None or isinstance(parameters["coverage"], dict),
+                     "COVERAGE_SCHEMA", "Coverage must be a declaration object or null")
+        if requirements is not None:
+            issues.check("/requirements", bool(requirements) or parameters.get("coverage") is None,
+                         "REQUIREMENTS_REQUIRED", "Coverage needs declared requirements")
         perspective = parameters.get("validation_profile")
-        require(perspective is None or isinstance(perspective, str) and perspective in develop_cases.PERSPECTIVES, "VALIDATION_PROFILE", "Unknown Develop perspective profile")
+        issues.check("/validation_profile", perspective is None or isinstance(perspective, str) and perspective in develop_cases.PERSPECTIVES,
+                     "VALIDATION_PROFILE", "Unknown Develop perspective profile")
         profile = parameters.get("profile", "execution")
-        require(isinstance(profile, str) and profile in {"structural", "execution"}, "INVALID_PARAMETERS", "Unknown Develop profile")
+        issues.check("/profile", isinstance(profile, str) and profile in {"structural", "execution"}, "INVALID_PARAMETERS", "Unknown Develop profile")
         for key in ("inputs", "artifacts", "expectations", "execution_checks"):
             if key in parameters:
-                require(isinstance(parameters[key], list), "INVALID_PARAMETERS", "Develop parameter must be a list: " + key)
+                issues.check("/" + key, isinstance(parameters[key], list), "INVALID_PARAMETERS", "Develop parameter must be a list: " + key)
+        issues.raise_if_any()
         for item in parameters.get("inputs", []) + parameters.get("artifacts", []):
             relative_path(item)
         inputs = parameters.get("inputs", [])
@@ -483,7 +518,7 @@ class DevelopModule:
                 "CHECK_UNSUPPORTED", "Develop command checks expect exit zero")
         if "adapter" in parameters:
             fields(parameters, {"kind", "expectedExitCode", "timeout_seconds", "adapter"}, {"kind", "adapter"})
-            adapter = fields(parameters["adapter"], {"id", "selector", "source_paths", "rules"}, {"id", "selector", "source_paths", "rules"})
+            adapter = fields(parameters["adapter"], {"id", "selector", "source_paths", "rules", "criteria_source"}, {"id", "selector", "source_paths", "rules"})
             rules = fields(adapter["rules"], {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"},
                            {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"})
             result = develop_cases.normalize({"kind": "cases", "id": "normalized", "adapter_id": adapter["id"], "selector": adapter["selector"],

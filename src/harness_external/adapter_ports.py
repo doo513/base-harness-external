@@ -35,3 +35,12 @@ class CaseSchemaAdapter(Protocol):
     """Optional data-only capability used by framework-neutral Domain compilers."""
     def normalize_selection(self, selector: dict, inputs: list[str], required_cases: list[str]) -> dict: ...
     def validate_reference(self, selector: dict, reference: dict) -> None: ...
+
+
+class ExternalCaptureAdapter(Protocol):
+    """Optional trusted-side observer; receives only admitted process capture.
+
+    The common transport still launches every subject inside strict Sandbox.
+    No reporting resource, token or observer code is exposed to that subject.
+    """
+    def observe_capture(self, capture: dict, check: dict) -> dict: ...

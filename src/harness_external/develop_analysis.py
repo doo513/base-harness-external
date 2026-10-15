@@ -1,8 +1,10 @@
-"""Domain reasoning support: discover useful unknowns, then find and apply knowledge.
+"""Pure Domain advice views over a separately versioned, data-only catalog.
 
-This module returns advice only. It does not generate task answers, persist Needs,
-route by goal keywords, fetch sources or make Core lifecycle/gate decisions.
+Only this loader/selection code belongs to the Domain implementation identity.
+Catalog text is identified by map_hash and retained in each Run; copy edits do
+not change criteria, invalidate measurements, or rewrite existing advice.
 """
+from importlib.resources import files
 from types import MappingProxyType
 
 from harness.common import canonical_bytes, canonical_hash
@@ -10,78 +12,92 @@ from harness.json_codec import decode
 
 
 KINDS = ("knowledge", "observation", "decision", "verification")
-NEED_QUALITY = {
-    "unknown": "Find what the request and inspected evidence do not settle; do not turn an already stated requirement into a new question.",
-    "decision_relevant": "Name the design choice, code change or verification decision that would differ depending on the answer.",
-    "investigable": "Make the question specific to this project's behavior, data or dependencies and identify a source or observation that could answer it.",
-    "sufficient": "Identify what finding would be enough for the next action; distinguish an observed fact, a tentative assumption and a decision still needing the user.",
-}
-PERSPECTIVES = (
-    {"id": "outcome", "ask": "What observable change is requested, what must remain true, and which input or conflict rules are still unspecified?",
-     "knowledge_refs": ["compatibility", "verification"]},
-    {"id": "existing_behavior", "ask": "Which entrypoints, callers and data transformations produce the behavior being changed? Where could code and documentation disagree?",
-     "knowledge_refs": ["structure", "compatibility"]},
-    {"id": "design", "ask": "What is the smallest coherent change boundary? Which facts are local, which results depend on other inputs, and what observation distinguishes plausible designs?",
-     "knowledge_refs": ["structure", "runtime"]},
-    {"id": "change", "ask": "Which dependents, side effects and failure paths would this change affect? What must be ordered, preserved or recovered?",
-     "knowledge_refs": ["structure", "recovery"]},
-    {"id": "verification", "ask": "What result would expose a plausible but wrong implementation? Which assumptions can be checked now and which remain unobserved?",
-     "knowledge_refs": ["verification", "runtime"]},
-)
-KNOWLEDGE_MAP = (
-    {"id": "compatibility", "helps_answer": "What behavior or data must survive a change, including conflicting inputs?",
-     "when": "Existing behavior, schemas or consumers constrain a change",
-     "source_hints": ["Request constraints, public API/schema and their consumers", "Existing implementation plus callers of the affected behavior", "Representative inputs, conflict cases and compatibility tests"],
-     "enables": "Choose preservation and conflict behavior from relevant evidence; ask for an externally owned decision rather than inventing it.",
-     "limitation": "Current behavior may be a bug; examples do not establish an approved policy."},
-    {"id": "structure", "helps_answer": "What produces the result, who consumes it, and which dependencies make a seemingly local change nonlocal?",
-     "when": "Locating a change or choosing component responsibilities",
-     "source_hints": ["The affected entrypoint and immediate producers/consumers", "Data structures, ownership boundaries and derived-state users", "Project/package configuration where resolution depends on layout"],
-     "enables": "Separate input-local facts from derived results; choose reuse, invalidation and change boundaries from actual dependencies.",
-     "limitation": "Directory names alone do not establish runtime or import behavior."},
-    {"id": "runtime", "helps_answer": "Which runtime, dependency and platform assumptions affect the result?",
-     "when": "Execution, packaging or platform behavior matters",
-     "source_hints": ["Dependency and build configuration", "Supported environment documentation", "A bounded runtime capability probe"],
-     "enables": "Select a compatible implementation and test environment; keep unsupported environments explicit instead of assuming equivalence.",
-     "limitation": "A result in one environment does not establish behavior in another."},
-    {"id": "recovery", "helps_answer": "Who owns partial changes, retries, concurrent updates and cleanup after failure?",
-     "when": "The task changes persistent state or interacts with fallible operations",
-     "source_hints": ["Writes and other effects, including helpers that hide them", "State/resource owners, error paths and transaction boundaries", "A targeted failure, replay or concurrency observation"],
-     "enables": "Decide effect ordering, atomicity, retry behavior and cleanup ownership before relying on a successful happy path.",
-     "limitation": "A happy-path result does not establish recovery or concurrency safety."},
-    {"id": "verification", "helps_answer": "Which observable outcomes distinguish the required behavior from a plausible but wrong implementation?",
-     "when": "Choosing evidence for a requirement or investigating a failed observation",
-     "source_hints": ["Requirement conditions and known counterexamples", "Existing tests and their actual assertions", "Baseline and current Candidate observations"],
-     "enables": "Turn a decision or assumption into a discriminating observation; use its outcome to keep, revise or reject the approach.",
-     "limitation": "Test presence and passing linked checks do not prove complete goal coverage."},
-)
+PERSPECTIVE_IDS = ("outcome", "existing_behavior", "design", "change", "verification")
+KNOWLEDGE_IDS = ("compatibility", "structure", "runtime", "recovery", "verification")
 
 
-# Keep the shared map immutable. Each returned document remains caller-owned.
-NEED_QUALITY = MappingProxyType(NEED_QUALITY)
-PERSPECTIVES = tuple(MappingProxyType({key: tuple(value) if isinstance(value, list) else value
-                                     for key, value in item.items()}) for item in PERSPECTIVES)
-KNOWLEDGE_MAP = tuple(MappingProxyType({key: tuple(value) if isinstance(value, list) else value
-                                      for key, value in item.items()}) for item in KNOWLEDGE_MAP)
+def _load_catalog():
+    # Package data only, once per process. No workspace/source discovery here.
+    raw = files("harness_external").joinpath("develop_analysis_map.json").read_text(encoding="utf-8")
+    if len(raw.encode("utf-8")) > 32000:
+        raise ValueError("Analysis catalog exceeds 32 KiB")
+    body = decode(raw)
+    expected = {"schema_version", "revision", "need_kinds", "meaning", "persistence_required",
+                "minimum_need_count", "need_quality", "analysis_perspectives", "knowledge_map", "discovery", "boundary"}
+    if (not isinstance(body, dict) or set(body) != expected or body["schema_version"] != "develop-analysis-v2"
+            or body["need_kinds"] != list(KINDS) or body["persistence_required"] is not False
+            or type(body["minimum_need_count"]) is not int or body["minimum_need_count"] != 0
+            or not isinstance(body["revision"], str) or not 0 < len(body["revision"]) <= 128):
+        raise ValueError("Invalid data-only analysis catalog")
+    for name, identifiers, required in (
+        ("analysis_perspectives", PERSPECTIVE_IDS, {"id", "ask", "knowledge_refs"}),
+        ("knowledge_map", KNOWLEDGE_IDS, {"id", "helps_answer", "when", "source_hints", "enables", "limitation"}),
+    ):
+        items = body[name]
+        if (not isinstance(items, list) or len(items) != len(identifiers)
+                or any(not isinstance(item, dict) or not required <= set(item)
+                       or not set(item) <= required | ({"investigation"} if name == "analysis_perspectives" else set()) for item in items)
+                or [item["id"] for item in items] != list(identifiers)):
+            raise ValueError("Invalid analysis catalog inventory")
+        for item in items:
+            for key in required - {"knowledge_refs", "source_hints"}:
+                if not isinstance(item[key], str) or not 0 < len(item[key]) <= 4000:
+                    raise ValueError("Invalid analysis catalog text")
+            if name == "analysis_perspectives":
+                refs = item["knowledge_refs"]
+                if (not isinstance(refs, list) or not refs or any(not isinstance(ref, str) or ref not in KNOWLEDGE_IDS for ref in refs)
+                        or len(set(refs)) != len(refs)):
+                    raise ValueError("Invalid analysis catalog knowledge references")
+                route = item.get("investigation")
+                if route is not None and (not isinstance(route, dict) or set(route) != {"inspect", "decide", "check"}
+                        or any(not isinstance(text, str) or not 0 < len(text) <= 400 for text in route.values())):
+                    raise ValueError("Invalid analysis investigation route")
+            else:
+                hints = item["source_hints"]
+                if (not isinstance(hints, list) or not 1 <= len(hints) <= 8
+                        or any(not isinstance(hint, str) or not 0 < len(hint) <= 4000 for hint in hints)):
+                    raise ValueError("Invalid analysis catalog source hints")
+    for name, keys in (("need_quality", {"unknown", "decision_relevant", "investigable", "sufficient"}),
+                       ("discovery", {"select", "inspect", "apply", "revisit"})):
+        value = body[name]
+        if (not isinstance(value, dict) or set(value) != keys
+                or any(not isinstance(text, str) or not 0 < len(text) <= 4000 for text in value.values())):
+            raise ValueError("Invalid analysis catalog guidance")
+    if any(not isinstance(body[name], str) or not 0 < len(body[name]) <= 4000 for name in ("meaning", "boundary")):
+        raise ValueError("Invalid analysis catalog boundary")
+    return body
+
+
+# A damaged NEW catalog must not make an already stored map unreadable.
+# guidance() reports the failure; select_guidance() depends only on its input.
+_GUIDANCE_ERROR = None
+try:
+    _BODY = _load_catalog()
+except (OSError, ValueError, TypeError, KeyError) as error:
+    _GUIDANCE_ERROR = str(error)
+    _BODY = {"need_quality": {}, "analysis_perspectives": [],
+             "knowledge_map": [{"id": key} for key in KNOWLEDGE_IDS]}
+def _freeze(value):
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+NEED_QUALITY = _freeze(_BODY["need_quality"])
+PERSPECTIVES = _freeze(_BODY["analysis_perspectives"])
+KNOWLEDGE_MAP = _freeze(_BODY["knowledge_map"])
 PERSPECTIVE_INDEX = MappingProxyType({item["id"]: item for item in PERSPECTIVES})
 KNOWLEDGE_INDEX = MappingProxyType({item["id"]: item for item in KNOWLEDGE_MAP})
-_BODY = {"schema_version": "develop-analysis-v2", "revision": "2", "need_kinds": list(KINDS),
-            "meaning": "advisory_reasoning_support_not_workflow", "persistence_required": False, "minimum_need_count": 0,
-            "need_quality": dict(NEED_QUALITY), "analysis_perspectives": [dict(item) for item in PERSPECTIVES],
-            "knowledge_map": [dict(item) for item in KNOWLEDGE_MAP],
-            "discovery": {
-                "select": "Form a task-specific question first, then choose a useful map entry or another source. Skip irrelevant perspectives; no category quota or goal-keyword routing.",
-                "inspect": "Locate the relevant symbol, caller, configuration or assertion and inspect only enough context to answer the question. Use a focused observation if reading cannot distinguish alternatives.",
-                "apply": "Connect the finding to the next design choice, code change or check. This is ordinary Host reasoning: no Need IDs, registration or state updates are needed. Preserve a consequential decision/source only when useful for handoff.",
-                "revisit": "When implementation or measurement contradicts an assumption, refine the question or approach. Stop exploration when the next action is supported; do not read the entire map or treat an answer as goal proof.",
-            },
-            "boundary": "The Host reasons and uses its existing tools. Domain advice neither executes tools nor changes permissions, budgets, Run state, GoalContract, gates or Verifier observations."}
 _GUIDANCE_JSON = canonical_bytes({**_BODY, "map_hash": canonical_hash(_BODY)}).decode("utf-8")
 del _BODY
 
 
 def guidance(*, perspectives=None, knowledge=None):
     """Default stays complete; optional explicit IDs do not route by goal text."""
+    if _GUIDANCE_ERROR is not None:
+        raise ValueError("Analysis catalog unavailable: " + _GUIDANCE_ERROR)
     body = decode(_GUIDANCE_JSON)
     if perspectives is None and knowledge is None:
         return body

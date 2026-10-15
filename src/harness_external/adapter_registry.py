@@ -18,7 +18,7 @@ from .registry import code_identity
 from .adapter_loading import load_module
 
 METHODS = ("runtime", "command", "stage", "observer")
-SCHEMA_METHODS = ("normalize_selection", "validate_reference", "legacy_execution_check")
+SCHEMA_METHODS = ("normalize_selection", "validate_reference", "legacy_execution_check", "observe_capture")
 _IMPORT_LOCK = threading.RLock()
 
 
@@ -130,6 +130,7 @@ class AdapterRegistry:
                       and key not in {"identity_files", "identity_file_ids", "identity_config"} and not callable(value)
                       and not isinstance(value, (property, classmethod, staticmethod))}
         body = {"schema_version": "execution-adapter-identity-v1", "id": adapter_id, "revision": adapter.revision,
+                "observation_boundary": "external_capture" if callable(getattr(adapter, "observe_capture", None)) else "subject_process",
                 "factory": entry.factory, "factory_source_hash": source_hash(source),
                 "implementation_hash": canonical_hash({"sources": sources, "methods": methods}),
                 "configuration_hash": canonical_hash({"registration": arguments.arguments, "effective": config, "identity_file_ids": file_ids,
@@ -144,6 +145,22 @@ class AdapterRegistry:
             validate_binding(binding)
             require(self.identity(binding["id"]) == binding["implementation"],
                     "ADAPTER_IMPLEMENTATION_CHANGED", "Adapter differs from its Run binding")
+
+    def validate_gates(self, checks, gate_ids):
+        """A framework report may be advisory, never independent gate evidence.
+
+        Capability is established by registered, pinned implementation code,
+        not a caller-provided trust label or a Domain's description.
+        """
+        gates = set(gate_ids)
+        for check in checks:
+            selection = check["spec"]["parameters"].get("adapter")
+            if check["check_id"] in gates and selection:
+                require(self.identity(selection["id"])["observation_boundary"] == "external_capture",
+                        "EXTERNAL_OBSERVER_REQUIRED", "Mandatory Check " + check["check_id"] +
+                        " requires an observer outside the Candidate process. Keep " + selection["id"] +
+                        " as an advisory check and declare externally observed criteria (for example process-observations-v1). "
+                        "Do not silently weaken an existing completion policy.")
 
     def pin_implementations(self, checks, pinned=None):
         """Pin code/config when a Check is admitted, before runtime preparation."""
@@ -182,4 +199,7 @@ class AdapterRegistry:
 
 def builtin_adapter_registry():
     # Registration is lazy: read-only CLI calls do not import verifier plugins.
-    return AdapterRegistry([AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter", parameter_alias="pytest_checks")])
+    return AdapterRegistry([
+        AdapterRegistration("pytest-cases-v1", "harness_external.pytest_adapter:PytestAdapter", parameter_alias="pytest_checks"),
+        AdapterRegistration("process-observations-v1", "harness_external.process_adapter:ProcessObservationAdapter"),
+    ])

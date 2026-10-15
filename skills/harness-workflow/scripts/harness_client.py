@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
 import sys
 import tempfile
 import time
@@ -145,6 +146,35 @@ def expand_context(packet):
 ATTENTION_OUTCOMES = ["failed", "error", "skipped", "xfail", "xpass", "not_selected", "not_run", "incomplete"]
 
 
+def compact_call_result(operation, result):
+    """Drop repeated implementation manifests, never criteria or uncertainty."""
+    if not result.get("ok"):
+        return result
+    require(operation in {"start", "finish"}, "COMPACT_OPERATION", "Compact call projection supports start/finish.")
+    common = {key: copy.deepcopy(result[key]) for key in (
+        "api_version", "ok", "assurance", "ready", "run_id", "caller_request", "binding_file", "transport") if key in result}
+    common.update(view="caller-compact", meaning="read_projection_not_a_complete_context_transfer")
+    if operation == "start":
+        contract = result["contract"]
+        common.update(goal=contract["original_goal"], constraints=copy.deepcopy(result.get("constraints", [])),
+                      contract_projection={key: copy.deepcopy(value) for key, value in contract.items()
+                                           if key not in {"original_goal", "verifier", "source_domain"}},
+                      **{key: copy.deepcopy(result[key]) for key in ("context", "policy", "phase", "limits", "questions", "domain_preparation", "acceptance") if key in result},
+                      details={"operation": "context", "run_id": result["run_id"], "contract_hash": contract["contract_hash"],
+                               "omitted": ["contract.verifier", "contract.source_domain", "interpretation"]})
+    else:
+        record = result["record"]
+        resolution = copy.deepcopy(result["resolution"])
+        scope = resolution.get("measurement_scope", {})
+        if "observations" in scope:
+            scope["observation_count"] = len(scope.pop("observations"))
+        common.update(completion={key: copy.deepcopy(record[key]) for key in (
+            "outcome", "outcome_meaning", "lifecycle", "candidate_hash", "contract_hash", "record_hash",
+            "gates", "assessment", "limitations", "unresolved_work", "unresolved_verification_jobs") if key in record},
+            resolution=resolution, details={"operation": "context", "run_id": result["run_id"], "record_hash": record["record_hash"]})
+    return common
+
+
 def attention_report(current, job, cases, *, limit=20):
     """Project observed exceptions, never infer root causes or goal satisfaction."""
     result = (job or {}).get("result") or {}
@@ -172,6 +202,7 @@ def attention_report(current, job, cases, *, limit=20):
                     "detail": {"kind": "cases", "detail": {"record_id": record["observation_id"], "record_digest": digest(record),
                         "path": ["case", "phases", index], "sha256": digest(phase)}}})
         items.append({"kind": "case", "status": case["outcome"], "check_id": record["check_id"],
+                      "observation_boundary": record.get("observation_boundary", "unknown"), "trust": record.get("trust", "unknown"),
                       "case_id": case["case_id"], "requirement_ids": linked.get((record["check_id"], case["case_id"]), []),
                       "observation_id": record["observation_id"], "executed": case["executed"],
                       "finished": case["finished"], "errors": errors})
@@ -196,7 +227,7 @@ def attention_report(current, job, cases, *, limit=20):
     payload = {"api_version": current["api_version"], "ok": True, "schema_version": "harness-client-attention-v1",
         "assurance": current["assurance"], "ready": current["ready"],
         "run_id": current.get("run_id") or current.get("run", {}).get("run_id"),
-        **{key: current[key] for key in ("run", "intent_ref", "policy_ref", "candidate", "gates", "assessment", "limits", "usage", "details") if key in current},
+        **{key: current[key] for key in ("run", "intent_ref", "policy_ref", "candidate", "gates", "assessment", "limits", "usage", "details", "operation_constraints") if key in current},
         "measurement": current.get("measurement"),
         "attention": returned, "attention_page_complete": complete, "listed_attention_count": len(returned),
         "total_known_attention_count": len(items), "omitted_attention_count": len(items) - len(returned),
@@ -204,6 +235,7 @@ def attention_report(current, job, cases, *, limit=20):
                        "total": cases.get("total", 0), "next_offset": cases.get("next_offset")},
         "selected_job": {key: job.get(key) for key in ("job_id", "status", "candidate_hash", "check_set_hash", "completed_checks", "total_checks")} if job else None,
         "requirement_count": len(requirements),
+        "framework_reported_requirement_ids": [item["requirement_id"] for item in requirements if item.get("status") == "framework_reported_only"],
         "known_gaps": [{"requirement_id": item["requirement_id"], "known_gap_ids": item["known_gap_ids"]} for item in requirements if item["known_gap_ids"]]}
     if job:
         payload["selected_job"]["result_status"] = result.get("status")
@@ -261,11 +293,18 @@ def default_config_path():
 
 def validate_config(config):
     required = {"schema_version", "harness_repo", "state_dir", "state_lifetime"}
-    require(isinstance(config, dict) and required <= config.keys() <= required | {"policy_root"},
+    require(isinstance(config, dict) and required <= config.keys() <= required | {"policy_root", "server_socket"},
             "CONFIG_INVALID", "Config requires schema_version, harness_repo, state_dir and state_lifetime.")
     require(type(config["schema_version"]) is int and config["schema_version"] == 1, "CONFIG_VERSION", "Unsupported config schema.")
     repo, state = absolute_path(config["harness_repo"]), absolute_path(config["state_dir"])
-    require((repo / "scripts" / "harness-tool").is_file(), "HARNESS_NOT_FOUND", "Select a Harness source checkout containing scripts/harness-tool.")
+    endpoint = {}
+    if "server_socket" in config:
+        selected = absolute_path(config["server_socket"])
+        require(os.name == "posix" and hasattr(socket, "AF_UNIX") and len(os.fsencode(selected)) <= 103,
+                "TRANSPORT_PATH", "Use a POSIX local socket path of at most 103 bytes.")
+        endpoint["server_socket"] = str(selected)
+    else:
+        require((repo / "scripts" / "harness-tool").is_file(), "HARNESS_NOT_FOUND", "Select a Harness source checkout containing scripts/harness-tool.")
     require(config["state_lifetime"] in ("persistent", "ephemeral"), "CONFIG_INVALID", "Invalid state_lifetime.")
     temporary_roots = {Path(tempfile.gettempdir()).resolve(), Path("/tmp"), Path("/var/tmp")}
     require(config["state_lifetime"] == "ephemeral" or not any(state.resolve().is_relative_to(root) for root in temporary_roots),
@@ -273,15 +312,16 @@ def validate_config(config):
     policy = {}
     if "policy_root" in config:
         root = absolute_path(config["policy_root"])
-        require(root.is_dir(), "POLICY_ROOT_MISSING", "Configured operator policy directory must exist.")
+        require(bool(endpoint) or root.is_dir(), "POLICY_ROOT_MISSING", "Configured operator policy directory must exist.")
         policy["policy_root"] = str(root)
-    return {**config, "harness_repo": str(repo), "state_dir": str(state), **policy}
+    return {**config, "harness_repo": str(repo), "state_dir": str(state), **policy, **endpoint}
 
 
-def configure(path, repo, state, ephemeral=False, policy_root=None):
+def configure(path, repo, state, ephemeral=False, policy_root=None, server_socket=None):
     config = validate_config({"schema_version": 1, "harness_repo": repo, "state_dir": state,
                               "state_lifetime": "ephemeral" if ephemeral else "persistent",
-                              **({"policy_root": policy_root} if policy_root is not None else {})})
+                              **({"policy_root": policy_root} if policy_root is not None else {}),
+                              **({"server_socket": server_socket} if server_socket is not None else {})})
     path.parent.mkdir(parents=True, exist_ok=True)
     # Installation never replaces an existing caller's configuration.
     with path.open("x", encoding="utf-8") as stream:
@@ -290,6 +330,32 @@ def configure(path, repo, state, ephemeral=False, policy_root=None):
         stream.flush()
         os.fsync(stream.fileno())
     return {"ok": True, "config_path": str(path.absolute()), "config": config}
+
+
+def describe(operation=None):
+    """Expose existing caller syntax without configuration, I/O or a Core call."""
+    if operation is None:
+        return {"ok": True, "operations": sorted(set(OPTIONS) - {"invoke"}),
+                "detail": "describe --operation NAME", "domain_fields_are_opaque": True}
+    require(operation in OPTIONS and operation != "invoke", "OPERATION_INVALID", "Select a public operation.")
+    options = OPTIONS[operation]
+    types = {"str": "string", "int": "integer", "bool": "boolean", "number": "number", "repeat": "array", "json": ["object", "array"]}
+    properties = {key: {"type": types[kind], **({"items": {"type": "string"}} if kind == "repeat" else {})}
+                  for key, kind in options.items()}
+    required = REQUIRED.get(operation, {"run_id"} if "run_id" in options else set())
+    argv = ["python3", "<harness_client.py>", "--config", "<client.json>", "call", "--operation", operation,
+            "--arguments", "json:<operation arguments only>"]
+    if "run_id" in options:
+        argv.extend(["--binding", "<binding.json>"])
+    if operation in MUTATIONS:
+        argv.extend(["--action-id", "<stable intent label>", "--output", "<saved-request.json>"])
+    if operation == "start":
+        argv.extend(["--binding-output", "<new-binding.json>", "--format", "compact"])
+    return {"ok": True, "operation": operation, "mutates": operation in MUTATIONS, "call_argv_template": argv,
+            "input_schema": {"type": "object", "properties": properties, "required": sorted(required), "additionalProperties": False},
+            "binding_supplies": ["run_id", "context"] if "run_id" in options else [],
+            "request_rule": "explicit stable action-id and saved output request" if operation in MUTATIONS else "no action-id",
+            "domain_fields_are_opaque": True}
 
 
 def cli_arguments(operation, arguments, json_directory=None):
@@ -337,6 +403,9 @@ class Client:
         self.timeout = timeout
 
     def execute(self, operation, arguments, request_id=None):
+        if self.config.get("server_socket"):
+            require(operation == "invoke" and request_id is None, "TRANSPORT_OPERATION", "Socket transport accepts guarded invoke envelopes only.")
+            return self._socket_execute(arguments["request"])
         effective = arguments["request"]["operation"] if operation == "invoke" else operation
         if effective not in {"start", "doctor"}:
             require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
@@ -370,6 +439,35 @@ class Client:
         require(completed.returncode in (0, 2), "TRANSPORT_EXIT", "Unexpected CLI exit; mutation outcome may be unknown.")
         return response
 
+    def _socket_execute(self, request):
+        expected = {"state_dir": self.config["state_dir"], "policy_root": self.config.get("policy_root")}
+        packet = canonical({"protocol": "harness-local-transport-v1", "configuration": expected, "request": request}) + b"\n"
+        require(len(packet) <= MAX_INPUT, "INPUT_TOO_LARGE", "Socket request exceeds 256 KiB.")
+        sent = False
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+                channel.settimeout(self.timeout)
+                channel.connect(self.config["server_socket"])
+                sent = True
+                channel.sendall(packet)
+                with channel.makefile("rb") as stream:
+                    raw = stream.readline(MAX_OUTPUT + 1)
+        except OSError as error:
+            raise ClientError("CALL_OUTCOME_UNKNOWN" if sent else "TRANSPORT_UNAVAILABLE",
+                              "Server response was lost; query the same Run or replay the IDENTICAL saved request. No automatic retry or local fallback occurred." if sent else
+                              "Configured Harness server is unavailable. Start it outside the restricted Host; no local fallback was attempted.") from error
+        require(raw.endswith(b"\n") and len(raw) <= MAX_OUTPUT, "CALL_OUTCOME_UNKNOWN", "Missing or oversized server response; preserve the saved request.")
+        try:
+            response = decode(raw.decode("utf-8"))
+        except (ValueError, UnicodeError) as error:
+            raise ClientError("CALL_OUTCOME_UNKNOWN", "Server response was not valid JSON; preserve the saved request.") from error
+        require(isinstance(response, dict) and response.get("api_version") == API_VERSION and type(response.get("ok")) is bool,
+                "API_MISMATCH", "Expected the external-harness-v2 API.")
+        if response["ok"]:
+            require(response.get("transport", {}).get("configuration") == expected,
+                    "TRANSPORT_CONFIGURATION_MISMATCH", "Server response belongs to a different store or policy registry.")
+        return response
+
     @contextmanager
     def serialized(self, key):
         """Transport mutex only: Core remains the authoritative concurrency guard."""
@@ -377,6 +475,11 @@ class Client:
         require(isinstance(key, str) and bool(key), "REQUEST_INVALID", "A request scope is required.")
         import fcntl
         root = Path(self.config["state_dir"]) / ".caller-locks"
+        if self.config.get("server_socket"):
+            # The remote store need not be visible inside the Host sandbox.
+            # This is only a per-user transport mutex, never a Run database.
+            keyspace = hashlib.sha256(self.config["server_socket"].encode("utf-8")).hexdigest()
+            root = Path(tempfile.gettempdir()) / ("harness-client-" + str(os.getuid())) / keyspace
         require(not any(p.is_symlink() for p in (root, *root.parents)), "CALLER_LOCK_PATH", "Caller lock directory must not use symlinks.")
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         filename = root / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
@@ -395,7 +498,7 @@ class Client:
         require(isinstance(request, dict), "REQUEST_INVALID", "Request must be an object.")
         cli_arguments(request.get("operation"), request.get("arguments"))
         if request["operation"] in MUTATIONS:
-            if request["operation"] != "start":
+            if request["operation"] != "start" and not self.config.get("server_socket"):
                 require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
                         "Configured state is missing; do not initialize a replacement store.")
             key = request["arguments"].get("run_id", "start")
@@ -432,10 +535,11 @@ class Client:
             raise ClientError(result["error"]["code"], result["error"]["message"])
         return result
 
-    def call_operation(self, operation, arguments, *, binding=None, action_id=None, output=None):
+    def call_operation(self, operation, arguments, *, binding=None, action_id=None, output=None, binding_output=None):
         """Save one explicit intent, then send it. No automatic ID change/retry."""
         request = self.normalize_request(self.make_request(operation, arguments, binding=binding, action_id=action_id)["request"])
         require(operation not in MUTATIONS or output is not None, "REQUEST_FILE_REQUIRED", "Mutations need --output to save their exact request before dispatch.")
+        require(binding_output is None or operation == "start", "BINDING_OPERATION", "Only start can save a new binding from its receipt.")
         reference = {}
         if output is not None:
             path = Path(output).absolute()
@@ -447,10 +551,28 @@ class Client:
             reference = {"request_file": str(path), "request_id": request.get("request_id")}
         try:
             result = self.call(request)
+            if binding_output is not None and result.get("ok"):
+                result = {**result, "binding_file": self.bind_started(result, binding_output)}
         except (ClientError, OSError, ValueError) as error:
             error.saved_request = reference
             raise
         return {**result, **({"caller_request": reference} if reference else {})}
+
+    def bind_started(self, result, output):
+        context = result.get("context")
+        require(result.get("ok") and isinstance(context, dict)
+                and set(context) == {"workspace", "domain", "intent_ref", "policy_ref"},
+                "CORE_UPGRADE_REQUIRED", "Start receipt lacks binding references. Preserve/replay the saved request; do not start another Run.")
+        binding = {"schema_version": "harness-caller-binding-v1", "config": copy.deepcopy(self.config),
+                   "run_id": result["run_id"], **copy.deepcopy(context)}
+        self.binding_context(binding)
+        path = Path(output).absolute()
+        try:
+            write_new_json(path, binding)
+        except FileExistsError:
+            require(not path.is_symlink() and read_json(str(path)) == binding,
+                    "BINDING_CONFLICT", "Binding file belongs to different references; preserve the saved start request and select a new binding path.")
+        return str(path)
 
     def bind(self, run_id, workspace, domain, output):
         resumed = self.call({"operation": "resume", "arguments": {"run_id": run_id},
@@ -659,11 +781,14 @@ def main(argv=None):
         parser.add_argument("--config", type=Path, default=default_config_path(), help="one persistent caller config, independent of the workspace")
         parser.add_argument("--call-timeout", type=float, help="optional foreground CLI timeout; not the verification job budget")
         commands = parser.add_subparsers(dest="command", required=True)
+        schema = commands.add_parser("describe", help="show local request fields without loading config or calling Harness")
+        schema.add_argument("--operation", choices=tuple(name for name in OPTIONS if name != "invoke"))
         setup = commands.add_parser("configure", help="create a NEW config; never overwrite")
         setup.add_argument("--harness-repo", required=True)
         setup.add_argument("--state-dir", required=True)
         setup.add_argument("--ephemeral", action="store_true", help="explicitly disposable tests only")
         setup.add_argument("--policy-root", help="operator-configured acceptance registry, not an editable task proposal")
+        setup.add_argument("--server-socket", help="explicit external Harness socket; never falls back to spawning local Core")
         call = commands.add_parser("call", help="one request, no automatic action loop")
         source = call.add_mutually_exclusive_group(required=True)
         source.add_argument("--request", help="replay a saved JSON request: path, '-' stdin, or json:{...}")
@@ -672,8 +797,9 @@ def main(argv=None):
         call.add_argument("--arguments", default="json:{}", help="JSON arguments; binding supplies run_id")
         call.add_argument("--action-id", help="stable explicit intent; mutations only")
         call.add_argument("--output", type=Path, help="save the exact request before dispatch; required for a direct mutation")
+        call.add_argument("--binding-output", type=Path, help="start only: save binding from the same Core receipt, without another resume")
         call.add_argument("--resolve-detail", action="store_true", help="decode only the selected records detail, starting at byte zero")
-        call.add_argument("--format", choices=("raw", "attention"), default="raw", help="attention is a bounded view for status/resume responses")
+        call.add_argument("--format", choices=("raw", "attention", "compact"), default="raw", help="attention for bound reads; compact start/finish preserves criteria and omits implementation manifests")
         call.add_argument("--attention-limit", type=int, default=20)
         find = commands.add_parser("find", help="list matching Runs without choosing/resuming one")
         find.add_argument("--workspace", required=True)
@@ -709,9 +835,14 @@ def main(argv=None):
         context.add_argument("--max-pages", type=int, default=64)
         commands.add_parser("preflight", help="measure actual strict Sandbox availability; no task run is created")
         args = parser.parse_args(argv)
-        if args.command == "configure":
-            result = configure(args.config, args.harness_repo, args.state_dir, args.ephemeral, args.policy_root)
+        if args.command == "describe":
+            result = describe(args.operation)
+        elif args.command == "configure":
+            result = configure(args.config, args.harness_repo, args.state_dir, args.ephemeral, args.policy_root, args.server_socket)
         else:
+            require(args.config.is_file(), "CONFIG_MISSING",
+                    "Selected config does not exist: " + str(args.config) +
+                    ". Use --config PATH or BASE_HARNESS_CLIENT_CONFIG for the installed configuration; do not select another store from a workspace binding.")
             client = Client(read_json(str(args.config)), timeout=args.call_timeout)
             if args.command == "call":
                 binding = read_json(str(args.binding)) if args.binding else None
@@ -731,15 +862,22 @@ def main(argv=None):
                 require(not args.resolve_detail or args.format == "raw" and operation == "records" and binding is not None
                         and args.action_id is None and args.output is None,
                         "CLI_ARGUMENTS", "Detail resolution requires records, a binding and raw format")
-                require(args.format == "raw" or operation in {"status", "resume", "checkpoint", "wait"} and binding is not None,
+                require(args.format != "attention" or operation in {"status", "resume", "checkpoint", "wait"} and binding is not None,
                         "CLI_ARGUMENTS", "Attention requires an explicit bound read/checkpoint/wait")
+                require(args.format != "compact" or operation in {"start", "finish"}, "CLI_ARGUMENTS", "Compact call format supports start/finish")
+                require(args.binding_output is None or operation == "start", "BINDING_OPERATION", "Only start can save a new binding")
                 if args.resolve_detail:
                     detail_arguments = {key: value for key, value in arguments.items() if key != "run_id"}
                     result = client.resolve_detail(binding, detail_arguments)
                 elif saved is not None:
                     result = client.call(saved)
+                    if args.binding_output is not None and result.get("ok"):
+                        result = {**result, "binding_file": client.bind_started(result, args.binding_output)}
                 else:
-                    result = client.call_operation(operation, arguments, binding=binding, action_id=args.action_id, output=args.output)
+                    result = client.call_operation(operation, arguments, binding=binding, action_id=args.action_id, output=args.output,
+                                                   binding_output=args.binding_output)
+                if args.format == "compact":
+                    result = compact_call_result(operation, result)
                 if args.format == "attention":
                     reference = result.get("caller_request")
                     try:

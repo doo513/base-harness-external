@@ -33,7 +33,7 @@ def observations():
            "domain_identity": {"id": "independent"}, "adapter_bindings": {"domain.probe": {"id": "opaque-adapter"}}}
     common = {key: copy.deepcopy(value) for key, value in job.items() if key not in {"candidate", "checks", "adapter_bindings"}}
     common.update(subject_role="candidate", subject=job["candidate"]["subject"], check_id="domain.probe",
-                  check_ref=job["checks"][0]["ref"], origin="verifier")
+                  check_ref=job["checks"][0]["ref"], origin="verifier", observation_boundary="external_capture", trust="locally_measured")
     check = {**common, "observation_id": "check-observation", "comparison_status": "passed", "case_summary": {"collection_complete": True}}
     case = {**common, "observation_id": "case-observation", "execution_observation_id": "check-observation",
             "adapter_identity": job["adapter_bindings"]["domain.probe"],
@@ -177,20 +177,22 @@ def test_import_boundaries_and_private_runtime_paths():
 
 
 class IndependentDomain:
-    """Not a Develop subclass/wrapper; the same existing pytest adapter is reused."""
+    """Not a Develop subclass/wrapper; the registered external observer is reused."""
     domain_id = "independent-review"
     revision = "1"
 
     def prepare(self, goal, parameters, verifier, *, exploratory=False, intent=None):
         check = {"kind": "command", "expectedExitCode": 0, "timeout_seconds": 10,
                  "check_id": "domain.probe", "check_key": "probe",
-                 "adapter": {"id": "pytest-cases-v1", "paths": ["test_probe.py"], "args": [],
-                             "rules": {"required_case_ids": ["test_probe.py::test_value"], "allowed_outcomes": ["passed"],
+                 "adapter": {"id": "process-observations-v1", "criteria_source": "selector", "source_paths": ["test_probe.py"],
+                             "selector": {"source_paths": ["test_probe.py"], "argv": ["python3", "test_probe.py"], "cwd": ".",
+                                          "cases": [{"id": "opaque-output", "stream": "stdout", "operator": "equals", "expected": "2\n"}]},
+                             "rules": {"required_case_ids": ["opaque-output"], "allowed_outcomes": ["passed"],
                                        "minimum_selected": 1, "require_complete_session": True}}}
         contract = {"original_goal": goal, "domain_id": self.domain_id, "domain_revision": self.revision,
                     "inputs": ["test_probe.py"], "artifacts": ["test_probe.py"], "profile": "execution", "checks": [check],
                     "verifier": verifier, "rules": {"all_checks_required": True, "snapshot_required": True}, "limitations": [],
-                    "observation_links": link_spec("test_probe.py::test_value")}
+                    "observation_links": link_spec("opaque-output")}
         contract["contract_hash"] = canonical_hash(contract)
         return {"contract": contract, "questions": [], "status": "proceed", "available_operations": ["submit", "verify", "finish_completed"]}
 
@@ -201,7 +203,7 @@ class IndependentDomain:
 def independent_run(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / "test_probe.py").write_text("def test_value(): assert 1 + 1 == 2\n")
+    (workspace / "test_probe.py").write_text("print(1 + 1)\n", encoding="utf-8")
     monkeypatch.setattr("harness_external.worker.spawn_worker", lambda *args: None)
     api = Harness(tmp_path / "state", domains=DomainRegistry([IndependentDomain()]))
     run_id = api.start(domain_id="independent-review", goal="Observe the declared case", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
@@ -219,7 +221,7 @@ def test_materialized_command_receipt_cannot_be_replaced(tmp_path, monkeypatch):
     assert api.resume(run_id)["gates"]["status"] == "unsatisfied"
 
 
-@pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="independent Domain through the real pytest Sandbox")
+@pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="independent Domain through the real external observer")
 def test_live_independent_domain_completes_without_loading_develop(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "harness_external.domain", None)
     monkeypatch.setitem(sys.modules, "harness_external.develop_cases", None)

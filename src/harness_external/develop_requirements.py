@@ -45,6 +45,8 @@ def validate_bindings(requirements, check_index, *, eligible_ids=None, allow_unm
     mapped = set()
     for item in requirements:
         references = item["check_ids"]
+        require(allow_unmapped or bool(references), "REQUIREMENT_UNMAPPED",
+                "Acceptance requirement " + item["id"] + " must reference at least one admitted Check")
         require(set(references) <= allowed and set(references) <= set(check_index),
                 "REQUIREMENT_REFERENCE", "Requirements must reference admitted checks with explicit logical IDs")
         minimum = item["minimum_evidence"]

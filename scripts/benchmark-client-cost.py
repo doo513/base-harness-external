@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--before-helper", type=Path, required=True, help="a saved pre-change helper")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--cases", type=int, default=50)
+    parser.add_argument("--startup-only", action="store_true", help="isolate start/binding/compact changes; do not attribute older read optimizations to this change")
     args = parser.parse_args()
     if not (1 <= args.repetitions <= 20 and 3 <= args.cases <= 100):
         parser.error("repetitions must be 1..20, cases 3..100")
@@ -62,6 +63,34 @@ def main():
         config = root / "client.json"
         settings = after.configure(config, str(ROOT), str(api.store.root), ephemeral=True)["config"]
         client = after.Client(settings)
+        startup_samples = []
+        for index in range(args.repetitions):
+            start_args = {"domain": "develop", "goal": "Preserve the complete task and criteria", "workspace": str(workspace),
+                          "mode": "strict", "provenance": {"declared_author": "application"}, "constraints": ["Do not change the criteria"],
+                          "parameters": {"profile": "structural", "inputs": ["data"], "artifacts": ["data"],
+                                         "expectations": [{"path": "data", "operator": "equals", "expected": "ready"}]}}
+            before_start, first_seconds, first_bytes = cli(args.before_helper, config, "call", "--operation", "start",
+                "--arguments", arguments(start_args), "--action-id", "before-start-" + str(index), "--output", str(root / f"before-start-{index}.json"))
+            _, bind_seconds, bind_bytes = cli(args.before_helper, config, "bind", "--run-id", before_start["run_id"],
+                "--workspace", str(workspace), "--domain", "develop", "--output", str(root / f"before-binding-{index}.json"))
+            current, seconds, byte_count = cli(after_path, config, "call", "--operation", "start",
+                "--arguments", arguments(start_args), "--action-id", "after-start-" + str(index), "--output", str(root / f"after-start-{index}.json"),
+                "--binding-output", str(root / f"after-binding-{index}.json"), "--format", "compact")
+            if (current["details"]["contract_hash"] != before_start["contract"]["contract_hash"]
+                    or current["goal"] != before_start["contract"]["original_goal"] or current["constraints"] != start_args["constraints"]
+                    or current["contract_projection"]["checks"] != before_start["contract"]["checks"]):
+                raise AssertionError("Startup projection changed intent or criteria")
+            binding = after.read_json(str(root / f"after-binding-{index}.json"))
+            if client.validate_binding(binding)["run"]["run_id"] != current["run_id"]:
+                raise AssertionError("Returned binding differs from Core")
+            startup_samples.append((first_seconds + bind_seconds, seconds, first_bytes + bind_bytes, byte_count))
+        report["startup_binding"] = {key: {"median_seconds": statistics.median(row[index] for row in startup_samples),
+            "median_response_bytes": statistics.median(row[index + 2] for row in startup_samples),
+            "helper_cli_launches": 2 if index == 0 else 1}
+            for key, index in (("before", 0), ("after", 1))} | {"same_current_core": True, "criteria_equal": True, "binding_matches_core": True}
+        if args.startup_only:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return
         binding_path = root / "binding.json"
         client.bind(run, str(workspace), "develop", binding_path)
         timing, size = {key: [] for key in ("before", "after")}, {key: [] for key in ("before", "after")}
@@ -116,7 +145,7 @@ def main():
             "scenarios": [{"id": f"case-{index}", "requirement_id": "behavior", "check_id": "domain.tests", "kind": "positive",
                 "required": False, "test_ref": {"framework": "pytest", "path": "test_cases.py", "case_id": "test_cases.py::" + name}}
                 for index, name in enumerate(names)]}
-        target = api.start(domain_id="develop", goal="Observe actual case outcomes", workspace=str(workspace), request_id="cases",
+        target = api.start(domain_id="develop", goal="Inspect auxiliary framework reports", workspace=str(workspace), request_id="cases", mode="exploratory",
             parameters={"inputs": ["test_cases.py"], "artifacts": ["test_cases.py"],
                 "expectations": [{"path": "test_cases.py", "operator": "contains", "expected": "def test"}],
                 "execution_checks": [{"kind": "cases", "id": "tests", "adapter_id": "pytest-cases-v1",

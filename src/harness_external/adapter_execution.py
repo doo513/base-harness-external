@@ -104,6 +104,46 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
     require(binding["id"] == check["adapter"]["id"], "ADAPTER_SELECTION_CHANGED", "Check and adapter binding differ")
     adapter = registry.resolve(binding["id"])
     execution = command(check, registry) if execution is None else validate_command(check, execution)
+    if binding["implementation"].get("observation_boundary") == "external_capture":
+        from .worker import execute_sandbox
+        if binding.get("status") == "unavailable":
+            return {"status": "not_run", "reason": "ADAPTER_UNAVAILABLE: " + binding["reason"]}, None
+        require(adapter.runtime(state_root, copy.deepcopy(binding["runtime"])) == binding["runtime"],
+                "ADAPTER_RUNTIME_CHANGED", "Pinned external observer is unavailable or changed")
+        remaining = deadline - time.monotonic()
+        require(not abort.is_set() and remaining > 0, "VERIFICATION_CANCELLED", "Verification expired during external observer preparation")
+        # Only the Candidate command enters Sandbox. Predicates, the observer
+        # implementation and the captured receipt remain in this trusted process.
+        capture = execute_sandbox(execution, payload, state_root, abort, remaining, input_binding)
+        execution_inputs.validate_receipt(capture, input_binding)
+        if not capture.get("capture"):
+            # No subject was admitted/executed. A selector declaration is not
+            # a case observation and must not create an observation checkpoint.
+            return capture, None
+        summary = adapter.observe_capture(copy.deepcopy(capture), copy.deepcopy(check))
+        require(isinstance(summary, dict) and type(summary.get("collection_complete")) is bool
+                and type(summary.get("session_complete")) is bool and isinstance(summary.get("cases"), list)
+                and len(summary["cases"]) <= MAX_CASES and len(canonical_bytes(summary)) <= MAX_REPORT_BYTES,
+                "CASE_REPORT_PROTOCOL", "Invalid external observation summary")
+        cases = [_case(case) for case in summary["cases"]]
+        require(len({case["case_id"] for case in cases}) == len(cases), "CASE_REPORT_PROTOCOL", "Duplicate external observation IDs")
+        completed = capture.get("status") == "completed" and (capture.get("capture") or {}).get("execution") == "completed"
+        require(completed or not summary["session_complete"] and not any(case["outcome"] == "passed" for case in cases),
+                "CASE_REPORT_PROTOCOL", "An uncompleted process cannot yield passing external observations")
+        registry.validate_bindings({"current": binding})
+        require(not abort.is_set() and time.monotonic() < deadline,
+                "VERIFICATION_CANCELLED", "Verification expired while observing process output")
+        for case in cases:
+            require(not abort.is_set() and time.monotonic() < deadline,
+                    "VERIFICATION_CANCELLED", "Verification expired before publishing an observation")
+            on_case(copy.deepcopy(case), copy.deepcopy(binding))
+        require(not abort.is_set() and time.monotonic() < deadline,
+                "VERIFICATION_CANCELLED", "Verification expired while publishing observations")
+        summary = copy.deepcopy(summary)
+        summary.update(cases=cases, adapter_identity=copy.deepcopy(binding), observation_boundary="external_capture",
+                       case_scope_hash=canonical_hash({"discovered": sorted(case["case_id"] for case in cases),
+                           "selected": sorted(case["case_id"] for case in cases if case["selected"] is True)}) if summary["collection_complete"] else None)
+        return capture, summary
     artifact_path = relative_path(adapter.report_path)
     artifact = Path(payload) / artifact_path
     require(not artifact.exists() and not artifact.is_symlink(), "ADAPTER_RESOURCE_CONFLICT", "Snapshot collides with the adapter observation artifact")
@@ -233,6 +273,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
         if failure:
             summary.update(session_complete=False, protocol_error=failure)
         summary["adapter_identity"] = binding
+        summary["observation_boundary"] = "subject_process"
         summary["case_scope_hash"] = canonical_hash({"discovered": sorted(case["case_id"] for case in cases),
             "selected": sorted(case["case_id"] for case in cases if case["selected"] is True)}) if summary["collection_complete"] else None
         registry.validate_bindings({"current": binding})

@@ -43,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
     parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
     commands = parser.add_subparsers(dest="command", required=True)
+    server = commands.add_parser("serve", help="serve existing Harness requests outside a restricted Host; no MCP or model runtime")
+    server.add_argument("--socket", required=True, help="Unix socket in a private runtime directory, outside workspaces")
+    server.add_argument("--workspace-root", action="append", required=True, help="explicit allowed workspace root; repeat for multiple roots")
     invoked = commands.add_parser("invoke", help="one guarded caller envelope; no separate resume preflight")
     invoked.add_argument("--request", required=True, help=JSON_HELP)
     start = commands.add_parser("start")
@@ -113,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
+        if args.command == "serve":
+            from .local_transport import serve
+            serve(api, args.socket, args.workspace_root)
+            return 0
         if args.command == "doctor":
             from . import diagnostics
             from .service import response
@@ -167,7 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if args.command == "doctor" and not result["healthy"] else 0
     except (HarnessError, MeasurementProtocolError, OSError, ValueError, sqlite3.Error) as error:
         print(canonical_bytes({"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
-                               "error": {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]}}).decode())
+                               "error": error.as_dict() if isinstance(error, HarnessError) else
+                                        {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]}}).decode())
         return 2
 
 

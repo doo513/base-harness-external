@@ -98,6 +98,36 @@ def test_default_config_is_independent_of_working_directory(tmp_path, monkeypatc
     assert helper.default_config_path() == tmp_path / "explicit.json"
 
 
+def test_socket_caller_uses_the_configured_server_without_launching_local_core(tmp_path, monkeypatch):
+    import threading
+    from harness_external.local_transport import HarnessServer
+    from harness_external.service import Harness
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "payload.txt").write_text("ready", encoding="utf-8")
+    api = Harness(tmp_path / "server-state")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    with HarnessServer(api, runtime / "h.sock", [workspace]) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            config = helper.configure(tmp_path / "client.json", str(ROOT), str(api.store.root), ephemeral=True,
+                                      server_socket=str(server.socket_path))["config"]
+            client = helper.Client(config)
+            def forbidden(*args, **kwargs):
+                pytest.fail("A socket caller must not launch Core/Worker under the Host's restrictions")
+            monkeypatch.setattr(helper.subprocess, "run", forbidden)
+            started = client.call(start_request(workspace))
+            assert started["ok"], started
+            assert client.call(start_request(workspace))["run_id"] == started["run_id"]
+            status = client.call(request(workspace, started["run_id"], "resume", view="compact"))
+            assert status["transport"]["configuration"]["state_dir"] == str(api.store.root)
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+
 @pytest.mark.parametrize("change", [
     {"schema_version": True}, {"state_lifetime": "guess"}, {"state_dir": "relative"},
     {"harness_repo": "/this-checkout-does-not-exist"}, {"unknown": "field"},
@@ -106,6 +136,17 @@ def test_invalid_config_fails_before_invoking_core(caller, change):
     client, _, _ = caller
     with pytest.raises(helper.ClientError):
         helper.Client({**client.config, **change})
+
+
+def test_describe_is_local_and_uses_the_actual_request_schema(tmp_path):
+    execution = subprocess.run([sys.executable, str(HELPER), "--config", str(tmp_path / "missing.json"),
+                                "describe", "--operation", "start"], capture_output=True, text=True, encoding="utf-8", timeout=10)
+    assert execution.returncode == 0, execution.stdout + execution.stderr
+    value = json.loads(execution.stdout)
+    assert value["input_schema"]["required"] == sorted(helper.REQUIRED["start"])
+    assert set(value["input_schema"]["properties"]) == set(helper.OPTIONS["start"])
+    assert value["mutates"] is True
+    assert value["domain_fields_are_opaque"] is True
 
 
 @pytest.mark.parametrize("raw", ['{"key":1,"key":2}', '{"value":NaN}', '{"value":Infinity}'])

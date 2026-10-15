@@ -80,7 +80,9 @@ class AdapterCheckPreparation:
         method = getattr(self.adapters.resolve(adapter_id), "normalize_selection", None)
         require(callable(method), "ADAPTER_SCHEMA_UNAVAILABLE", "Selected adapter does not provide a case schema")
         selected = method(copy.deepcopy(selector), list(inputs), list(required_cases))
-        fields(selected, {"selector", "source_paths"}, {"selector", "source_paths"})
+        fields(selected, {"selector", "source_paths", "criteria_source"}, {"selector", "source_paths"})
+        require(isinstance(selected.get("criteria_source", "files"), str) and selected.get("criteria_source", "files") in {"files", "selector"},
+                "ADAPTER_SCHEMA_INVALID", "Case criteria come from declared files or the pinned selector")
         require(isinstance(selected["selector"], dict) and len(canonical_bytes(selected["selector"])) <= 64000,
                 "ADAPTER_SCHEMA_INVALID", "Selector must be a bounded object")
         paths = selected["source_paths"]

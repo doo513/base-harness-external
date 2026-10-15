@@ -54,7 +54,9 @@ def test_discovery_module_does_not_import_core_or_the_legacy_record_validator():
     tree = ast.parse(source)
     imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     imports.update(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
-    assert imports <= {"types", "harness.common", "harness.json_codec"}
+    # Immutable package data is loaded at import; guidance/selection remain
+    # data-only and cannot inspect the workspace, Run state, or model clients.
+    assert imports <= {"types", "importlib.resources", "harness.common", "harness.json_codec"}
 
 
 def test_mutating_advice_does_not_change_preparation_contract_or_operations(monkeypatch):
@@ -120,6 +122,18 @@ def test_guidance_available_before_scope_is_known_without_creating_scope():
     assert result["analysis_guidance"]["persistence_required"] is False
     assert result["status"] == "needs_input"
     assert result["contract"]["inputs"] == result["contract"]["checks"] == []
+
+
+def test_selected_guidance_connects_inspection_decision_and_counterexample_without_records():
+    selected = develop_analysis.guidance(perspectives=["change", "verification"])
+    assert selected["persistence_required"] is False
+    assert [item["id"] for item in selected["analysis_perspectives"]] == ["change", "verification"]
+    for item in selected["analysis_perspectives"]:
+        route = item["investigation"]
+        assert set(route) == {"inspect", "decide", "check"}
+        assert all(isinstance(text, str) and 0 < len(text) <= 400 for text in route.values())
+        assert set(item["knowledge_refs"]) <= {entry["id"] for entry in selected["knowledge_map"]}
+    assert len(canonical_bytes(selected)) < len(canonical_bytes(develop_analysis.guidance()))
 
 
 def test_legacy_normalization_remains_optional_and_compatible():

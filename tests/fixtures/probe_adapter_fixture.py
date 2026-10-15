@@ -1,6 +1,7 @@
 """Test-only adapter: no pytest, Domain, Worker or process-launch dependencies."""
 import copy
 import hashlib
+import json
 from pathlib import Path
 
 from harness.common import canonical_bytes
@@ -101,3 +102,22 @@ class ProbeAdapter:
 
     def observer(self, token, runtime):
         return ProbeObserver(token, runtime['case_id'])
+
+
+class ExternalProbeAdapter(ProbeAdapter):
+    """Same opaque test schema, observations made outside the subject process."""
+    revision = '2'
+
+    def command(self, check):
+        selection = check['adapter'].get('selector', check['adapter'])
+        script = "from pathlib import Path; import sys,time; print(Path('probe_data.json').read_text(encoding='utf-8'),flush=True); time.sleep(float(sys.argv[1]))"
+        return {'kind': 'command', 'argv': ['python3', '-c', script, str(selection.get('delay', 0))],
+                'cwd': '.', 'expectedExitCode': 0, 'timeout_seconds': check.get('timeout_seconds', 30) + self.timeout_boost}
+
+    def observe_capture(self, capture, check):
+        receipt = capture.get('capture') or {}
+        complete = receipt.get('execution') == 'completed'
+        ok = complete and json.loads(receipt['stdout'])['ok'] is True
+        case = dict(case_id=self.case_id, discovered=True, selected=True, started=bool(receipt),
+                    executed=complete, finished=complete, outcome='passed' if ok else 'failed' if complete else 'not_run', phases=[])
+        return {'framework': 'fixture-probe', 'collection_complete': True, 'session_complete': complete, 'cases': [case]}

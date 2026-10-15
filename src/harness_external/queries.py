@@ -2,7 +2,7 @@
 from . import semantics, need_records
 from . import read_core
 from .read_core import COLLECTIONS, RECENT_JOB_LIMIT, page_bounds, records
-from .views import job_view, run_view
+from .views import job_view, run_view, operation_constraints
 from .errors import require
 
 
@@ -43,6 +43,7 @@ def resume(api, run_id, *, view="summary", analysis_selection=None):
             return result
         jobs = [job_view(job) for job in checked]
         return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
+                "operation_constraints": operation_constraints(run, gate_results),
                 "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),
                 "interpretation": {key: latest[key] for key in ("ref", "goal_summary", "assumptions", "open_questions")},
                 "domain_questions": run["domain_questions"], "domain_preparation": preparation,

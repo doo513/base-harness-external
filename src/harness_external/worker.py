@@ -247,6 +247,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                     if check.get("adapter"):
                         from .adapter_execution import execute as execute_adapter
                         binding = job["adapter_bindings"][check_record["check_id"]]
+                        observation_boundary = binding["implementation"].get("observation_boundary", "subject_process")
                         environment["adapter_identity"] = binding
                         def checkpoint_case(case, adapter_identity):
                             identity = {"job": job_id, "subject": candidate["subject"], "check": check_record["ref"], "case": case["case_id"]}
@@ -259,7 +260,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                                     "domain_identity": job["domain_identity"],
                                     "acceptance_binding_hash": job.get("acceptance_binding_hash"), "runtime_environment_hash": canonical_hash(environment),
                                     "execution_observation_id": "observation:" + job_id + ":" + str(index),
-                                    "origin": "verifier", "trust": "locally_reported", "case": {**case, "phases": redact(case["phases"])}}
+                                    "origin": "verifier", "observation_boundary": observation_boundary,
+                                    "trust": "locally_measured" if observation_boundary == "external_capture" else "framework_reported",
+                                    "case": {**case, "phases": redact(case["phases"])}}
                             item["record_hash"] = canonical_hash(item)
                             with store.transaction() as connection:
                                 store.checkpoint_case(connection, job_id, owner, item)
@@ -312,6 +315,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                                   acceptance_binding_hash=job.get("acceptance_binding_hash"), subject_role=subject_role)
                 if case_summary is not None:
                     from collections import Counter
+                    checkpoint["observation_boundary"] = case_summary.get("observation_boundary", "subject_process")
+                    if checkpoint["observation_boundary"] != "external_capture":
+                        checkpoint["trust"] = "framework_reported"
                     checkpoint["case_summary"] = {key: value for key, value in case_summary.items() if key != "cases"}
                     checkpoint["case_summary"].update(discovered_count=len(case_summary["cases"]),
                             selected_count=sum(c["selected"] is True for c in case_summary["cases"]),
@@ -329,6 +335,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                                        "kind": check["kind"], "role": checkpoint["role"],
                                        "subject_role": subject_role, "environment_hash": canonical_hash(environment),
                                        "execution_status": checkpoint["execution_status"], "comparison_status": checkpoint["comparison_status"],
+                                       "observation_boundary": checkpoint.get("observation_boundary", "external_capture"),
                                        "case_summary": checkpoint.get("case_summary")})
             status = "passed" if all(s == "passed" for s in comparisons) else "failed"
             if "incomplete" in comparisons:

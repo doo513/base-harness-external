@@ -1,5 +1,8 @@
 """Host-selected advice is a view, not a contract or execution transition."""
 import copy
+import importlib
+import json
+from pathlib import Path
 
 import pytest
 
@@ -160,3 +163,65 @@ def test_core_forwards_opaque_selection_without_adopting_develop_semantics(task)
     selected = api.resume(run, analysis_selection={"section": "chosen-by-host"})
     assert selected["domain_preparation"]["analysis_guidance"]["opaque_view"] == "chosen-by-host"
     assert "opaque_view" not in api.resume(run)["domain_preparation"]["analysis_guidance"]
+
+
+def test_advice_copyedit_does_not_invalidate_a_run_or_replace_its_recorded_map(task, monkeypatch):
+    api, workspace = task
+    started = start(api, workspace)
+    run_id = started["run_id"]
+    before = api.domains.identity("develop")
+    recorded = api.resume(run_id)["domain_preparation"]["analysis_guidance"]
+    catalog_path = Path(develop_analysis.__file__).with_name("develop_analysis_map.json")
+    revised = json.loads(catalog_path.read_text(encoding="utf-8"))
+    revised["revision"] = "copyedit-3"
+    revised["analysis_perspectives"][0]["ask"] = "A revised advisory question, not a new acceptance condition."
+    original_read = Path.read_text
+
+    def changed(path, *args, **kwargs):
+        return json.dumps(revised) if path == catalog_path else original_read(path, *args, **kwargs)
+
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(Path, "read_text", changed)
+            importlib.reload(develop_analysis)
+            assert develop_analysis.guidance()["map_hash"] != recorded["map_hash"]
+            assert api.domains.identity("develop") == before
+            assert api.resume(run_id)["domain_preparation"]["analysis_guidance"] == recorded
+            assert api.resume(run_id, analysis_selection={"perspectives": ["outcome"]})["domain_preparation"]["analysis_guidance"]["source_map_hash"] == recorded["map_hash"]
+            api.submit(run_id, "submit-after-copyedit")
+            job_id = api.verify(run_id, "verify-after-copyedit")["job_id"]
+            execute_job(api.store.root, job_id)
+            assert api.finish(run_id, "finish-after-copyedit", outcome="completed")["record"]["gates"]["status"] == "passed"
+    finally:
+        importlib.reload(develop_analysis)
+
+
+def test_executable_advice_loader_remains_part_of_domain_identity(task, monkeypatch):
+    api, _ = task
+    before = api.domains.identity("develop")
+    original_read = Path.read_bytes
+
+    def changed(path):
+        data = original_read(path)
+        return data + b"\n# executable loader changed\n" if path.name == "develop_analysis.py" else data
+
+    monkeypatch.setattr(Path, "read_bytes", changed)
+    assert api.domains.identity("develop") != before
+
+
+def test_broken_new_catalog_does_not_prevent_reading_stored_advice(task, monkeypatch):
+    api, workspace = task
+    run_id = start(api, workspace)["run_id"]
+    recorded = api.resume(run_id)["domain_preparation"]["analysis_guidance"]
+    catalog = Path(develop_analysis.__file__).with_name("develop_analysis_map.json")
+    original = Path.read_text
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(Path, "read_text", lambda path, *args, **kwargs: '{"invalid":true}' if path == catalog else original(path, *args, **kwargs))
+            importlib.reload(develop_analysis)
+            with pytest.raises(ValueError, match="catalog unavailable"):
+                develop_analysis.guidance()
+            projected = api.resume(run_id, analysis_selection={"perspectives": ["verification"]})
+            assert projected["domain_preparation"]["analysis_guidance"]["source_map_hash"] == recorded["map_hash"]
+    finally:
+        importlib.reload(develop_analysis)

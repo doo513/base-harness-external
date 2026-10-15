@@ -155,6 +155,7 @@ class Harness:
 
     def _validate_checks(self, run, contract):
         module = self._module(run)
+        self.adapters.validate_gates(semantics.current_checks(run), run["gate_bindings"])
         observation_links.validate(contract.get("observation_links"), [item["check_id"] for item in semantics.current_checks(run)])
         for item in semantics.current_checks(run):
             parameters = copy.deepcopy(item["spec"]["parameters"])
@@ -309,10 +310,14 @@ class Harness:
                              deferred_checks=deferred_checks, domain_identity=self.domains.identity(domain_id), policy_provenance=provenance,
                              questions=preparation["questions"], domain_revision=module.revision, initial_intent=original_intent,
                              acceptance_binding=binding)
+            self.adapters.validate_gates(semantics.current_checks(run), run["gate_bindings"])
             run["domain_preparation"] = canonical_preparation
             if preparation["status"] == "needs_input":
                 run["phase"] = "waiting_input"
             result = response(run_id=run_id, contract=contract, phase=run["phase"], limits=bound,
+                              context={"workspace": str(source), "domain": domain_id,
+                                       "intent_ref": original_intent["ref"], "policy_ref": run["policy"]["ref"]},
+                              constraints=copy.deepcopy(original_intent["constraints"]),
                               interpretation=run["interpretations"][-1], policy=run["policy"], questions=run["domain_questions"],
                               domain_preparation=preparation_view,
                               acceptance=acceptance.view(binding),
@@ -536,6 +541,7 @@ class Harness:
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
                 run["gate_bindings"][key] = created["ref"]
+            self.adapters.validate_gates(semantics.current_checks(run), run["gate_bindings"])
             run["verification"] = {"status": "not_run"}
             result = response(run_id=run_id, check=created, gated=key in run["gate_bindings"])
         return self._publish_prepared_run(run, expected_revision, request_id, fingerprint, result)

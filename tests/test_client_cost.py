@@ -10,8 +10,8 @@ import pytest
 
 from harness_external import context, worker
 from harness_external.errors import HarnessError
-from test_skill_workflow import helper, caller, bound_run, ROOT, HELPER
-from test_pytest_domain import policy_fixture
+from test_skill_workflow import helper, caller, bound_run, start_request, ROOT, HELPER
+from test_pytest_domain import advisory_fixture, start_advisory
 
 
 def test_direct_call_saves_normalized_request_once_and_replays_after_loss(caller, tmp_path, monkeypatch):
@@ -61,6 +61,42 @@ def test_direct_mutation_requires_a_saved_request_before_dispatch(caller, monkey
     with pytest.raises(helper.ClientError) as error:
         client.call_operation("observe", {"data": {"note": "decision"}}, binding=binding, action_id="note")
     assert error.value.code == "REQUEST_FILE_REQUIRED"
+
+
+def test_start_can_save_binding_from_its_receipt_without_an_extra_resume(caller, tmp_path, monkeypatch):
+    client, workspace, _ = caller
+    calls = []
+    original = client.execute
+    def counted(operation, arguments, *args):
+        calls.append(arguments["request"]["operation"])
+        return original(operation, arguments, *args)
+    monkeypatch.setattr(client, "execute", counted)
+    arguments = start_request(workspace)["arguments"]
+    result = client.call_operation("start", arguments, action_id="begin", output=tmp_path / "request.json",
+                                   binding_output=tmp_path / "binding.json")
+    assert calls == ["start"]
+    binding = helper.read_json(str(tmp_path / "binding.json"))
+    assert binding["run_id"] == result["run_id"]
+    assert binding["intent_ref"] == result["context"]["intent_ref"]
+    assert client.validate_binding(binding)["run"]["run_id"] == result["run_id"]
+    replay = client.call_operation("start", arguments, action_id="begin", output=tmp_path / "request.json",
+                                   binding_output=tmp_path / "binding.json")
+    assert replay["run_id"] == result["run_id"]
+
+
+def test_compact_start_keeps_goal_policy_guidance_and_recovery_reference(caller, tmp_path):
+    client, workspace, _ = caller
+    result = client.call_operation("start", start_request(workspace)["arguments"], action_id="begin",
+                                   output=tmp_path / "request.json", binding_output=tmp_path / "binding.json")
+    compact = helper.compact_call_result("start", result)
+    assert compact["goal"] == result["contract"]["original_goal"]
+    assert compact["policy"] == result["policy"]
+    assert compact["domain_preparation"] == result["domain_preparation"]
+    assert compact["caller_request"] == result["caller_request"]
+    assert compact["binding_file"] == str(tmp_path / "binding.json")
+    assert compact["details"]["operation"] == "context"
+    assert compact["details"]["contract_hash"] == result["contract"]["contract_hash"]
+    assert len(helper.canonical(compact)) < len(helper.canonical(result))
 
 
 def test_saved_intent_detaches_caller_owned_nested_values(caller, tmp_path, monkeypatch):
@@ -206,19 +242,18 @@ def observed(tmp_path_factory):
     root = tmp_path_factory.mktemp("client-actual-cases")
     source = "import pytest\ndef test_ok(): assert True\ndef test_bad(): assert 'a' * 2000 == 'b' * 2000\n@pytest.mark.skip(reason='not available')\ndef test_skip(): pass\n"
     source += "\n".join(f"def test_normal_{index}(): assert {index} == {index}" for index in range(14))
-    api, workspace, _ = policy_fixture(root, source, required="test_cases.py::test_bad")
+    api, workspace, definition = advisory_fixture(root, source, required="test_cases.py::test_bad")
     patch = pytest.MonkeyPatch()
     patch.setattr(worker, "spawn_worker", lambda *a: None)
     try:
-        run = api.start(domain_id="develop", goal="Observe declared cases", workspace=str(workspace), parameters={},
-                        capture_baseline=True, request_id="start")["run_id"]
+        run = start_advisory(api, workspace, definition, capture_baseline=True)["run_id"]
         api.submit(run, "submit")
         job = api.verify(run, "verify", compare_baseline=True)["job_id"]
         worker.execute_job(api.store.root, job)
     finally:
         patch.undo()
     config_path = root / "client.json"
-    config = helper.configure(config_path, str(ROOT), str(api.store.root), ephemeral=True, policy_root=str(root / "policies"))["config"]
+    config = helper.configure(config_path, str(ROOT), str(api.store.root), ephemeral=True)["config"]
     client = helper.Client(config)
     binding_path = root / "binding.json"
     client.bind(run, str(workspace), "develop", binding_path)

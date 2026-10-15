@@ -166,7 +166,7 @@ def probe_policy(tmp_path, *, ok=True):
 def test_same_develop_accepts_opaque_cases_without_loading_pytest(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "harness_external.pytest_adapter", None)
     workspace, root = probe_policy(tmp_path)
-    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(case_id="사례 / 1"))
+    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(external=True, case_id="사례 / 1"))
     run = api.start(domain_id="develop", goal="한글 관측", workspace=str(workspace), parameters={}, policy_id="probe", request_id="start")["run_id"]
     checks = api.records(run, "checks")["items"]
     adapter = next(c for c in checks if c["check_id"] == "domain.behavior")["spec"]["parameters"]["adapter"]
@@ -177,7 +177,7 @@ def test_same_develop_accepts_opaque_cases_without_loading_pytest(tmp_path, monk
 
 def test_selected_adapter_validates_coverage_reference_and_canonical_checks_stay_pinned(tmp_path):
     workspace, root = probe_policy(tmp_path)
-    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(case_id="사례 / 1"))
+    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(external=True, case_id="사례 / 1"))
     run = api.start(domain_id="develop", goal="goal", workspace=str(workspace), parameters={}, policy_id="probe", request_id="start")["run_id"]
     with pytest.raises(HarnessError) as error:
         api.revise(run, {"expected_revision": 1, "parameters": {"execution_checks": [
@@ -198,7 +198,7 @@ def test_selected_adapter_validates_coverage_reference_and_canonical_checks_stay
 def test_live_same_develop_joins_other_adapter_observations_and_gates(tmp_path, monkeypatch, ok):
     monkeypatch.setitem(sys.modules, "harness_external.pytest_adapter", None)
     workspace, root = probe_policy(tmp_path, ok=ok)
-    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(case_id="사례 / 1"))
+    api = Harness(tmp_path / "state", policy_root=root, adapters=probe_registry(external=True, case_id="사례 / 1"))
     run = api.start(domain_id="develop", goal="한글 관측", workspace=str(workspace), parameters={}, policy_id="probe", request_id="start")["run_id"]
     api.submit(run, "submit")
     job_id = api.verify(run, "verify")["job_id"]
@@ -219,16 +219,17 @@ def test_live_same_develop_joins_other_adapter_observations_and_gates(tmp_path, 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="Unicode pytest cases through real Sandbox and detached worker")
 def test_live_unicode_pytest_case_preserves_exact_binding(tmp_path):
-    from test_pytest_domain import policy_fixture
+    from test_pytest_domain import advisory_fixture, start_advisory
     case = "test_cases.py::test_한글"
-    api, workspace, _ = policy_fixture(tmp_path, "from app import value\ndef test_한글(): assert value() == 1\n", required=case)
-    run = api.start(domain_id="develop", goal="한글 테스트 연결", workspace=str(workspace), parameters={}, request_id="start")["run_id"]
+    api, workspace, definition = advisory_fixture(tmp_path, "from app import value\ndef test_한글(): assert value() == 1\n", required=case)
+    run = start_advisory(api, workspace, definition, goal="한글 테스트 연결")["run_id"]
     api.submit(run, "submit")
     job_id = api.verify(run, "verify")["job_id"]
     job = wait_job(api, run, job_id)
     assert job["result"]["status"] == "passed", job
     assert api.records(run, "cases", job_id=job_id)["items"][0]["case"]["case_id"] == case
-    assert job["result"]["requirement_observations"]["requirements"][0]["linked_cases_passed"]
+    assert job["result"]["requirement_observations"]["requirements"][0]["reported_cases_passed"]
+    assert not job["result"]["requirement_observations"]["requirements"][0]["linked_cases_passed"]
     assert api.finish(run, "finish", outcome="completed")["record"]["ready"] is False
 
 

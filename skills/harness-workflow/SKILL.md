@@ -5,130 +5,96 @@ description: Use Base Harness External to track and verify agent work when the u
 
 # Harness workflow
 
-You solve the user's task with the Host's existing tools. Harness owns Run state,
-contracts, submitted snapshots and measured facts; it does not call a model.
-Use this workflow for an explicitly requested Harness task or an opted-in workspace.
-Installation alone does not opt every unrelated task into Harness.
+Use the Host's existing model, editing and discovery tools. Harness owns the
+original intent, policy, Run state, Candidate snapshots and verification records.
+Installation alone does not opt unrelated work into this workflow.
 
-## Connect and prepare
+## Connect once
 
-Run bundled `scripts/harness_client.py` with the persistent installation config.
-Read [the caller protocol](references/protocol.md) when setting up a connection,
-recovering an unknown outcome, or using advanced read references. Use
-`preflight` when execution capability is unknown, `bind` once for an explicitly
-selected Run, and `checkpoint` for submit/verify/wait. These helpers make no task,
-assessment or closeout decisions. For other actions, `call --operation ...
---arguments json:{...}` constructs and sends one request. Supply `--binding` for
-an existing Run; omit `run_id` from those arguments. Mutations also need an
-intentional `--action-id` and `--output REQUEST_FILE`, saved before dispatch.
-Use `call --request REQUEST_FILE` to replay that exact intent after response loss.
-On a new session, use `context --binding ... --complete` without a cursor. The
-helper validates all pages and returns lossless `data`, `texts` and `text_refs`;
-read their contents. Afterwards, use `--complete --after CURSOR` for changes.
-If the Host loses context, request a full transfer again; a saved binding is not
-evidence that the model remembers earlier pages. Inspect `critical` even when the
-delta is empty. `--complete` delivers a cursor only after every page validates;
-it does not mean the model retained the delivered text.
-For repeated progress checks after restoring context, `resume` with `view: compact`
-returns a smaller view. Use `records` with `view: references` and fetch only needed
-`detail` references for large observations. `call --operation records --binding ...
---arguments json:{"kind":...,"detail":...} --resolve-detail` retrieves and validates
-only the selected detail. Compact views do not replace context restoration after memory loss.
-For failure investigation, `call --operation status --binding ... --arguments
-json:{"job_id":...} --format attention` returns bounded exceptions and requirement
-links. Check its pagination, known gaps and `not_queried`; fetch details when needed.
-If configuration/runtime is absent, report the missing setup. Do not guess another
-checkout, create a temporary production state store, or silently bypass Harness.
+Run bundled `scripts/harness_client.py` with the operator's persistent config,
+selected by `--config PATH` or `BASE_HARNESS_CLIENT_CONFIG`. Use `preflight`
+when the actual execution path is unknown. A configured `server_socket` uses an
+operator-started external Harness; the same endpoint handles preflight and work.
+Missing setup or an unavailable Sandbox is a limitation, not permission to run
+verification directly on the Host. Do not guess another checkout or state store.
 
-- Preserve the user's original request and constraints. Prepare checks only obvious
-  missing information, contradictions and scope misunderstandings; interpretation
-  is revisable, not the definitive solution. Ask only when ambiguity changes scope,
-  authority or the intended result.
-- For a resumed task, find and inspect the existing Run's goal, workspace, Domain,
-  lifecycle and active job. Explicitly use that Run ID. Never select a Run merely
-  because it is newest, or hide missing state by starting another one.
-- Use the operator-configured Domain acceptance profile when one is installed;
-  `mode: acceptance` keeps mandatory checks/test bundles separate from your
-  exploratory probes. Do not create or edit operator approvals as part of solving
-  the task. Without a configured policy, label caller-defined criteria and coverage
-  limitations honestly; do not invent independent approval.
-- A binding file only caches immutable references. Core remains authoritative.
-  Give each intentional action an ID; repeat that ID only to retransmit the same
-  request. Keep the exact saved request after response loss. A new checkpoint ID
-  means a new submission, not a retry of a lost response.
+Use `describe --operation NAME` to see exact input fields without config or a
+Core call. Read [the protocol](references/protocol.md) for installation/recovery,
+a missing schema detail, advanced records, or runtime transitions; ordinary calls
+do not require loading the entire reference.
 
-## Explore, execute and measure
+Start with the original goal and constraints. Use the configured acceptance
+policy when present. Otherwise explicitly choose the task's policy and declare
+model-authored criteria as `provenance: {"declared_author":"model"}`; this is not
+user approval. Unknown scope can remain exploratory and revisable.
+Prepare checks obvious omissions/contradictions; it does not fix the solution.
+Use `call --operation start --arguments json:{...} --action-id ...
+--output REQUEST_FILE --binding-output BINDING_FILE --format compact` to start
+and save a binding in one call. The arguments are operation fields, not another
+request envelope. `describe` includes the exact CLI template.
 
-Use `analysis_guidance` as Domain reasoning support. Discover task-specific unknowns
-whose answers could change a design choice, code change or verification decision;
-do not restate already settled requirements. Use relevant analysis perspectives,
-then choose useful Knowledge Map sources or other evidence with Host tools. Apply
-what you learn to the solution, revisiting assumptions when execution contradicts
-them. Skip irrelevant perspectives and stop discovery when the next action is
-sufficiently supported. Ask the user when uncertainty changes authority, scope or
-the intended result rather than silently deciding it.
+For an existing Run, inspect its goal, workspace, Domain and lifecycle before
+binding it. Never choose the newest Run automatically. Save one explicit binding
+with `bind --run-id ... --workspace ... --domain ... --output ...`.
+Bindings cache references only; Core remains authoritative.
 
-When a useful perspective is known, pass `analysis_selection` on `start` or a
-read-only `resume` to request just those perspectives/knowledge entries. Develop
-selects linked knowledge by default. Omitting selection keeps the complete map;
-an empty object (`{}`) restores it. See the protocol for IDs and request examples.
-Advice selection is a read preference: it does not require `revise`, Need records
-or a new action ID. Original goals, constraints and verification criteria remain
-available through the normal context/contract views.
+## Investigate and implement
 
-This is ordinary reasoning, not a Need registration/closure workflow. No Need
-IDs, required question count or extra Harness calls are needed. Preserve a brief
-consequential decision and source only when useful for handoff. Do not create or
-revise records solely to demonstrate that analysis happened. Only change contract
-or check declarations when their actual meaning or scope changes.
+Use relevant Domain `analysis_guidance`: identify an unresolved fact, the design
+decision it affects, and an observation that distinguishes plausible answers.
+Selected perspectives connect inspection, decision and counterexample checks.
+Use Host tools to inspect the relevant symbol, caller and assertion; stop when
+the next action is supported. No Need IDs, quotas or extra tracking calls are
+required. Preserve consequential decisions and sources when useful for handoff.
 
-For explicitly requested legacy Need tracking, the optional
-[record protocol](references/need-records.md) remains available. It is not part
-of the default analysis path and does not decide completion.
+Use `analysis_selection` on start or read-only resume for needed perspectives or
+knowledge entries. Omission retains the full map; `{}` restores the stored map.
+Advice does not alter criteria or grant an operation. Revise checks/interpretation
+only when their actual meaning or input scope changes.
 
-Plan, decompose, delegate when appropriate and try alternatives using the Host's
-existing capabilities and permissions. Do not add a model loop to Harness or make
-the helper decide the solution. Skill instructions do not expand authorization.
+Declare all code/fixture inputs needed for verification. Mandatory case checks
+require an observer outside the Candidate process, such as
+`process-observations-v1`. In-process pytest is an auxiliary framework report:
+its `passed` or `executed` fields cannot satisfy a mandatory case gate.
+Do not downgrade a pinned policy to accommodate an unavailable/unsupported check.
+Tests, their author and configured approval are distinct; passing checks do not
+prove that their criteria cover the entire goal.
 
-Revise the working interpretation/check proposals when observations warrant it.
-Declare the complete input scope needed by the chosen checks, including tests and
-fixtures. Use task/Domain reasoning to consider the intended runtime environment:
-a Linux measurement is not evidence of Windows behavior. Missing execution support
-is an explicit limitation, not permission to bypass the strict Sandbox.
+## Submit, inspect, decide
 
-At meaningful checkpoints, use `checkpoint --binding ... --action-id ...`.
-`wait_status: pending` means the observation window ended, not that the job failed;
-use `wait` for the same job. After an intentional edit, use a new checkpoint ID.
-For change/regression evidence, capture the baseline before editing and request
-`--compare-baseline`. An improved check does not prove the whole goal was met.
+At an intentional checkpoint use `checkpoint --binding ... --action-id ...
+--wait-seconds 30`. It performs submit/verify/wait, not assessment or repair.
+`pending` ends the observation window, not the job; wait on the same job.
+A new action ID means a new intentional action. After response loss, replay the
+IDENTICAL saved request/ID or query its Run; never automatically invent another.
+For other mutations, `call --operation ... --arguments json:{...} --binding ...
+--action-id ... --output REQUEST_FILE` saves the exact request before dispatch.
 
-Read actual observations, `measurement_scope`, requirement links and limitations.
-A process exit is not a count of tests or independent goal validation. A mandatory
-command that cannot run stays unavailable, not replaced with a substring check.
-Verifier facts do not order
-a retry: you decide whether to revise, try another method, stop partially, or ask
-the user. Keep caller observations and direct Host tests distinct from Harness
-measurements. Do not convert a test skip or unavailable runtime into a pass.
+After context loss, use `context --binding ... --complete` without a cursor and
+read its contents. Afterwards use its cursor for deltas, or `resume` with
+`view: compact` for progress. `operation_constraints` explains known blockers,
+not authorization or proof that the runtime/file checks will pass.
 
-## Close out or hand off
+Use `--format attention` on a bound status/resume read to collect failures,
+requirement links and evidence boundaries. Preserve skips, unavailability,
+framework-only reports, known gaps and pagination. Fetch an exact raw detail
+with `records` and `--resolve-detail` when needed.
+Capture a baseline before edits if comparing original and revised behavior.
+A baseline improvement concerns that check, not complete goal correctness.
 
-Before reporting success, compare current submitted files with the verified
-Candidate, inspect gates and unresolved work, and assess the observations that
-actually concern the current Candidate/check set. A past measurement can inform
-reasoning but is not current proof. Report scope changes rather than rewriting the
-original goal. Do not erase failed attempts or reset budgets by quietly creating Runs.
+Verifier facts do not order a retry. Decide whether to repair, explore, retain
+uncertainty or stop. Direct Host tests remain caller observations, not Harness
+measurements. A Linux result does not establish Windows behavior.
 
-Use `finish` with the disposition supported by the facts and current policy. A
-mandatory-policy change requires explicit operator configuration and a new Run
-linked to its terminal predecessor and reason; do not quietly reset the task.
-On a budget/deadline boundary, explain the remaining work and preserve the Run for
-inspection; do not continue by silently resetting the policy. On interruption,
-record a concise decision/next step when possible and restore `context` next time.
-Legacy `resume` remains available. A runtime-version change needs the old runtime
-or an explicitly linked new Run; never transfer old passing evidence as new proof.
+## Finish or hand off
 
-The final user report needs the deliverable, actual measurements and skips, remaining
-uncertainty and the Run ID (or a linked report containing it). Distinguish measured
-results, model assessment and lifecycle closure. All current results are unsigned
-`local-advisory`, `ready=false`, not protected certification. Skill adherence is not
-a security boundary, and a separate directory does not defeat same-user tampering.
+Compare current submitted files with the verified Candidate; inspect current
+gates, observation scope, unresolved work and uncertainty before choosing
+`finish`. Keep measured facts, model assessment and lifecycle closure separate.
+Do not edit Harness state, rewrite original intent, weaken mandatory criteria,
+or quietly reset budgets through a new Run. A terminal Run/policy/runtime change
+needs the explicit linked continuation described in the protocol.
+
+Report the deliverable, actual measurements and skips, remaining uncertainty,
+and Run ID. Results are unsigned `local-advisory`, `ready=false`; neither Skill
+adherence nor a separate directory establishes protected certification.

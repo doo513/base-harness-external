@@ -22,6 +22,30 @@ python3 skills/harness-workflow/scripts/harness_client.py preflight
 Python 패키지 설치 없이 기존 `scripts/harness-tool`을 호출합니다. Bun 또는 namespace
 권한이 없다면 doctor 결과를 먼저 해결하세요. 격리 없는 실행으로 자동 대체하지 않습니다.
 
+호스트의 터미널 제한 때문에 namespace를 만들 수 없다면, 호스트 밖의 일반 WSL/Linux
+터미널에서 같은 Harness를 실행할 수 있습니다. 전용 상태·정책 디렉터리와 허용할
+작업공간을 명시하세요. 모델이나 MCP 서버를 실행하는 기능은 아닙니다.
+
+```sh
+mkdir -m 700 /path/to/private-runtime
+bash scripts/harness-tool --state-dir /path/to/harness-state \
+  serve --socket /path/to/private-runtime/harness.sock \
+  --workspace-root /path/to/projects
+```
+
+소켓은 103바이트 이내의 Linux 파일시스템 경로여야 합니다. 부모 디렉터리는 현재
+사용자 소유의 0700 디렉터리이고, 상태·소켓은 허용 작업공간 밖에 있어야 합니다.
+기존 소켓을 자동 삭제하거나 덮어쓰지 않습니다. 정책이 있다면 `serve` 앞에
+`--policy-root /path/to/policies`를 추가하세요.
+
+도우미 설정에도 같은 `state_dir`·`policy_root`와 `server_socket`을 명시합니다.
+새 설정은 `configure --server-socket ...`으로 만들 수 있습니다. 기존 설정은 명시적으로
+편집하고, 실행 경로를 바꾼 뒤 호스트의 실제 도구에서 `preflight`를 다시 실행하세요.
+연결 실패 시 로컬 실행으로 대체하지 않습니다. 서버 재시작 후에도 Run/Job 이력은
+기존 Core 저장소에 있으며, 재전송에는 동일한 요청 ID와 본문을 사용합니다.
+실행 중 Harness 코드를 갱신하면 `SERVER_RUNTIME_CHANGED`를 반환하므로 서버를
+재시작해야 합니다. 실행 중인 검증과 원래 요청을 확인하고 같은 저장소를 유지하세요.
+
 도우미의 기본 설정은 `$XDG_CONFIG_HOME/base-harness-external/client.json` 또는
 `~/.config/base-harness-external/client.json`입니다. 다른 설정은 모든 호출에 같은
 `--config /absolute/client.json`을 붙이거나 `BASE_HARNESS_CLIENT_CONFIG`로 지정하세요.

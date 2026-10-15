@@ -10,12 +10,32 @@ The helper config pins `harness_repo`, `state_dir`, `state_lifetime` and schema 
 Production uses a durable state directory outside every workspace. `--ephemeral`
 is an explicit disposable-test setting, not a recovery strategy. Setup is documented
 in the repository's `INSTALL.md`; the helper's `configure --help` is self-contained.
-The helper sends one `invoke --request` envelope to the existing CLI, not a second service. Optional `policy_root`
+The helper sends one `invoke --request` envelope to the existing CLI. Optional
+`server_socket` sends that same envelope to an operator-started local Harness
+outside the Host's process restrictions. It creates no second Run store and
+never falls back to local execution. Preflight and task requests share the
+endpoint; state/policy configuration must match the server. Optional `policy_root`
 selects an operator-configured acceptance registry. It is configuration, not a
 field the caller can replace in a task request. Configured Domain defaults cannot
 be overridden by selecting a weaker policy.
 
 ## Low-overhead workflow
+
+`describe --operation NAME` returns actual accepted fields and a CLI template
+without loading configuration or invoking Core. A missing installation reports
+`CONFIG_MISSING`; select its config or set `BASE_HARNESS_CLIENT_CONFIG` once.
+Core validation errors can include bounded `diagnostics` with JSON-pointer
+`path`, `code`, and `message`, plus `diagnostic_count` and
+`diagnostics_truncated`. Fix independent input errors together. This does not
+authorize automatic retries/new IDs after an unknown mutation outcome.
+
+For a fresh Run, `call --operation start ... --output REQUEST_FILE
+--binding-output BINDING_FILE --format compact` saves the returned context
+references without another resume call. The exact start request is still saved
+before dispatch, and identical replay can finish saving the same binding. A
+conflicting binding is never overwritten. `compact` start/finish output keeps
+criteria, policy, uncertainty and recovery references but omits implementation
+manifests; it is not a complete context transfer.
 
 `preflight` runs the real strict Sandbox doctor without creating a task Run. If
 unavailable, preserve the limitation; never fall back to unsandboxed verification.
@@ -127,6 +147,16 @@ After restoring context, use `resume` arguments `{"view":"compact"}` for repeate
 progress checks. `summary` remains the default and includes fuller working
 context. Compact `details.snapshot` identifies the source; it is not a cursor
 proving that the Host has received the omitted context.
+`operation_constraints` lists known blockers for submit, verify and completed
+closeout. It is a read projection, not authorization: invocation still checks
+the current revision, files, runtime and execution ownership.
+
+Case observations distinguish `external_capture` from `subject_process`.
+In-process pytest reports are auxiliary and cannot be mandatory gates. Use an
+external observer for mandatory case facts. A reported pass remains available
+for diagnosis/citation, but `reported_cases_passed` does not mean
+`linked_cases_passed`. Historical reports without a boundary do not become
+independent evidence merely by being read with a newer client.
 
 For large records, `records` with `view: "references"` returns
 `record-projection-v1` items. Each has `source` (`run_id`, `kind`, `record_id`,

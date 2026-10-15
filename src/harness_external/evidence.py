@@ -28,9 +28,13 @@ def scope(items):
             "observations": items}
     cases = [item["case_summary"] for item in items if item.get("case_summary")]
     if cases:
-        result.update(test_case_count=sum(c["executed_count"] for c in cases), test_case_scope="observed_case_runs_in_case_aware_checks",
+        external = [c for c in cases if c.get("observation_boundary") == "external_capture"]
+        reported = [c for c in cases if c.get("observation_boundary") != "external_capture"]
+        result.update(test_case_count=sum(c["executed_count"] for c in external) if external else None,
+                      test_case_scope="externally_observed_predicates" if external else "framework_reported_not_independently_observed",
+                      reported_test_case_count=sum(c["executed_count"] for c in reported),
                       discovered_case_count=sum(c["discovered_count"] for c in cases), selected_case_count=sum(c["selected_count"] for c in cases),
-                      test_case_count_complete=len(cases) == kinds["command"] and all(c["collection_complete"] and c["session_complete"] for c in cases))
+                      test_case_count_complete=len(external) == kinds["command"] and all(c["collection_complete"] and c["session_complete"] for c in external))
     return result
 
 

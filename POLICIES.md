@@ -105,17 +105,22 @@ declared criteria/test authors from the approver and Domain generator. Each valu
 is `user`, `model`, `application` or `unknown`; omission means unknown, not that
 an application authored the tests. These remain configuration claims.
 
-Develop requires a declared bundle for mandatory command checks. Bundle files are
-inputs, not implementation artifacts. Each mandatory check must map to a declared
-requirement. An unmapped requirement remains explicitly uncovered. A requirement
+Develop requires a declared bundle for mandatory commands whose criteria depend
+on test files. External process predicates can instead be defined entirely in
+the pinned policy selector (`criteria_source: selector`). Bundle files are inputs,
+not implementation artifacts. Every mandatory check must map to a requirement,
+and every configured acceptance requirement must reference an admitted mandatory
+check, including file-only requirements. Unmapped requirements remain allowed
+only in caller/exploratory declarations, where they are explicitly uncovered. A requirement
 declared to need commands cannot be mapped to file-only checks. These are format
 and consistency checks, not an LLM judgment that the criteria are sufficient.
 
 The optional `coverage` inventory gives a Domain a typed place to describe which
 pinned test cases are intended to exercise which requirements and checks. Scenario
 `kind` values are `positive`, `negative`, `boundary`, `state_transition`,
-`concurrency`, `recovery` and `fault_injection`. Each `test_ref.path` must be in the
-pinned bundle; `case_id` is an author-declared logical test name. Known gaps require
+`concurrency`, `recovery` and `fault_injection`. A file-defined `test_ref.path` must
+be in the pinned bundle; inline external predicates reference their declared
+observed sources. `case_id` is an author-declared logical observation name. Known gaps require
 a requirement and an explanation. Resume/status exposes scenario counts, known gaps
 and requirements with no inventory entry. Coverage entries are declarations only:
 the Domain does not parse test code or claim per-case execution. The generic verifier
@@ -123,7 +128,38 @@ still measures the configured command as a whole and reports no test-case count.
 All existing required check IDs, gates, baselines and strict Sandbox behavior remain
 unchanged by this inventory.
 
+## External process observations
+
+Mandatory case gates require an observer outside the Candidate process. The
+bundled `process-observations-v1` adapter describes one Sandbox command and
+evaluates its actual captured stdout/stderr in the trusted Worker process:
+
+```json
+{"kind":"cases", "id":"answer", "adapter_id":"process-observations-v1",
+ "selector":{"source_paths":["app.py"], "argv":["python3","app.py"],
+             "cases":[{"id":"exact-answer", "stream":"stdout", "operator":"equals", "expected":"42\n"}]},
+ "required_cases":["exact-answer"]}
+```
+
+Supported predicates are `equals`, nonempty `contains`, and `json_equals` over
+unambiguous JSON. Optional `json_path` selects object keys or nonnegative array
+indexes; comparisons preserve JSON value types. Predicates live in the pinned selector and are never staged
+into the Candidate. `source_paths` names observed input files, not test code;
+coverage can reference those paths and the opaque predicate IDs. A case here is
+an externally evaluated predicate, not proof that an in-process unit test ran.
+The example requires the process to exit zero as well as producing the output.
+It does not prove unrelated behavior or prevent a weak expectation from being
+chosen. Generic command checks still measure exit status, not test-case counts.
+
 ## Pytest case observations
+
+Pytest is now an auxiliary reporting adapter. Test and Candidate code share a
+Python process and can fabricate its event stream, even when runtime files are
+read-only. Its records therefore carry `observation_boundary: subject_process`
+and `trust: framework_reported`. Register it in exploratory mode without making
+it a required gate. A mandatory in-process adapter is rejected with
+`EXTERNAL_OBSERVER_REQUIRED`; changing a previously pinned policy requires an
+explicit new policy/linked Run, never automatic downgrade.
 
 Develop uses `parameters.execution_checks` for both ordinary commands and
 case-aware checks. Selecting the bundled pytest adapter looks like:
@@ -158,9 +194,11 @@ and may set `required: true`. Parameter IDs, including brackets and Unicode, are
 preserved. The declared file and node-ID prefix must agree. Required scenarios
 are compiled into immutable Check rules; ordinary v1 inventory remains advisory.
 Case-aware acceptance test files must belong to the pinned operator bundle.
-See the [pytest queue example](examples/acceptance/policies/pytest-queue/policy.json).
+The [queue example](examples/acceptance/policies/pytest-queue/policy.json) retains
+its historical directory/ID but revision 2 uses external process predicates for
+mandatory verification. Its original pytest tests remain an auxiliary example.
 
-Each case records discovery, selection, protocol start, call-phase execution,
+Each framework report records claimed discovery, selection, protocol start, call-phase execution,
 completion, phase outcomes and duration. `missing` is a derived mapping result
 only after complete collection. A collection error yields `unconfirmed`;
 selection filters yield `not_selected`; an early stop can leave `not_run` or
@@ -185,10 +223,14 @@ and reports `declared_scenarios_observed`, `linked_cases_passed`,
 `linked_checks_passed`, missing/unconfirmed cases and known gaps. It includes its
 execution scope. One case can support several links without counting as several
 executions. A passing linked suite still does not establish goal completeness.
-`measurement_scope.test_case_count` counts observed call-phase executions in
-case-aware checks; `test_case_count_complete` and `test_case_scope` describe its
-limits. Generic command checks keep unknown case counts. Baseline case runs are
-not included in the Candidate's count.
+`measurement_scope.test_case_count` counts externally observed predicates only;
+`reported_test_case_count` separately counts framework-reported execution.
+`test_case_count_complete` and `test_case_scope` describe the scope. Generic
+command checks keep unknown case counts. Baseline observations are excluded from
+Candidate counts. `reported_cases_passed`/`reported_scenarios_observed` retain
+auxiliary reports without asserting `linked_cases_passed` or independently
+observed scenarios. Missing boundary metadata in historical records is not
+upgraded to independent evidence.
 
 ### Domain, Core and execution boundaries
 
@@ -244,11 +286,20 @@ The framework-neutral `ExecutionAdapter` port has four methods:
   `feed(event)` returns a completed normalized case or None; `finish(error)`
   returns the normalized session summary, including incomplete facts.
 
+An optional `observe_capture(capture, check)` method selects the external-observer
+route. The common transport executes `command(check)` in strict Sandbox,
+validates its input receipt, and only then calls this method outside the
+Candidate. `stage`/`observer` are not called and no reporting token/resource is
+mounted. The method is fingerprinted with the adapter implementation. Candidate
+events and caller-provided trust labels cannot select this route. No admitted
+process capture means no case observation checkpoint.
+
 To use the same Develop compiler, an adapter also implements the optional
 `CaseSchemaAdapter` data-only capability:
 
 - `normalize_selection(selector, inputs, required_cases)` validates framework
-  syntax and returns `{selector, source_paths}`. It may not widen input scope or
+  syntax and returns `{selector, source_paths}` and optional
+  `criteria_source: files|selector`. It may not widen input scope or
   change required-case IDs/outcome criteria.
 - `validate_reference(selector, reference)` rejects incompatible case/source
   links. Case IDs are opaque to Develop; their grammar belongs here.

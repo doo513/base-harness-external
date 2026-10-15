@@ -31,10 +31,10 @@ def case(tmp_path, monkeypatch):
     return Harness(tmp_path / "state"), workspace
 
 
-def start(case, params, *, mode="exploratory", request_id="start"):
+def start(case, params, *, mode="exploratory", request_id="start", required_checks=None):
     api, workspace = case
     return api.start(domain_id="develop", goal="Preserve existing data", workspace=str(workspace),
-                     parameters=params, mode=mode, request_id=request_id, provenance={"declared_author": "model"})
+                     parameters=params, mode=mode, required_checks=required_checks, request_id=request_id, provenance={"declared_author": "model"})
 
 
 def measure(api, run_id, key="verify"):
@@ -184,6 +184,33 @@ def test_configured_requirements_share_schema_and_keep_channel_authority(configu
     assert begun["contract"]["observation_links"]["requirements"][0]["requirement_id"] == "addition"
 
 
+@pytest.mark.parametrize("minimum", ["file", "command", "testcase"])
+def test_acceptance_rejects_each_unmapped_requirement_before_creating_run(configured, minimum):
+    api, workspace, root, definition = configured
+    definition["requirements"].append({
+        "id": "preserve-history", "statement": "Preserve all prior records",
+        "check_ids": [], "minimum_evidence": minimum,
+    })
+    (root / "sum/policy.json").write_text(json.dumps(definition), encoding="utf-8")
+    with pytest.raises(HarnessError) as error:
+        api.start(domain_id="develop", goal="Add integers and preserve records",
+                  workspace=str(workspace), parameters={}, request_id="unmapped")
+    assert error.value.code == "REQUIREMENT_UNMAPPED"
+    assert "preserve-history" in str(error.value)
+    assert api.list_runs()["items"] == []
+
+
+def test_acceptance_still_rejects_a_mandatory_check_without_a_requirement(configured):
+    api, workspace, root, definition = configured
+    definition["requirements"][0]["check_ids"] = ["domain.behavior"]
+    (root / "sum/policy.json").write_text(json.dumps(definition), encoding="utf-8")
+    with pytest.raises(HarnessError) as error:
+        api.start(domain_id="develop", goal="Add integers", workspace=str(workspace),
+                  parameters={}, request_id="unmapped-check")
+    assert error.value.code == "REQUIREMENT_REFERENCE"
+    assert api.list_runs()["items"] == []
+
+
 def test_requirement_implementation_is_part_of_domain_identity(monkeypatch):
     from pathlib import Path
     from harness_external.registry import builtin_registry
@@ -292,14 +319,15 @@ def test_live_declared_conditions_join_current_cases_and_preserve_completion_pol
     api, workspace = case
     (workspace / "app.py").write_text("def value(): return 1\n", encoding="utf-8")
     (workspace / "test_app.py").write_text(source, encoding="utf-8")
-    begun = start(case, case_parameters(), mode="strict")
+    begun = start(case, case_parameters(), required_checks=["domain.entry"])
     run_id = begun["run_id"]
     job = measure(api, run_id)
     assert job["status"] == "completed", job
     observed = job["result"]["requirement_observations"]
     requirement = observed["requirements"][0]
     assert requirement["scenarios"][0]["status"] == outcome
-    assert requirement["linked_cases_passed"] is (outcome == "passed")
+    assert requirement["reported_cases_passed"] is (outcome == "passed")
+    assert requirement["linked_cases_passed"] is False
     assert observed["requirements"][1]["known_gap_ids"] == ["recovery-gap"]
     assert not observed["requirements"][1]["linked_checks_passed"]
     assert job["result"]["status"] == ("passed" if outcome == "passed" else "failed")
@@ -309,6 +337,7 @@ def test_live_declared_conditions_join_current_cases_and_preserve_completion_pol
         assert completed["resolution"]["certification"] == "not_issued"
         assert completed["record"]["ready"] is False
     else:
-        with pytest.raises(HarnessError) as error:
-            api.finish(run_id, "finish", outcome="completed")
-        assert error.value.code == "VERIFICATION_REQUIRED"
+        # Auxiliary framework failure remains a fact, without silently becoming
+        # a mandatory gate. External-gate failures are covered separately.
+        assert api.resume(run_id)["gates"]["status"] == "passed"
+        assert requirement["linked_checks_passed"] is False

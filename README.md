@@ -2,7 +2,8 @@
 
 A model-free Develop Harness called by an existing agent through a JSON CLI.
 It owns independent Run state, pinned contracts, snapshots and verification jobs.
-It does not include a model gateway, agent Host, UI or MCP server.
+It does not include a model gateway, agent Host, UI or MCP server. An optional
+local socket transport serves the same API outside a restricted Host process.
 
 The repository also ships a portable [harness-workflow Skill](skills/harness-workflow/SKILL.md)
 and a small caller helper. Follow [Skill + Harness installation](INSTALL.md) to
@@ -19,13 +20,19 @@ and bounded `wait`, without automatic assessment, repair or closeout.
 For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 Develop also supports [pytest case observations](POLICIES.md#pytest-case-observations):
 exact scenario bindings, selected/executed/outcome facts and scoped requirement
-reports. The optional pytest runtime is isolated in the existing Sandbox.
+reports. The optional pytest runtime is isolated in the existing Sandbox, but
+its in-process case events are auxiliary framework reports, not independent
+evidence. Mandatory case gates require an external observer such as the bundled
+`process-observations-v1`, which evaluates captured output outside the Candidate
+process. Existing mandatory pytest policies fail with `EXTERNAL_OBSERVER_REQUIRED`;
+they are never silently downgraded.
 Domain compiles declarative links; Core joins their opaque IDs to scoped facts.
 Worker does not import Develop to aggregate results, and the pytest adapter owns
 its private execution command. See [responsibility boundaries](POLICIES.md#domain-core-and-execution-boundaries).
 Applications can [register verifier adapters](POLICIES.md#adapter-interface-and-application-registration)
 through the common port; detached Workers restore pinned registrations without
-framework-specific dispatch code. Pytest is the only bundled production adapter.
+framework-specific dispatch code. Bundled adapters provide auxiliary pytest
+reporting and external process-output observations.
 `bash scripts/harness-tool` runs the checkout without an editable installation
 and works from another working directory when given its absolute path.
 
@@ -44,6 +51,9 @@ checks reuse the existing Bun/Linux-namespace Sandbox (also inside WSL) through 
 adapter; file-only structural checks do not need Bun. In this first release,
 command checks require this source checkout and Bun on PATH (or `BUN`). A missing
 adapter/Sandbox returns incomplete verification, never an unsandboxed fallback.
+If the Host's terminal cannot create namespaces, an operator can start `serve`
+outside that restriction and configure the helper's `server_socket`. Both
+preflight and verification use that endpoint. See [installation](INSTALL.md).
 
 The default independent state directory is `$XDG_STATE_HOME/base-harness-external`
 (falling back to `~/.local/state/base-harness-external`) on Linux, or

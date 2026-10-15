@@ -21,8 +21,9 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 PROBE_ID = 'fixture-probe-v1'
 
 
-def probe_registry(**config):
-    return AdapterRegistry([AdapterRegistration(PROBE_ID, 'probe_adapter_fixture:ProbeAdapter', config, str(FIXTURES))])
+def probe_registry(*, external=False, **config):
+    factory = 'ExternalProbeAdapter' if external else 'ProbeAdapter'
+    return AdapterRegistry([AdapterRegistration(PROBE_ID, 'probe_adapter_fixture:' + factory, config, str(FIXTURES))])
 
 
 def probe_check(delay=0):
@@ -185,7 +186,7 @@ def test_adapter_implementation_is_pinned_before_first_verification(tmp_path):
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
     (workspace / 'probe_data.json').write_text('{"ok":true}')
-    adapters = probe_registry(case_id='original')
+    adapters = probe_registry(external=True, case_id='original')
     api = Harness(tmp_path / 'state', domains=DomainRegistry([ProbeDomain()]), adapters=adapters)
     run_id = api.start(domain_id='adapter-probe', goal='Pinned execution', workspace=str(workspace), parameters={}, request_id='start')['run_id']
     api.submit(run_id, 'submit')
@@ -196,12 +197,13 @@ def test_adapter_implementation_is_pinned_before_first_verification(tmp_path):
     assert api.status(run_id)['run']['verification_attempts'] == 0
 
 
-def start_probe(tmp_path, *, ok=True, case_id='opaque case / 1', delay=0):
+def start_probe(tmp_path, *, ok=True, case_id='opaque case / 1', delay=0, external=True):
     workspace = tmp_path / 'workspace'
     workspace.mkdir(parents=True)
     (workspace / 'probe_data.json').write_text(json.dumps({'ok': ok}))
-    api = Harness(tmp_path / 'state', domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry(case_id=case_id))
-    run_id = api.start(domain_id='adapter-probe', goal='Observe input fact', workspace=str(workspace), parameters={'delay': delay}, request_id='start')['run_id']
+    api = Harness(tmp_path / 'state', domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry(external=external, case_id=case_id))
+    options = {} if external else {'mode': 'exploratory', 'deferred_checks': ['independent-observer']}
+    run_id = api.start(domain_id='adapter-probe', goal='Observe input fact', workspace=str(workspace), parameters={'delay': delay}, request_id='start', **options)['run_id']
     api.submit(run_id, 'submit')
     job_id = api.verify(run_id, 'verify')['job_id']
     return api, run_id, job_id
@@ -222,7 +224,7 @@ def wait_job(api, run_id, job_id):
 @pytest.mark.parametrize('ok', [True, False])
 def test_live_external_adapter_detached_worker_and_restart(tmp_path, ok):
     api, run_id, job_id = start_probe(tmp_path, ok=ok)
-    restored = Harness(api.store.root, domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry())
+    restored = Harness(api.store.root, domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry(external=True))
     job = wait_job(restored, run_id, job_id)
     assert job['status'] == 'completed', job
     assert job['result']['status'] == ('passed' if ok else 'failed'), job
@@ -231,7 +233,7 @@ def test_live_external_adapter_detached_worker_and_restart(tmp_path, ok):
     assert case['adapter_identity']['implementation']['id'] == PROBE_ID
     assert job['pid'] != os.getpid()
     if ok:
-        wrong_config = Harness(api.store.root, domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry(case_id='changed'))
+        wrong_config = Harness(api.store.root, domains=DomainRegistry([ProbeDomain()]), adapters=probe_registry(external=True, case_id='changed'))
         with pytest.raises(HarnessError) as error:
             wrong_config.finish(run_id, 'wrong-configuration', outcome='completed')
         assert error.value.code == 'ADAPTER_IMPLEMENTATION_CHANGED'
@@ -255,7 +257,7 @@ def test_live_two_sessions_do_not_replace_each_others_adapter(tmp_path):
 
 @pytest.mark.skipif(os.environ.get('BASE_HARNESS_EXTERNAL_LIVE') != '1', reason='registered adapter cancellation and checkpoint ownership')
 def test_live_cancelled_plugin_keeps_facts_without_success(tmp_path):
-    api, run_id, job_id = start_probe(tmp_path, delay=10)
+    api, run_id, job_id = start_probe(tmp_path, delay=10, external=False)
     deadline = time.monotonic() + 30
     while not api.records(run_id, 'cases', job_id=job_id)['items']:
         assert time.monotonic() < deadline

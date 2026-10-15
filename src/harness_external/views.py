@@ -3,6 +3,40 @@ from harness.common import canonical_hash
 from . import semantics
 
 
+def operation_constraints(run, gates):
+    """Cheap read-only reasons, not permission or a successful admission promise.
+
+    File integrity, runtime availability and concurrent revision checks still
+    occur when the chosen operation is invoked. No action is selected here.
+    """
+    common = ["RUN_CLOSED"] if run["status"] == "finished" else ["RUN_NOT_ACTIVE"] if run["status"] != "active" else []
+    if run["active_job"]:
+        common = [*common, "VERIFICATION_ACTIVE"]
+    operations = {}
+    available = run["domain_preparation"]["available_operations"]
+    for operation in ("submit", "verify", "finish_completed"):
+        reasons = list(common)
+        if operation not in available:
+            reasons.append("NEEDS_INPUT")
+        if operation in {"submit", "verify"} and run["actions"] >= run["limits"]["max_actions"]:
+            reasons.append("ACTION_BUDGET_EXHAUSTED")
+        if operation == "verify":
+            if run["candidate"] is None:
+                reasons.append("SUBMIT_REQUIRED")
+            if run["verification_attempts"] >= run["limits"]["max_verifications"]:
+                reasons.append("VERIFICATION_BUDGET_EXHAUSTED")
+            if not semantics.current_checks(run):
+                reasons.append("CHECKS_REQUIRED")
+        if operation == "finish_completed":
+            if run["domain_questions"] or gates["status"] not in {"passed", "not_required"} or (
+                    run["policy"]["mode"] == "strict" and run["verification"]["status"] != "passed"):
+                reasons.append("VERIFICATION_REQUIRED")
+            if run["contract"]["rules"].get("snapshot_required", False) and run["candidate"] is None:
+                reasons.append("SUBMIT_REQUIRED")
+        operations[operation] = {"blocked_by": list(dict.fromkeys(reasons))}
+    return {"meaning": "known_preconditions_not_authorization", "operations": operations}
+
+
 def job_view(job, *, compact=False):
     value = {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
             "deadline_at", "completed_checks", "total_checks", "observed_cases", "completed_cases", "error", "check_set_hash", "candidate_hash")},
@@ -42,6 +76,7 @@ def compact_resume(run, jobs, counts, gates, snapshot):
     measurement["measurement_scope"] = {key: body for key, body in scope.items() if key != "observations"}
     measurement["measurement_scope"]["observation_count"] = len(scope.get("observations", []))
     return {"view": "compact", "run": state, "intent_ref": run["intent"]["ref"], "policy_ref": run["policy"]["ref"],
+            "operation_constraints": operation_constraints(run, gates),
             "interpretation_ref": run["interpretations"][-1]["ref"],
             "usage": {"actions": run["actions"], "verification_attempts": run["verification_attempts"]},
             "limits": run["limits"], "candidate": {key: run["candidate"][key] for key in ("candidate_id", "candidate_hash", "subject")} if run["candidate"] else None,
