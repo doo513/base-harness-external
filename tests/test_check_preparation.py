@@ -289,9 +289,94 @@ def test_runner_capture_reads_utf8_under_ascii_defaults(tmp_path, monkeypatch):
     assert json.loads(report.read_text(encoding="utf-8"))["token"] == "한글 토큰"
 
 
+def text_io_without_utf8(source):
+    tree = ast.parse(source)
+    modules = {name: name for name in ("builtins", "io", "os")}
+    functions = {"open": "builtins.open"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update((item.asname or item.name, item.name) for item in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module in {"builtins", "io", "os"}:
+            functions.update((item.asname or item.name, node.module + "." + item.name) for item in node.names)
+
+    def argument(call, name, position, default=None):
+        return next((item.value for item in call.keywords if item.arg == name),
+                    call.args[position] if position is not None and len(call.args) > position else ast.Constant(default))
+
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        qualified = functions.get(function.id) if isinstance(function, ast.Name) else None
+        if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+            qualified = modules.get(function.value.id, "") + "." + function.attr
+        if qualified == "os.open":
+            continue  # Raw descriptor flags, not a text stream or an encoding API.
+        if qualified in {"builtins.open", "io.open", "os.fdopen"}:
+            mode = argument(node, "mode", 1, "r")
+            encoding = argument(node, "encoding", 3)
+        elif isinstance(function, ast.Attribute) and function.attr in {"read_text", "write_text", "open"}:
+            if function.attr == "open":  # Path / Traversable file-like API.
+                mode = argument(node, "mode", 0, "r")
+                encoding = argument(node, "encoding", 2)
+            else:
+                mode = ast.Constant("r")
+                encoding = argument(node, "encoding", 0 if function.attr == "read_text" else 1)
+        else:
+            continue
+        if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and "b" in mode.value:
+            continue
+        if not (isinstance(encoding, ast.Constant) and encoding.value == "utf-8"):
+            violations.append(node.lineno)
+    return sorted(violations)
+
+
+def test_utf8_guard_detects_text_open_without_encoding():
+    assert text_io_without_utf8('open("data.json")') == [1]
+
+
+@pytest.mark.parametrize("source", [
+    'path.read_text()', 'path.write_text("결과")',
+    'path.read_text(encoding=None)', 'path.write_text("결과", encoding="locale")',
+    'path.open()', 'path.open("r")', 'path.open(mode="w")',
+    'path.open("a", encoding=None)', 'path.open("w", encoding="ascii")',
+    'open("data.json", "r")', 'open("data.json", mode="a")',
+    'open("data.json", encoding=None)', 'open("data.json", mode=chosen_mode)',
+    'io.open("data.json")', 'builtins.open("data.json", "x")',
+    'os.fdopen(descriptor)', 'os.fdopen(descriptor, mode="w")',
+    'import io as streams\nstreams.open("data.json")',
+    'from io import open as read_file\nread_file("data.json")',
+    'from builtins import open as read_file\nread_file("data.json")',
+    'from os import fdopen as descriptor_stream\ndescriptor_stream(descriptor)',
+])
+def test_utf8_guard_rejects_implicit_or_non_utf8_text_io(source):
+    assert text_io_without_utf8(source) == [len(source.splitlines())]
+
+
+@pytest.mark.parametrize("source", [
+    'path.read_text(encoding="utf-8")', 'path.read_text("utf-8")',
+    'path.write_text("결과", encoding="utf-8")', 'path.write_text("결과", "utf-8")',
+    'path.open(encoding="utf-8")', 'path.open("w", encoding="utf-8")',
+    'path.open("r", -1, "utf-8")',
+    'open("data.json", encoding="utf-8")', 'open("data.json", "w", -1, "utf-8")',
+    'io.open("data.json", "r", encoding="utf-8")',
+    'builtins.open("data.json", "a", encoding="utf-8")',
+    'os.fdopen(descriptor, encoding="utf-8")',
+    'import io as streams\nstreams.open("data.json", encoding="utf-8")',
+    'from io import open as read_file\nread_file("data.json", encoding="utf-8")',
+    'open("data.json", "rb")', 'open("data.json", mode="wb")',
+    'path.open("rb")', 'path.open(mode="xb")',
+    'io.open("data.json", "r+b")', 'os.fdopen(descriptor, "rb")',
+    'os.open("data.json", os.O_RDONLY)',
+    'import os as descriptors\ndescriptors.open("data.json", descriptors.O_RDONLY)',
+    'from os import open as open_descriptor\nopen_descriptor("data.json", 0)',
+])
+def test_utf8_guard_preserves_explicit_utf8_and_binary_descriptor_io(source):
+    assert text_io_without_utf8(source) == []
+
+
 def test_managed_text_io_always_declares_utf8():
     root = Path(__file__).resolve().parents[1]
     for path in (root / "src").rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"read_text", "write_text"}:
-                assert any(k.arg == "encoding" and isinstance(k.value, ast.Constant) and k.value.value == "utf-8" for k in node.keywords), (path, node.lineno)
+        assert not (lines := text_io_without_utf8(path.read_text(encoding="utf-8"))), (path, lines)
