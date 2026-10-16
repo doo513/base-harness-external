@@ -23,10 +23,19 @@ Core call. Read [the protocol](references/protocol.md) for installation/recovery
 a missing schema detail, advanced records, or runtime transitions; ordinary calls
 do not require loading the entire reference.
 
+For Domain parameters, use `describe --domain develop --adapter ADAPTER_ID`.
+It queries the configured registry once and returns the Domain and selector
+schemas. Reuse those fields instead of reading helper implementation code.
+
 Start with the original goal and constraints. Use the configured acceptance
 policy when present. Otherwise explicitly choose the task's policy and declare
 model-authored criteria as `provenance: {"declared_author":"model"}`; this is not
 user approval. Unknown scope can remain exploratory and revisable.
+Pass the full original request with `--goal-file /absolute/request.txt` or `goal`;
+attach explicitly supplied specifications with `--source spec=/absolute/SPEC.md`.
+Do not replace those originals with a summary. Requirement `source_refs` address
+1-based inclusive lines in `goal` or a named source. Inspect `verification_plan`
+for unmapped source IDs, missing scenarios and unsuitable observation kinds.
 Prepare checks obvious omissions/contradictions; it does not fix the solution.
 Use `call --operation start --arguments json:{...} --action-id ...
 --output REQUEST_FILE --binding-output BINDING_FILE --format compact` to start
@@ -59,6 +68,10 @@ its `passed` or `executed` fields cannot satisfy a mandatory case gate.
 Do not downgrade a pinned policy to accommodate an unavailable/unsupported check.
 Tests, their author and configured approval are distinct; passing checks do not
 prove that their criteria cover the entire goal.
+For CLI behavior, the external process observer accepts disposable `fixtures`,
+an `expected_exit_code`, and stdout/stderr or file-state cases. File observations
+come from outside the Candidate. An `unchanged` case must name the actual file
+whose preservation matters; a different file does not exercise that requirement.
 
 ## Submit, inspect, decide
 
@@ -94,6 +107,8 @@ gates, observation scope, unresolved work and uncertainty before choosing
 Do not edit Harness state, rewrite original intent, weaken mandatory criteria,
 or quietly reset budgets through a new Run. A terminal Run/policy/runtime change
 needs the explicit linked continuation described in the protocol.
+An empty failure list with no declared requirements is unknown coverage.
+Include the reported evidence gaps even when all configured checks passed.
 
 Report the deliverable, actual measurements and skips, remaining uncertainty,
 and Run ID. Results are unsigned `local-advisory`, `ready=false`; neither Skill

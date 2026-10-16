@@ -22,6 +22,7 @@ EXECUTION_FILES = (
     "harness_external/adapter_ports.py", "harness_external/adapter_registry.py", "harness_external/adapter_loading.py",
     "harness_external/execution_inputs.py",
     "harness_external/check_preparation.py",
+    "harness_external/intent_sources.py",
 )
 
 

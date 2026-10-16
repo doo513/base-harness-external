@@ -20,7 +20,8 @@ from .registry import builtin_registry
 from .adapter_registry import builtin_adapter_registry
 from .check_preparation import AdapterCheckPreparation
 from . import queries, maintenance
-from . import acceptance, evidence, observation_links, need_records
+from .views import verification_scope
+from . import acceptance, evidence, observation_links, need_records, intent_sources
 from .identity import verifier_identity
 
 
@@ -38,6 +39,19 @@ class Harness:
         self.domains = domains or builtin_registry(check_preparation=AdapterCheckPreparation(self.adapters))
         self.policies = acceptance.PolicyRegistry(policy_root)
 
+    def describe(self, domain_id="develop", adapter_id=None):
+        module = self.domains.resolve(domain_id)
+        describe = getattr(module, "describe_parameters", None)
+        require(callable(describe), "DOMAIN_SCHEMA_UNAVAILABLE", "Selected Domain has no discovery schema")
+        schema = fields(describe(), {"schema_version", "input_schema", "notes"}, {"schema_version", "input_schema"})
+        require(isinstance(schema["schema_version"], str) and isinstance(schema["input_schema"], dict)
+                and isinstance(schema.get("notes", []), list) and all(isinstance(item, str) for item in schema.get("notes", []))
+                and len(canonical_bytes(schema)) <= 64000,
+                "DOMAIN_SCHEMA_INVALID", "Domain schema must be bounded")
+        return response(domain_id=domain_id, domain_revision=module.revision, **copy.deepcopy(schema),
+                        adapters=self.adapters.describe(adapter_id), configured_default_policy_id=self.policies.defaults().get(domain_id),
+                        meaning="input_discovery_not_runtime_availability_or_approval")
+
     @staticmethod
     def _domain_preparation_view(preparation):
         result = {"status": preparation["status"], "available_operations": preparation["available_operations"]}
@@ -49,6 +63,10 @@ class Harness:
         if "requirements_summary" in preparation:
             # Opaque Domain metadata; declarations do not grant completion.
             result["requirements"] = copy.deepcopy(preparation["requirements_summary"])
+        if "verification_plan" in preparation:
+            require(isinstance(preparation["verification_plan"], dict) and len(canonical_bytes(preparation["verification_plan"])) <= 32000,
+                    "DOMAIN_VERIFICATION_PLAN", "Domain plan diagnostics must be bounded")
+            result["verification_plan"] = copy.deepcopy(preparation["verification_plan"])
         if "analysis_guidance" in preparation:
             guidance = preparation["analysis_guidance"]
             require(isinstance(guidance, dict) and len(canonical_bytes(guidance)) <= 32000,
@@ -190,10 +208,11 @@ class Harness:
               mode: str | None = None, required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
               constraints: list[str] | None = None, provenance: dict | None = None, policy_id: str | None = None,
               predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False,
-              continuation_reason: str | None = None, analysis_selection: dict | None = None):
+              continuation_reason: str | None = None, analysis_selection: dict | None = None, sources: list | None = None):
         # Request identity does not depend on mutable registry contents. A replay
         # returns the originally selected policy, even after operator revision.
         requested_mode = mode
+        pinned_sources = intent_sources.normalize(sources) if sources is not None else []
         require(not (continuation_reason is not None and policy_change_reason is not None), "TRANSITION_REASON", "Choose one transition reason")
         transition_kind = "runtime_transition" if continuation_reason is not None else "policy_change"
         if continuation_reason is not None:
@@ -217,6 +236,8 @@ class Harness:
                 "STATE_WORKSPACE_OVERLAP", "Run state and workspace must be disjoint directories")
         request = {"operation": "start", "domain_id": domain_id, "goal": goal,
                    "workspace": str(source), "parameters": parameters, "budget": budget}
+        if sources is not None:
+            request["sources"] = sources
         if analysis_selection is not None:
             request["analysis_selection"] = analysis_selection
         if mode not in (None, "strict") or required_checks:
@@ -259,8 +280,11 @@ class Harness:
                         and predecessor["intent"]["domain_id"] == domain_id and predecessor["status"] != "active"
                         and predecessor["intent"]["constraints"] == (constraints or []),
                         "POLICY_CHANGE_LINK", "Policy changes require the same task and a terminal predecessor Run")
+                require(predecessor["intent"].get("sources", []) == pinned_sources,
+                        "POLICY_CHANGE_LINK", "A continuation must preserve the original source documents")
             run_id = "run_" + uuid.uuid4().hex
-            original_intent = semantics.record("intent:" + run_id, 1, {"original_goal": goal, "domain_id": domain_id, "constraints": constraints or []})
+            original_intent = semantics.record("intent:" + run_id, 1, {"original_goal": goal, "domain_id": domain_id, "constraints": constraints or [],
+                                              **({"sources": pinned_sources} if sources is not None else {})})
             if selected:
                 require(callable(getattr(module, "prepare_acceptance", None)), "DOMAIN_POLICY_UNSUPPORTED", "Domain has no acceptance policy compiler")
                 preparation = module.prepare_acceptance(goal, copy.deepcopy(parameters), verifier_identity(),
@@ -315,6 +339,7 @@ class Harness:
             if preparation["status"] == "needs_input":
                 run["phase"] = "waiting_input"
             result = response(run_id=run_id, contract=contract, phase=run["phase"], limits=bound,
+                              verification_scope=verification_scope(run),
                               context={"workspace": str(source), "domain": domain_id,
                                        "intent_ref": original_intent["ref"], "policy_ref": run["policy"]["ref"]},
                               constraints=copy.deepcopy(original_intent["constraints"]),
@@ -950,6 +975,7 @@ class Harness:
             # the completed body, not the earlier pre-resolution draft.
             run["record"] = record
             self.store.save_run(connection, run)
-            result = response(run_id=run_id, record=record, resolution=record["resolution"])
+            result = response(run_id=run_id, record=record, resolution=record["resolution"],
+                              verification_scope=verification_scope(run, record["gates"]))
             self.store.remember(connection, run_id, request_id, fingerprint, result)
             return result

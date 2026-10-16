@@ -453,6 +453,26 @@ human identity. The current product does not have a protected approval service.
 
 ## Baseline and result meaning
 
+The `process-observations-v1` selector also accepts `expected_exit_code` (0..255)
+and `fixtures: [{"path":"fixtures/output.txt","text":"original"}]`. Fixtures
+are created exclusively in the disposable Sandbox copy, after admitting pinned
+inputs. They cannot overlap submitted files. Their bytes/paths are pinned in
+the Check selector; they are not accepted from Candidate-generated reports.
+
+A file case is, for example, `{"id":"preserve-output","kind":"file",
+"path":"fixtures/output.txt","operator":"unchanged"}`. The trusted parent
+observes before/after hashes, sizes, executable bits and modification times after
+the command exits. `unchanged` requires an existing file on both sides. Other
+file operators are `absent`, UTF-8 byte `equals`, `sha256` and strict `json_equals`;
+only the last three require `expected`. Paths are relative to the workspace,
+independent of command cwd. Up to 32 file paths are supported; retained output is
+bounded to 64 KB per file / 128 KB total. The enclosing selector retains its
+existing 64 KB bound. File bytes are evaluated outside the Candidate; persisted
+case phases contain metadata, not duplicate file bodies. These observations
+describe the selected paths at the two endpoints, not all transient filesystem
+events or proof that a modeled failure occurred. Submitted input integrity
+checks before, during copying and after execution remain in force.
+
 `start --capture-baseline` snapshots declared inputs before edits. Missing files
 are reported; Harness does not synthesize an original from an edited checkout.
 `verify --compare-baseline` measures that original and the current Candidate in

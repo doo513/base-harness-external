@@ -42,10 +42,12 @@ def command(check, registry=None):
 
 def validate_command(check, execution):
     """Validate/copy one materialization without invoking an adapter again."""
-    fields(execution, {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode"},
+    fields(execution, {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode", "fixtures", "observed_files"},
            {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode"})
-    require(execution["kind"] == "command" and type(execution["expectedExitCode"]) is int and execution["expectedExitCode"] == 0,
+    require(execution["kind"] == "command" and type(execution["expectedExitCode"]) is int and 0 <= execution["expectedExitCode"] <= 255,
             "ADAPTER_COMMAND", "Adapter must describe a command with the supported exit condition")
+    require(type(check.get("expectedExitCode", 0)) is int and execution["expectedExitCode"] == check.get("expectedExitCode", 0),
+            "ADAPTER_COMMAND", "Materialized exit condition differs from the admitted Check")
     argv = execution["argv"]
     require(isinstance(argv, list) and 1 <= len(argv) <= 64 and all(isinstance(v, str) and len(v) <= 8192 and "\x00" not in v for v in argv)
             and bool(argv[0].strip()) and len(canonical_bytes(argv)) <= 64000, "ADAPTER_COMMAND", "Invalid materialized argv")

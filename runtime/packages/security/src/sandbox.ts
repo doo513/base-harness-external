@@ -39,6 +39,7 @@ export interface SandboxProvenance {
   maxOutputBytes: number
   inputBytes: number
   workspaceHash?: string
+  timingMs?: { setup: number; execution: number; observation: number; cleanup: number }
   code?: string
 }
 
@@ -57,6 +58,10 @@ export interface SandboxRequest {
   observationArtifact?: { path: string; maxBytes: number; onLine: (line: string) => void }
   /** Pinned by the caller before copying. Never derived from a later source scan. */
   inputBinding?: ExecutionInputBinding
+  /** Trusted scenario setup in the disposable copy; cannot overlap submitted inputs. */
+  fixtures?: { path: string; text: string }[]
+  /** Explicit bounded paths observed by the parent, outside the Candidate namespace. */
+  observedFiles?: string[]
 }
 
 export interface InputFile { path: string; sha256: string; size: number; executable: boolean }
@@ -92,7 +97,10 @@ export interface SandboxResult {
   provenance: SandboxProvenance
   changes?: SandboxFileChange[]
   inputReceipt?: ExecutionInputReceipt
+  fileObservations?: { path: string; before: FileState; after: FileState; afterBase64?: string; contentStatus?: string }[]
 }
+
+interface FileState { kind: "absent" | "directory" | "file"; sha256?: string; size?: number; executable?: boolean; mtimeNs?: string }
 
 export class SandboxError extends Error {
   constructor(
@@ -325,14 +333,15 @@ function watchArtifact(workspace: string, artifact: SandboxRequest["observationA
   }
 }
 
-type WorkspaceScan = { files: Map<string, InputFile & { bytes?: Buffer }>; links: Map<string, string> }
+type WorkspaceScan = { files: Map<string, InputFile & { bytes?: Buffer; mtimeNs?: string }>; links: Map<string, string>; directories: Set<string> }
 const statIdentity = (info: BigIntStats) => [info.dev, info.ino, info.mode, info.nlink, info.size, info.mtimeNs, info.ctimeNs].join(":")
 
 /** Fresh bounded reads of the copy. Pre-execution state keeps hashes, not bodies. */
-async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceScan): Promise<WorkspaceScan> {
+async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceScan, retain = new Set<string>()): Promise<WorkspaceScan> {
   const scan = async (root: string) => {
     const files: WorkspaceScan["files"] = new Map()
     const links = new Map<string, string>()
+    const directories = new Set<string>()
     let bytes = 0
     const visit = async (directory: string): Promise<void> => {
       const directoryBefore = await fs.lstat(directory, { bigint: true })
@@ -341,7 +350,7 @@ async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceS
         const target = path.join(directory, item.name)
         const relative = path.relative(root, target).split(path.sep).join("/")
         const stat = await fs.lstat(target, { bigint: true })
-        if (stat.isDirectory()) await visit(target)
+        if (stat.isDirectory()) { directories.add(relative); await visit(target) }
         else if (stat.isSymbolicLink()) links.set(relative, await fs.readlink(target))
         else if (stat.isFile()) {
           if (stat.nlink !== 1n) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Snapshot has a hard link: ${relative}`)
@@ -361,7 +370,7 @@ async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceS
               size += bytesRead
               if (bytes > maxBytes) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Snapshot exceeds maxInputBytes")
               digest.update(buffer.subarray(0, bytesRead))
-              if (before) chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
+              if (before || retain.has(relative)) chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
             }
             const after = await handle.stat({ bigint: true })
             const named = await fs.lstat(target, { bigint: true })
@@ -369,8 +378,8 @@ async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceS
               throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Snapshot changed during reading")
             }
             const sha256 = digest.digest("hex")
-            files.set(relative, { path: relative, sha256, size, executable: Boolean(stat.mode & 0o111n),
-              ...(before && before.files.get(relative)?.sha256 !== sha256 ? { bytes: Buffer.concat(chunks) } : {}) })
+            files.set(relative, { path: relative, sha256, size, executable: Boolean(stat.mode & 0o111n), mtimeNs: stat.mtimeNs.toString(),
+              ...((before && before.files.get(relative)?.sha256 !== sha256) || retain.has(relative) ? { bytes: Buffer.concat(chunks) } : {}) })
           } finally { await handle.close() }
         } else throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Unsupported sandbox output entry: ${relative}`)
       }
@@ -379,7 +388,7 @@ async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceS
       }
     }
     await visit(root)
-    return { files, links }
+    return { files, links, directories }
   }
   return scan(root)
 }
@@ -416,6 +425,67 @@ function captureWorkspaceChanges(before: WorkspaceScan, after: WorkspaceScan): S
     if (left?.sha256 === right?.sha256) return []
     return [{ path: relativePath, beforeHash: left?.sha256 ?? null, afterHash: right?.sha256 ?? null,
       ...(right ? { after: new Uint8Array(right.bytes!) } : {}) }]
+  })
+}
+
+function scenarioPath(value: unknown): string {
+  if (typeof value !== "string" || !value || value.length > 512 || value.includes("\\") || value.includes(":") ||
+      value.includes("\0") || value.split("/").some(part => !part || part === "." || part === "..")) {
+    throw new SandboxError("SANDBOX_POLICY_DENIED", "Scenario paths must be relative files")
+  }
+  return value
+}
+
+function validateScenario(request: SandboxRequest) {
+  const fixtures = request.fixtures ?? []
+  const observed = request.observedFiles ?? []
+  if (!Array.isArray(fixtures) || fixtures.length > 32 || !Array.isArray(observed) || observed.length > 32) {
+    throw new SandboxError("SANDBOX_POLICY_DENIED", "Scenario setup/observation exceeds bounds")
+  }
+  let total = 0
+  const paths = new Set<string>()
+  for (const fixture of fixtures) {
+    if (!fixture || Object.keys(fixture).sort().join(",") !== "path,text" || typeof fixture.text !== "string") {
+      throw new SandboxError("SANDBOX_POLICY_DENIED", "Invalid scenario fixture")
+    }
+    const name = scenarioPath(fixture.path)
+    const bytes = Buffer.byteLength(fixture.text, "utf8")
+    total += bytes
+    if (bytes > 64000 || total > 128000 || paths.has(name.toLowerCase())) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Scenario fixture bounds exceeded")
+    paths.add(name.toLowerCase())
+  }
+  observed.forEach(scenarioPath)
+  if (new Set(observed.map(p => p.toLowerCase())).size !== observed.length) throw new SandboxError("SANDBOX_POLICY_DENIED", "Duplicate observed paths")
+}
+
+async function seedFixtures(workspace: string, before: WorkspaceScan, fixtures: NonNullable<SandboxRequest["fixtures"]>) {
+  const reserved = [...before.files.keys(), ...before.links.keys()]
+  for (const fixture of fixtures) {
+    const name = fixture.path.toLowerCase()
+    if (reserved.some(key => { const old = key.toLowerCase(); return old === name || old.startsWith(name + "/") || name.startsWith(old + "/") })) {
+      throw new SandboxError("SANDBOX_POLICY_DENIED", "Scenario fixture overlaps a submitted input")
+    }
+    const target = path.join(workspace, fixture.path)
+    await fs.mkdir(path.dirname(target), { recursive: true })
+    await fs.writeFile(target, fixture.text, { encoding: "utf8", flag: "wx" })
+    reserved.push(fixture.path)
+  }
+}
+
+function observeFiles(before: WorkspaceScan, after: WorkspaceScan, paths: string[]) {
+  let bytes = 0
+  const state = (scan: WorkspaceScan, name: string): FileState => {
+    const item = scan.files.get(name)
+    return item ? { kind: "file", sha256: item.sha256, size: item.size, executable: item.executable, mtimeNs: item.mtimeNs }
+      : { kind: scan.directories.has(name) ? "directory" : "absent" }
+  }
+  return paths.map(name => {
+    const body = after.files.get(name)?.bytes
+    const retained = body !== undefined && body.length <= 64000 && bytes + body.length <= 128000
+    if (retained) bytes += body.length
+    return { path: name, before: state(before, name), after: state(after, name),
+      ...(retained ? { afterBase64: body.toString("base64"), contentStatus: "captured" }
+        : body !== undefined ? { contentStatus: "limit_exceeded" } : {}) }
   })
 }
 
@@ -520,14 +590,25 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
   }
   await fs.mkdir(mountRoot, { recursive: true })
   let stopObserving = async () => {}
+  const began = performance.now()
+  const timingMs = { setup: 0, execution: 0, observation: 0, cleanup: 0 }
+  const elapsed = (start: number) => Math.round((performance.now() - start) * 1000) / 1000
   try {
     await fs.cp(root, workspace, { recursive: true, dereference: false, verbatimSymlinks: true })
-    const before = request.captureChanges || request.inputBinding ? await scanWorkspace(workspace, policy.maxInputBytes) : undefined
-    if (request.inputBinding) admitInputs(before!, request.inputBinding)
+    const scenario = Boolean(request.fixtures?.length || request.observedFiles?.length)
+    const original = request.captureChanges || request.inputBinding || scenario ? await scanWorkspace(workspace, policy.maxInputBytes) : undefined
+    if (request.inputBinding) admitInputs(original!, request.inputBinding)
+    if (request.fixtures?.length) await seedFixtures(workspace, original!, request.fixtures)
+    const before = request.fixtures?.length ? await scanWorkspace(workspace, policy.maxInputBytes) : original
+    if (request.inputBinding && request.fixtures?.length && !inputReceipt(original!, before!, request.inputBinding, new Date().toISOString()).unchanged) {
+      throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Scenario setup changed submitted inputs")
+    }
     const checkedAt = new Date().toISOString()
     const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
     // No command or case event runs before admitting the actual copied tree.
     stopObserving = watchArtifact(workspace, request.observationArtifact)
+    timingMs.setup = elapsed(began)
+    const executionStarted = performance.now()
     const result = await execute(
       [
         "unshare",
@@ -555,9 +636,13 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
       ],
       { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
     )
-    const after = before ? await scanWorkspace(workspace, policy.maxInputBytes, request.captureChanges ? before : undefined) : undefined
+    timingMs.execution = elapsed(executionStarted)
+    const observationStarted = performance.now()
+    const after = before ? await scanWorkspace(workspace, policy.maxInputBytes, request.captureChanges ? before : undefined, new Set(request.observedFiles ?? [])) : undefined
     const changes = request.captureChanges ? captureWorkspaceChanges(before!, after!) : undefined
-    const receipt = request.inputBinding ? inputReceipt(before!, after!, request.inputBinding, checkedAt) : undefined
+    const receipt = request.inputBinding ? inputReceipt(original!, after!, request.inputBinding, checkedAt) : undefined
+    const fileObservations = request.observedFiles ? observeFiles(before!, after!, request.observedFiles) : undefined
+    timingMs.observation = elapsed(observationStarted)
     return {
       exitCode: result.code,
       stdout: result.stdout,
@@ -573,19 +658,24 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
         maxProcesses: policy.maxProcesses,
         maxOutputBytes: policy.maxOutputBytes,
         inputBytes,
+        timingMs,
       },
       ...(changes ? { changes } : {}),
       ...(receipt ? { inputReceipt: receipt } : {}),
+      ...(fileObservations ? { fileObservations } : {}),
     }
   } finally {
+    const cleanupStarted = performance.now()
     try { await stopObserving() } finally {
     await fs.rm(base, { recursive: true, force: true })
+    timingMs.cleanup = elapsed(cleanupStarted)
     }
   }
 }
 
 export class SandboxManager {
   async run(request: SandboxRequest): Promise<SandboxResult> {
+    validateScenario(request)
     if (request.command.includes("\0")) throw new SandboxError("SANDBOX_POLICY_DENIED", "Sandbox command contains NUL")
     const policy = isolationPolicy(request.config)
     if (request.inputBinding !== undefined) request = { ...request, inputBinding: validateInputBinding(request.inputBinding) }
@@ -594,7 +684,7 @@ export class SandboxManager {
     const backend = policy.strictBackend === "auto" ? (process.platform === "win32" ? "wsl2" : "namespace") : policy.strictBackend
     if (backend === "wsl2") {
       if (request.inputBinding) throw new SandboxError("SANDBOX_UNAVAILABLE", "Pinned execution input verification requires the namespace backend")
-      if (request.readonlyResource || request.observationArtifact) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
+      if (request.readonlyResource || request.observationArtifact || request.fixtures || request.observedFiles) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
       if (process.platform !== "win32") throw new SandboxError("SANDBOX_UNAVAILABLE", "WSL2 backend requires Windows")
       return wslRun(request, policy, input.root, input.bytes)
     }

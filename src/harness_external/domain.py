@@ -9,13 +9,13 @@ from importlib.resources import files
 from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
 from .errors import HarnessError, ValidationIssues, require, fields, relative_path, integer, limits, validate_contract
-from . import develop_cases, develop_requirements
+from . import develop_cases, develop_requirements, develop_plan
 from .check_preparation import AdapterCheckPreparation, CheckPreparationPort
 from .registry import effective_config
 
 
 COVERAGE_KINDS = {"positive", "negative", "boundary", "state_transition", "concurrency", "recovery", "fault_injection"}
-DEVELOP_REVISION = "develop-external-11"
+DEVELOP_REVISION = "develop-external-12"
 PARAMETERS = {"inputs", "artifacts", "expectations", "execution_checks", "validation_profile", "profile", "requirements", "coverage"}
 _COMPILATION = ContextVar("develop_compilation", default=None)
 
@@ -225,7 +225,7 @@ def normalize_execution(value, inputs, preparation):
     return result
 
 
-def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, *, check_preparation=None) -> dict:
+def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, *, check_preparation=None, intent=None) -> dict:
     preparation = check_preparation if check_preparation is not None else AdapterCheckPreparation()
     parameters = _parameters(parameters, preparation)
     require(domain_id == "develop", "DOMAIN_UNSUPPORTED", "Only develop is supported")
@@ -299,6 +299,7 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
     }
     if "requirements" in parameters or "coverage" in parameters:
         requirements = develop_requirements.normalize(parameters.get("requirements", []))
+        develop_plan.bind_sources(requirements, goal, intent)
         coverage = parameters.get("coverage")
         require(bool(requirements) or coverage is None, "REQUIREMENTS_REQUIRED", "Coverage needs declared requirements")
         indexed = {item["check_id"]: item for item in checks if "check_id" in item}
@@ -315,8 +316,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
 
 class DevelopModule:
     identity_files = tuple(str(files("harness_external").joinpath(name)) for name in
-                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py", "develop_need_compat.py"))
-    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis", "develop-need-compat")
+                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py", "develop_need_compat.py", "develop_plan.py"))
+    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis", "develop-need-compat", "develop-verification-plan")
     domain_id = "develop"
     revision = DEVELOP_REVISION
 
@@ -385,6 +386,7 @@ class DevelopModule:
                         for key in required) or bool(bundle_paths),
                 "ACCEPTANCE_BUNDLE_REQUIRED", "Command acceptance requires an explicitly pinned test/fixture bundle")
         requirements = develop_requirements.normalize(policy["requirements"])
+        develop_plan.bind_sources(requirements, goal, intent)
         require(bool(requirements),
                 "REQUIREMENTS_REQUIRED", "Acceptance requires a bounded requirement-to-check mapping")
         mapped = develop_requirements.validate_bindings(requirements, indexed, eligible_ids=required, allow_unmapped=False)
@@ -431,6 +433,7 @@ class DevelopModule:
         result["contract"]["acceptance_requirements"] = copy.deepcopy(policy["requirements"])
         result["contract"]["limitations"].append("Requirement and scenario links express configured inventory, not proof that tests adequately represent the goal.")
         result["contract"]["contract_hash"] = canonical_hash({k: v for k, v in result["contract"].items() if k != "contract_hash"})
+        result["verification_plan"] = develop_plan.review(goal, intent, result["contract"], self._checks)
         return result
 
     def prepare(self, goal, parameters, verifier, *, exploratory=False, intent=None, analysis_selection=None):
@@ -459,6 +462,7 @@ class DevelopModule:
             if key in parameters:
                 issues.check("/" + key, isinstance(parameters[key], list), "INVALID_PARAMETERS", "Develop parameter must be a list: " + key)
         issues.raise_if_any()
+        develop_plan.bind_sources(requirements, goal, intent)
         for item in parameters.get("inputs", []) + parameters.get("artifacts", []):
             relative_path(item)
         inputs = parameters.get("inputs", [])
@@ -467,13 +471,14 @@ class DevelopModule:
         if profile == "execution" and not parameters.get("execution_checks"):
             missing.append("execution_checks")
         if not exploratory or not missing:
-            contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks)
+            contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks, intent=intent)
             result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"],
                       "analysis_guidance": advice}
             if "requirement_summary" in contract:
                 result["requirements_summary"] = copy.deepcopy(contract["requirement_summary"])
             if perspective:
                 result["validation_perspectives"] = {"profile_id": perspective, "revision": "1", "perspectives": develop_cases.PERSPECTIVES[perspective], "meaning": "advisory_not_mandatory_tests"}
+            result["verification_plan"] = develop_plan.review(goal, intent, contract, self._checks)
             return result
         # Missing domain data is a durable clarification state, never invented criteria.
         questions = [{"id": "develop:" + key, "parameter": key, "reason": "missing_domain_parameter"} for key in missing]
@@ -492,6 +497,7 @@ class DevelopModule:
             result["requirements_summary"] = develop_requirements.attach(contract, requirements, None,
                                                                          source="caller_proposal", pending=True)
         contract["contract_hash"] = canonical_hash(contract)
+        result["verification_plan"] = develop_plan.review(goal, intent, contract, self._checks)
         return result
 
     def select_analysis_guidance(self, guidance, selection):
@@ -502,6 +508,14 @@ class DevelopModule:
             return select_guidance(guidance, **selection)
         except ValueError as error:
             raise HarnessError("ANALYSIS_SELECTION_INVALID", str(error)) from error
+
+    def describe_parameters(self):
+        from .develop_schema import schema
+        return {"schema_version": "domain-input-schema-v1", "input_schema": schema(),
+                "notes": ["Named Check id x is referenced as domain.x.",
+                          "Partial exploratory declarations are allowed; inspect verification_plan and questions.",
+                          "Source references address 1-based inclusive lines in goal or start.sources.",
+                          "Schema describes syntax; cross-field scope and policy checks run during preparation."]}
 
     def normalize_need(self, details, contract):
         from .develop_need_compat import normalize
@@ -514,16 +528,18 @@ class DevelopModule:
             return normalize_file({key: value for key, value in parameters.items() if key != "kind"}, contract["inputs"])
         require(parameters["kind"] == "command" and contract["profile"] == "execution", "CHECK_UNSUPPORTED", "Command checks require the execution profile")
         require(bool(contract["inputs"]), "NEEDS_INPUT", "Declare input scope before command measurements")
-        require(type(parameters.get("expectedExitCode", 0)) is int and parameters.get("expectedExitCode", 0) == 0,
-                "CHECK_UNSUPPORTED", "Develop command checks expect exit zero")
+        require(type(parameters.get("expectedExitCode", 0)) is int and 0 <= parameters.get("expectedExitCode", 0) <= 255,
+                "CHECK_UNSUPPORTED", "Invalid command exit condition")
         if "adapter" in parameters:
             fields(parameters, {"kind", "expectedExitCode", "timeout_seconds", "adapter"}, {"kind", "adapter"})
-            adapter = fields(parameters["adapter"], {"id", "selector", "source_paths", "rules", "criteria_source"}, {"id", "selector", "source_paths", "rules"})
+            adapter = fields(parameters["adapter"], {"id", "selector", "source_paths", "rules", "criteria_source", "expected_exit_code"}, {"id", "selector", "source_paths", "rules"})
             rules = fields(adapter["rules"], {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"},
                            {"required_case_ids", "allowed_outcomes", "minimum_selected", "require_complete_session"})
             result = develop_cases.normalize({"kind": "cases", "id": "normalized", "adapter_id": adapter["id"], "selector": adapter["selector"],
                          "required_cases": rules["required_case_ids"], "allowed_outcomes": rules["allowed_outcomes"],
                          "timeout_seconds": parameters.get("timeout_seconds", 30)}, contract["inputs"], self._checks)
-            require(result["adapter"] == adapter, "CHECK_SCOPE_CONFLICT", "Case-aware conditions changed")
+            require(result["adapter"] == adapter and result["expectedExitCode"] == parameters.get("expectedExitCode", 0),
+                    "CHECK_SCOPE_CONFLICT", "Case-aware conditions changed")
             return result
+        require(parameters.get("expectedExitCode", 0) == 0, "CHECK_UNSUPPORTED", "Direct Develop command checks expect exit zero")
         return normalize_command({key: value for key, value in parameters.items() if key not in {"kind", "expectedExitCode"}})

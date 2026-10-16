@@ -43,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
     parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
     commands = parser.add_subparsers(dest="command", required=True)
+    describe = commands.add_parser("describe", help="read Domain and registered adapter input schemas without starting a Run")
+    describe.add_argument("--domain-id", default="develop")
+    describe.add_argument("--adapter-id")
     server = commands.add_parser("serve", help="serve existing Harness requests outside a restricted Host; no MCP or model runtime")
     server.add_argument("--socket", required=True, help="Unix socket in a private runtime directory, outside workspaces")
     server.add_argument("--workspace-root", action="append", required=True, help="explicit allowed workspace root; repeat for multiple roots")
@@ -51,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     start = commands.add_parser("start")
     start.add_argument("--domain", default="develop")
     start.add_argument("--goal", required=True)
+    start.add_argument("--sources", help=JSON_HELP + "; original source documents: [{id,label,text}]")
     start.add_argument("--workspace", required=True)
     start.add_argument("--parameters", help=JSON_HELP + "; inputs/artifacts/expectations/execution_checks/profile; optional requirements/coverage")
     start.add_argument("--analysis-selection", help=JSON_HELP + "; optional Domain advice view, separate from contract parameters")
@@ -112,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection", "outcomes")) > 1:
+        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection", "outcomes", "sources")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
@@ -120,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
             from .local_transport import serve
             serve(api, args.socket, args.workspace_root)
             return 0
-        if args.command == "doctor":
+        if args.command == "describe":
+            result = api.describe(args.domain_id, args.adapter_id)
+        elif args.command == "doctor":
             from . import diagnostics
             from .service import response
             result = response(**diagnostics.doctor(api.store, sandbox=args.sandbox))
@@ -151,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
                                constraints=load_json(args.constraints) if args.constraints else None,
                                policy_id=args.policy_id, predecessor_run_id=args.predecessor_run_id, policy_change_reason=args.policy_change_reason,
                                capture_baseline=args.capture_baseline, continuation_reason=args.continuation_reason,
-                               analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None)
+                               analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None,
+                               sources=load_json(args.sources) if args.sources else None)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
         elif args.command == "revise":

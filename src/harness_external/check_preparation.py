@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from harness.common import canonical_bytes, canonical_hash
-from .errors import fields, relative_path, require
+from .errors import fields, integer, relative_path, require
 from .registry import code_identity, effective_config
 
 
@@ -80,7 +80,9 @@ class AdapterCheckPreparation:
         method = getattr(self.adapters.resolve(adapter_id), "normalize_selection", None)
         require(callable(method), "ADAPTER_SCHEMA_UNAVAILABLE", "Selected adapter does not provide a case schema")
         selected = method(copy.deepcopy(selector), list(inputs), list(required_cases))
-        fields(selected, {"selector", "source_paths", "criteria_source"}, {"selector", "source_paths"})
+        fields(selected, {"selector", "source_paths", "criteria_source", "expected_exit_code"}, {"selector", "source_paths"})
+        if "expected_exit_code" in selected:
+            integer(selected["expected_exit_code"], 0, 255, "expected_exit_code")
         require(isinstance(selected.get("criteria_source", "files"), str) and selected.get("criteria_source", "files") in {"files", "selector"},
                 "ADAPTER_SCHEMA_INVALID", "Case criteria come from declared files or the pinned selector")
         require(isinstance(selected["selector"], dict) and len(canonical_bytes(selected["selector"])) <= 64000,
@@ -98,3 +100,17 @@ class AdapterCheckPreparation:
         method = getattr(self.adapters.resolve(adapter["id"]), "validate_reference", None)
         require(callable(method), "ADAPTER_SCHEMA_UNAVAILABLE", "Selected adapter cannot validate case references")
         method(copy.deepcopy(adapter["selector"]), copy.deepcopy(reference))
+
+    def observations(self, adapter):
+        """Declared observation capabilities, never measured facts."""
+        if self.adapters is None:
+            return []
+        implementation = self.adapters.resolve(adapter["id"])
+        describe = getattr(implementation, "describe_observations", None)
+        if not callable(describe):
+            return []
+        result = describe(copy.deepcopy(adapter["selector"]))
+        require(isinstance(result, list) and len(canonical_bytes(result)) <= 32000,
+                "ADAPTER_SCHEMA_INVALID", "Observation descriptions must be bounded")
+        boundary = "external_capture" if callable(getattr(implementation, "observe_capture", None)) else "subject_process"
+        return [{**item, "boundary": boundary} for item in result]

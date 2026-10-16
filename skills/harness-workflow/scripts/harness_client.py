@@ -23,8 +23,9 @@ API_VERSION = "external-harness-v2"
 MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "finish", "checkpoint"}
 # Only CLI syntax lives here. Domain payloads and policy semantics belong to Harness.
 OPTIONS = {
+    "describe": {"domain_id": "str", "adapter_id": "str"},
     "start": {"domain": "str", "goal": "str", "workspace": "str", "mode": "str",
-              "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json", "analysis_selection": "json",
+              "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json", "analysis_selection": "json", "sources": "json",
               "required_check": "repeat", "deferred_check": "repeat", "policy_id": "str",
               "predecessor_run_id": "str", "policy_change_reason": "str", "continuation_reason": "str", "capture_baseline": "bool"},
     "invoke": {"request": "json"},
@@ -84,6 +85,12 @@ def canonical(value):
 
 def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
+
+
+def response_error_code(value):
+    error = value.get("error") if isinstance(value, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return code if isinstance(code, str) else None
 
 
 def restore_item(item, texts):
@@ -152,7 +159,7 @@ def compact_call_result(operation, result):
         return result
     require(operation in {"start", "finish"}, "COMPACT_OPERATION", "Compact call projection supports start/finish.")
     common = {key: copy.deepcopy(result[key]) for key in (
-        "api_version", "ok", "assurance", "ready", "run_id", "caller_request", "binding_file", "transport") if key in result}
+        "api_version", "ok", "assurance", "ready", "run_id", "caller_request", "binding_file", "transport", "verification_scope") if key in result}
     common.update(view="caller-compact", meaning="read_projection_not_a_complete_context_transfer")
     if operation == "start":
         contract = result["contract"]
@@ -183,7 +190,8 @@ def attention_report(current, job, cases, *, limit=20):
     for requirement in requirements:
         for case in requirement["scenarios"]:
             linked.setdefault((case["check_id"], case["case_id"]), []).append(requirement["requirement_id"])
-    items = []
+    declared_scope = current.get("verification_scope") or {}
+    items = [{"kind": "verification_gap", **copy.deepcopy(gap)} for gap in declared_scope.get("gaps", [])]
     for record in cases.get("items", []):
         # Baseline records remain accessible but cannot become Candidate issues.
         if record.get("subject_role") != "candidate":
@@ -223,12 +231,14 @@ def attention_report(current, job, cases, *, limit=20):
     if job and job.get("error"):
         items.append({"kind": "job_error", "error": job["error"]})
     returned = items[:limit]
-    complete = bool(job and job["status"] not in {"queued", "running"}) and cases.get("next_offset") is None and len(returned) == len(items)
+    complete = (bool(job and job["status"] not in {"queued", "running"}) and cases.get("next_offset") is None
+                and len(returned) == len(items) and declared_scope.get("omitted_gap_count", 0) == 0)
     payload = {"api_version": current["api_version"], "ok": True, "schema_version": "harness-client-attention-v1",
         "assurance": current["assurance"], "ready": current["ready"],
         "run_id": current.get("run_id") or current.get("run", {}).get("run_id"),
         **{key: current[key] for key in ("run", "intent_ref", "policy_ref", "candidate", "gates", "assessment", "limits", "usage", "details", "operation_constraints") if key in current},
         "measurement": current.get("measurement"),
+        "verification_scope": {key: value for key, value in declared_scope.items() if key != "gaps"},
         "attention": returned, "attention_page_complete": complete, "listed_attention_count": len(returned),
         "total_known_attention_count": len(items), "omitted_attention_count": len(items) - len(returned),
         "case_query": {"job_id": (job or {}).get("job_id"), "outcomes": ATTENTION_OUTCOMES,
@@ -397,17 +407,52 @@ def cli_arguments(operation, arguments, json_directory=None):
 
 
 class Client:
-    def __init__(self, config, *, timeout=None):
+    def __init__(self, config, *, timeout=None, trace_file=None):
         self.config = validate_config(config)
         require(timeout is None or 0 < timeout <= 3600, "TIMEOUT_INVALID", "Client timeout must be positive and at most 3600 seconds.")
         self.timeout = timeout
+        self.trace_file = Path(os.path.abspath(trace_file)) if trace_file is not None else None
+        self.cost_events = []
+        self.trace_warnings = []
 
     def execute(self, operation, arguments, request_id=None):
+        if self.trace_file is None:
+            return self._execute(operation, arguments, request_id)
+        started = time.monotonic()
+        envelope = arguments.get("request", {}) if operation == "invoke" else {"operation": operation, "arguments": arguments, "request_id": request_id}
+        result, failure = None, None
+        try:
+            result = self._execute(operation, arguments, request_id)
+            return result
+        except Exception as error:
+            failure = getattr(error, "code", type(error).__name__)
+            raise
+        finally:
+            request_arguments = envelope.get("arguments", {})
+            run = (result or {}).get("run")
+            job = (result or {}).get("job")
+            event = {"schema_version": "harness-client-cost-v1", "kind": "transport", "operation": envelope.get("operation"),
+                     "request_id": envelope.get("request_id"),
+                     "run_id": (result or {}).get("run_id") or (run.get("run_id") if isinstance(run, dict) else None) or request_arguments.get("run_id"),
+                     "job_id": (result or {}).get("job_id") or (job.get("job_id") if isinstance(job, dict) else None),
+                     "transport": "socket" if self.config.get("server_socket") else "cli",
+                     "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+                     "request_bytes": len(canonical(envelope)), "response_bytes": len(canonical(result)) if result is not None else None,
+                     "ok": result.get("ok") if result is not None else None,
+                     "error_code": failure or response_error_code(result), "model_tokens": None}
+            self.cost_events.append(event)
+            if self.trace_file is not None:
+                workspace = request_arguments.get("workspace") or envelope.get("context", {}).get("workspace")
+                warning = "TRACE_INSIDE_WORKSPACE" if workspace and self.trace_file.is_relative_to(Path(os.path.abspath(workspace))) else append_cost(self.trace_file, event)
+                if warning and warning not in self.trace_warnings:
+                    self.trace_warnings.append(warning)
+
+    def _execute(self, operation, arguments, request_id=None):
         if self.config.get("server_socket"):
             require(operation == "invoke" and request_id is None, "TRANSPORT_OPERATION", "Socket transport accepts guarded invoke envelopes only.")
             return self._socket_execute(arguments["request"])
         effective = arguments["request"]["operation"] if operation == "invoke" else operation
-        if effective not in {"start", "doctor"}:
+        if effective not in {"start", "doctor", "describe"}:
             require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
                     "Configured state is missing; check storage/configuration. Do not silently start a replacement Run.")
         # No shell, no model calls, no worker loop, no automatic retry/cancellation.
@@ -775,14 +820,86 @@ def write_new_json(path, value):
         os.fsync(stream.fileno())
 
 
+def append_cost(path, event):
+    """Optional diagnostics cannot change a committed operation's outcome."""
+    try:
+        path = Path(path)
+        require(not any(item.is_symlink() for item in (path, *path.parents)), "TRACE_PATH", "Trace path contains a symlink")
+        descriptor = os.open(path, os.O_CREAT | os.O_APPEND | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(descriptor, "ab+") as stream:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            stream.seek(0)
+            first = stream.readline(4097)
+            require(not first or len(first) <= 4096 and decode(first.decode("utf-8")).get("schema_version") == "harness-client-cost-v1",
+                    "TRACE_FORMAT", "Existing file is not a caller cost trace")
+            encoded = canonical(event) + b"\n"
+            require(len(encoded) <= 4096, "TRACE_LIMIT", "Trace row exceeds limit")
+            stream.write(encoded)
+            stream.flush()
+        return None
+    except (OSError, ValueError, ClientError, ImportError, AttributeError):
+        return "TRACE_WRITE_FAILED"
+
+
+def with_cost(result, client, trace_file, started, command):
+    if trace_file is None:
+        return result
+    events = client.cost_events if client is not None else []
+    elapsed = round((time.monotonic() - started) * 1000, 3)
+    transport = round(sum(item["elapsed_ms"] for item in events), 3)
+    metric = {"schema_version": "harness-client-cost-v1", "kind": "helper", "command": command,
+              "run_ids": sorted({item["run_id"] for item in events if item.get("run_id")}),
+              "ok": result.get("ok"), "error_code": response_error_code(result),
+              "elapsed_ms": elapsed, "transport_ms": transport, "outside_transport_ms": round(max(0, elapsed - transport), 3),
+              "transport_calls": len(events), "result_bytes_before_telemetry": len(canonical(result)),
+              "core_response_bytes": sum(item["response_bytes"] or 0 for item in events),
+              "unknown_response_count": sum(item["response_bytes"] is None for item in events),
+              "model_tokens": None, "meaning": "local_timings_and_bytes_not_model_billing"}
+    warnings = list(client.trace_warnings) if client is not None else []
+    if "TRACE_INSIDE_WORKSPACE" not in warnings:
+        warning = append_cost(trace_file, metric)
+        if warning:
+            warnings.append(warning)
+    return {**result, "client_cost": metric, **({"telemetry_warnings": sorted(set(warnings))} if warnings else {})}
+
+
+def source_arguments(operation, arguments, *, goal_file=None, source_files=()):
+    """Read explicitly selected originals once, before saving the exact request."""
+    require(not (goal_file or source_files) or operation == "start", "SOURCE_OPERATION", "Original source files belong to start")
+    result = copy.deepcopy(arguments)
+    def original(filename, maximum):
+        path = absolute_path(str(filename))
+        with path.open("rb") as stream:
+            data = stream.read(maximum + 1)
+        require(len(data) <= maximum, "SOURCE_LIMIT", "Original source exceeds its size limit")
+        return data.decode("utf-8")
+    if goal_file:
+        require("goal" not in result, "SOURCE_CONFLICT", "Use goal or --goal-file, not both")
+        result["goal"] = original(goal_file, 64000)
+    if source_files:
+        require("sources" not in result, "SOURCE_CONFLICT", "Use sources or --source, not both")
+        sources = []
+        for entry in source_files:
+            key, separator, filename = entry.partition("=")
+            require(bool(separator and key and filename), "SOURCE_ARGUMENT", "Use --source ID=/absolute/file")
+            sources.append({"id": key, "label": Path(filename).name, "text": original(filename, 64000)})
+        result["sources"] = sources
+    return result
+
+
 def main(argv=None):
+    started, client, args = time.monotonic(), None, None
     try:
         parser = Parser(description=__doc__)
         parser.add_argument("--config", type=Path, default=default_config_path(), help="one persistent caller config, independent of the workspace")
         parser.add_argument("--call-timeout", type=float, help="optional foreground CLI timeout; not the verification job budget")
+        parser.add_argument("--trace-file", type=Path, help="optional caller timing/byte log outside the workspace; never model token estimates")
         commands = parser.add_subparsers(dest="command", required=True)
         schema = commands.add_parser("describe", help="show local request fields without loading config or calling Harness")
         schema.add_argument("--operation", choices=tuple(name for name in OPTIONS if name != "invoke"))
+        schema.add_argument("--domain", help="query the configured Harness for Domain-owned parameter schemas")
+        schema.add_argument("--adapter", help="limit Domain discovery to one registered adapter")
         setup = commands.add_parser("configure", help="create a NEW config; never overwrite")
         setup.add_argument("--harness-repo", required=True)
         setup.add_argument("--state-dir", required=True)
@@ -795,6 +912,8 @@ def main(argv=None):
         source.add_argument("--operation", choices=tuple(OPTIONS), help="construct and send one existing operation")
         call.add_argument("--binding", type=Path)
         call.add_argument("--arguments", default="json:{}", help="JSON arguments; binding supplies run_id")
+        call.add_argument("--goal-file", type=Path, help="start only: read the original goal as UTF-8, without summarizing it")
+        call.add_argument("--source", action="append", default=[], help="start only: ID=/absolute/specification; repeat for original documents")
         call.add_argument("--action-id", help="stable explicit intent; mutations only")
         call.add_argument("--output", type=Path, help="save the exact request before dispatch; required for a direct mutation")
         call.add_argument("--binding-output", type=Path, help="start only: save binding from the same Core receipt, without another resume")
@@ -835,7 +954,8 @@ def main(argv=None):
         context.add_argument("--max-pages", type=int, default=64)
         commands.add_parser("preflight", help="measure actual strict Sandbox availability; no task run is created")
         args = parser.parse_args(argv)
-        if args.command == "describe":
+        if args.command == "describe" and not args.domain:
+            require(not args.adapter, "CLI_ARGUMENTS", "--adapter requires --domain")
             result = describe(args.operation)
         elif args.command == "configure":
             result = configure(args.config, args.harness_repo, args.state_dir, args.ephemeral, args.policy_root, args.server_socket)
@@ -843,11 +963,15 @@ def main(argv=None):
             require(args.config.is_file(), "CONFIG_MISSING",
                     "Selected config does not exist: " + str(args.config) +
                     ". Use --config PATH or BASE_HARNESS_CLIENT_CONFIG for the installed configuration; do not select another store from a workspace binding.")
-            client = Client(read_json(str(args.config)), timeout=args.call_timeout)
-            if args.command == "call":
+            client = Client(read_json(str(args.config)), timeout=args.call_timeout, trace_file=args.trace_file)
+            if args.command == "describe":
+                require(args.operation is None, "CLI_ARGUMENTS", "Choose local --operation or configured --domain discovery")
+                result = client.call({"operation": "describe", "arguments": {"domain_id": args.domain,
+                                      **({"adapter_id": args.adapter} if args.adapter else {})}})
+            elif args.command == "call":
                 binding = read_json(str(args.binding)) if args.binding else None
                 if args.request is not None:
-                    require(args.action_id is None and args.output is None and args.arguments == "json:{}",
+                    require(args.action_id is None and args.output is None and args.arguments == "json:{}" and not args.goal_file and not args.source,
                             "CLI_ARGUMENTS", "Saved request replay cannot also construct an intent")
                     saved = client.normalize_request(read_json(args.request))
                     operation, arguments = saved["operation"], saved["arguments"]
@@ -856,7 +980,8 @@ def main(argv=None):
                                 "RUN_CONTEXT_MISMATCH", "Saved request and binding differ")
                     result = None
                 else:
-                    operation, arguments = args.operation, read_json(args.arguments)
+                    operation = args.operation
+                    arguments = source_arguments(operation, read_json(args.arguments), goal_file=args.goal_file, source_files=args.source)
                     saved = None
                     result = None
                 require(not args.resolve_detail or args.format == "raw" and operation == "records" and binding is not None
@@ -907,12 +1032,15 @@ def main(argv=None):
                                         complete=args.complete, max_pages=args.max_pages)
             else:
                 result = client.call({"operation": "doctor", "arguments": {"sandbox": True}})
+        result = with_cost(result, client, args.trace_file, started, args.command)
         print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
         return 0 if result.get("ok") and result.get("healthy", True) else 2
     except (ClientError, OSError, ValueError, RecursionError) as error:
-        print(json.dumps({"ok": False, "source": "harness-client", "error": {
+        result = {"ok": False, "source": "harness-client", "error": {
             "code": getattr(error, "code", "CLIENT_INPUT_OR_IO"), "message": str(error)[:2000]},
-            **({"caller_request": error.saved_request} if getattr(error, "saved_request", None) else {})}, ensure_ascii=False))
+            **({"caller_request": error.saved_request} if getattr(error, "saved_request", None) else {})}
+        result = with_cost(result, client, getattr(args, "trace_file", None), started, getattr(args, "command", "invalid"))
+        print(json.dumps(result, ensure_ascii=False))
         return 2
 
 

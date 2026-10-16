@@ -142,7 +142,7 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
         operation, arguments = envelope["operation"], envelope["arguments"]
         require(isinstance(operation, str) and operation in {*METHODS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
         require(isinstance(arguments, dict), "INVALID_PARAMETERS", "Arguments must be an object")
-        if operation in {"doctor", "list-runs"}:
+        if operation in {"doctor", "list-runs", "describe"}:
             return
         if operation == "start":
             value = arguments.get("workspace")

@@ -14,7 +14,7 @@ def normalize(values):
             "REQUIREMENTS_REQUIRED", "Declare at most 100 requirements")
     result, identifiers = [], set()
     for value in values:
-        fields(value, {"id", "statement", "check_ids", "minimum_evidence", "kind", "when"},
+        fields(value, {"id", "statement", "check_ids", "minimum_evidence", "kind", "when", "source_refs"},
                {"id", "statement", "check_ids"})
         key = value["id"]
         require(isinstance(key, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", key))

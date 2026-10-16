@@ -334,6 +334,15 @@ class PytestAdapter:
     def normalize_selection(self, selector, inputs, required_cases):
         return normalize_selection(selector, inputs, required_cases)
 
+    def describe_selection(self):
+        return {"type": "object", "additionalProperties": False, "required": ["paths"], "properties": {
+            "paths": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string"}},
+            "args": {"type": "array", "maxItems": 32, "items": {"type": "string"},
+                     "description": "-k/-m/--maxfail values; -q, -v, -x, --strict-markers, --collect-only. Auxiliary reports only."}}}
+
+    def describe_observations(self, selector):
+        return [{"kind": "framework_report", "target": path, "operator": "reported_outcome"} for path in selector["paths"]]
+
     def validate_reference(self, selector, reference):
         case = node_id(reference["case_id"])
         require(reference.get("framework", "pytest") == "pytest" and case.split("::", 1)[0] == reference["path"]

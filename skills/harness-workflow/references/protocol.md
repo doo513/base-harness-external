@@ -21,6 +21,41 @@ be overridden by selecting a weaker policy.
 
 ## Low-overhead workflow
 
+`describe --domain develop [--adapter process-observations-v1]` queries the
+configured Harness for Domain parameters and registered selector schemas. It
+creates no Run and does not probe runtime availability. Local `describe
+--operation NAME` remains available without configuration.
+
+On direct `call --operation start`, `--goal-file /absolute/request.txt` supplies
+`goal` verbatim; repeated `--source spec=/absolute/SPEC.md` supplies original
+documents as `sources`. Do not also supply the same argument in `--arguments`.
+The saved request contains the text, so replay with `--request` never re-reads a
+changed source file. Core accepts at most 16 documents, 64 KB each / 128 KB total;
+the enclosing request still has its usual 256 KiB bound. Source hashes identify
+caller-supplied bytes, not authenticated user approval or complete interpretation.
+
+Requirements can contain `source_refs: [{"source_id":"spec","start_line":1,
+"end_line":3}]`. The reserved source ID `goal` addresses the original goal.
+`verification_plan` checks explicit links, literal R-numbered labels and declared
+observation kinds. Gaps are advisory and bounded; an omitted diagnostic count
+means the first page is incomplete. `verification_scope` is present on compact
+reads and finish responses. Job-only polling deliberately does not re-evaluate
+all gates; `gate_status: not_evaluated` requests a Run read when a gate decision
+is needed. No failure entries does not mean that undeclared requirements passed.
+
+For optional cost measurement put `--trace-file /outside/workspace/cost.jsonl`
+before the helper command. It appends timing/size rows without prompts, source
+text or command output. `client_cost` distinguishes transport time and time
+outside transport; transport includes any requested wait. Trace write failures
+are reported without changing the outcome or retrying a committed operation.
+`python3 <harness-repo>/scripts/report-caller-cost.py /absolute/cost.jsonl --run-id RUN_ID`
+summarizes calls, repeats, unknown outcomes and bytes. Optional `--model-usage`
+accepts a normalized Host report with `source`, `run_id`, `model`, optional
+`input_tokens`, `output_tokens`, `cache_read_tokens` and `elapsed_seconds`.
+Those remain Host-reported counters; absent tokens/billing are null, not inferred
+from response bytes. Job `timings.sandbox` reports setup/execution/observation/
+cleanup within worker time; do not add nested timing categories together.
+
 `describe --operation NAME` returns actual accepted fields and a CLI template
 without loading configuration or invoking Core. A missing installation reports
 `CONFIG_MISSING`; select its config or set `BASE_HARNESS_CLIENT_CONFIG` once.

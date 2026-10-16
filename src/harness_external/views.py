@@ -3,6 +3,25 @@ from harness.common import canonical_hash
 from . import semantics
 
 
+def verification_scope(run, gates=None):
+    """Bounded projection of Domain declarations and independently selected gates."""
+    plan = run["domain_preparation"].get("verification_plan")
+    gaps = (plan or {}).get("diagnostics", [])
+    count = (plan or {}).get("diagnostic_count", 0)
+    return {"meaning": "current_run_declarations_not_execution_or_goal_proof",
+            "interpretation_ref": run["interpretations"][-1]["ref"],
+            "domain_plan_status": plan.get("status") if plan else "not_reported",
+            "declared_requirement_count": plan.get("requirement_count") if plan else None,
+            "declared_scenario_count": plan.get("scenario_count") if plan else None,
+            "referenced_requirement_count": plan.get("referenced_requirement_count") if plan else None,
+            "gate_status": gates["status"] if gates is not None else ("not_evaluated" if run["gate_bindings"] else "not_required"),
+            "required_check_count": len(run["gate_bindings"]),
+            "plan_hash": canonical_hash(plan) if plan else None,
+            "details": {"operation": "context", "run_id": run["run_id"], "field": "domain_preparation.verification_plan"},
+            "gap_count": count, "gaps": gaps[:8], "omitted_gap_count": max(0, count - 8),
+            "coverage_conclusion": "not_established"}
+
+
 def operation_constraints(run, gates):
     """Cheap read-only reasons, not permission or a successful admission promise.
 
@@ -39,7 +58,7 @@ def operation_constraints(run, gates):
 
 def job_view(job, *, compact=False):
     value = {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
-            "deadline_at", "completed_checks", "total_checks", "observed_cases", "completed_cases", "error", "check_set_hash", "candidate_hash")},
+            "deadline_at", "completed_checks", "total_checks", "observed_cases", "completed_cases", "error", "check_set_hash", "candidate_hash", "timings")},
             "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison", "requirement_observations")} if job.get("result") else None}
     if compact and value["result"]:
         result = value["result"]
@@ -76,6 +95,7 @@ def compact_resume(run, jobs, counts, gates, snapshot):
     measurement["measurement_scope"] = {key: body for key, body in scope.items() if key != "observations"}
     measurement["measurement_scope"]["observation_count"] = len(scope.get("observations", []))
     return {"view": "compact", "run": state, "intent_ref": run["intent"]["ref"], "policy_ref": run["policy"]["ref"],
+            "verification_scope": verification_scope(run, gates),
             "operation_constraints": operation_constraints(run, gates),
             "interpretation_ref": run["interpretations"][-1]["ref"],
             "usage": {"actions": run["actions"], "verification_attempts": run["verification_attempts"]},

@@ -2,7 +2,7 @@
 from . import semantics, need_records
 from . import read_core
 from .read_core import COLLECTIONS, RECENT_JOB_LIMIT, page_bounds, records
-from .views import job_view, run_view, operation_constraints
+from .views import job_view, run_view, operation_constraints, verification_scope
 from .errors import require
 
 
@@ -10,6 +10,7 @@ def job_summary(api, run_id, job_id, *, compact=False):
     with api._read_run(run_id) as (connection, run):
         job = read_core.checked_job(api, connection, run_id, job_id)
         return {"run_id": run_id, "view": "compact" if compact else "summary", "job": job_view(job, compact=compact),
+                "verification_scope": verification_scope(run),
                 "measurement_count": connection.execute("SELECT count(*) FROM measurements WHERE run_id=? AND job_id=?", (run_id, job_id)).fetchone()[0]}
 
 
@@ -43,6 +44,7 @@ def resume(api, run_id, *, view="summary", analysis_selection=None):
             return result
         jobs = [job_view(job) for job in checked]
         return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
+                "verification_scope": verification_scope(run, gate_results),
                 "operation_constraints": operation_constraints(run, gate_results),
                 "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),
                 "interpretation": {key: latest[key] for key in ("ref", "goal_summary", "assumptions", "open_questions")},

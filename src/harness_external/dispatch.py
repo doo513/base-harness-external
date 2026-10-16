@@ -7,9 +7,9 @@ import time
 from .errors import fields, require
 
 METHODS = {name: name.replace("-", "_") for name in (
-    "start", "observe", "revise", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish", "list-runs", "context")}
+    "start", "observe", "revise", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish", "list-runs", "context", "describe")}
 METHODS.update(check="register_check", **{"retire-check": "retire_check"})
-READS = {"status", "resume", "records", "cleanup", "list-runs", "context", "doctor", "wait"}
+READS = {"status", "resume", "records", "cleanup", "list-runs", "context", "doctor", "wait", "describe"}
 
 
 def waiting(api, run_id, job_id, wait_seconds):
@@ -35,7 +35,7 @@ def invoke(api, request):
     require(request_id is None if operation in READS else isinstance(request_id, str) and 0 < len(request_id) <= 128,
             "REQUEST_ID_REQUIRED", "Mutations require a stable request ID; reads do not accept one")
     expected = None
-    if operation not in {"start", "doctor", "list-runs"}:
+    if operation not in {"start", "doctor", "list-runs", "describe"}:
         context = fields(request.get("context"), {"workspace", "domain", "intent_ref", "policy_ref"}, {"workspace", "domain"})
         require(isinstance(context["workspace"], str) and Path(context["workspace"]).is_absolute()
                 and isinstance(context["domain"], str), "CONTEXT_REQUIRED", "An absolute workspace and Domain are required")

@@ -68,6 +68,20 @@ class AdapterRegistry:
     def parameter_aliases(self):
         return {entry.parameter_alias: key for key, entry in self._registrations.items() if entry.parameter_alias is not None}
 
+    def describe(self, adapter_id=None):
+        result = []
+        for key in ([adapter_id] if adapter_id is not None else sorted(self._registrations)):
+            adapter = self.resolve(key)
+            describe = getattr(adapter, "describe_selection", None)
+            schema = describe() if callable(describe) else None
+            require(schema is None or isinstance(schema, dict) and len(canonical_bytes(schema)) <= 32000,
+                    "ADAPTER_SCHEMA_INVALID", "Selector schema must be a bounded object")
+            result.append({"adapter_id": key, "revision": adapter.revision,
+                           "observation_boundary": self.identity(key)["observation_boundary"],
+                           "schema_status": "available" if schema is not None else "not_provided",
+                           "selector_schema": copy.deepcopy(schema)})
+        return result
+
     def resolve(self, adapter_id):
         # Serialize registry instance creation and private package initialization.
         with _IMPORT_LOCK:

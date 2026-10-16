@@ -47,7 +47,9 @@ def job_binding(candidate, run_id, job_id, owner, check_ref, execution):
                          for entry in candidate["manifest"]["files"]],
                         {"run_id": run_id, "job_id": job_id, "owner": owner, "check_ref": check_ref,
                          "subject": candidate["subject"], "candidate_hash": candidate["candidate_hash"],
-                         "command": {key: execution[key] for key in ("argv", "cwd", "timeout_seconds")}})
+                         "command": {key: execution[key] for key in ("argv", "cwd", "timeout_seconds")},
+                         **({"scenario": {key: execution[key] for key in ("fixtures", "observed_files", "expectedExitCode") if key in execution}}
+                            if "fixtures" in execution or "observed_files" in execution or execution.get("expectedExitCode", 0) else {})})
 
 
 def validate_receipt(capture, binding):

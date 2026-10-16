@@ -44,3 +44,9 @@ class ExternalCaptureAdapter(Protocol):
     No reporting resource, token or observer code is exposed to that subject.
     """
     def observe_capture(self, capture: dict, check: dict) -> dict: ...
+
+
+class DiscoverableAdapter(Protocol):
+    """Optional pure schemas and declared observation kinds for callers/Domains."""
+    def describe_selection(self) -> dict: ...
+    def describe_observations(self, selector: dict) -> list[dict]: ...

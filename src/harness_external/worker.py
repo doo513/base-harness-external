@@ -116,6 +116,10 @@ def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threadin
     request = {"workspace": str(payload), "argv": check["argv"], "cwd": check["cwd"],
                "timeoutMs": max(1, min(int(remaining * 1000), check["timeout_seconds"] * 1000)),
                "inputBinding": execution_inputs.validate_binding(input_binding)}
+    if "fixtures" in check:
+        request["fixtures"] = check["fixtures"]
+    if "observed_files" in check:
+        request["observedFiles"] = check["observed_files"]
     environment = clean_environment()
     environment["XDG_STATE_HOME"] = str(state_dir / "sandbox-state")
     options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -150,6 +154,8 @@ def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threadin
 
 def execute_job(state_dir: str | Path, job_id: str) -> None:
     from .service import verifier_identity
+    began = time.monotonic()
+    runtime_cost = {"observed_commands": 0, "setup_ms": 0.0, "execution_ms": 0.0, "observation_ms": 0.0, "cleanup_ms": 0.0}
     store = Store(state_dir)
     owner = uuid.uuid4().hex
     abort, done = threading.Event(), threading.Event()
@@ -158,7 +164,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
         run = store.run(connection, job["run_id"])
         if job["status"] != "queued" or run["active_job"] != job_id or run["status"] != "active":
             return
-        job.update(status="running", heartbeat_at=time.time(), owner=owner, pid=os.getpid(), cleanup="running")
+        job.update(status="running", heartbeat_at=time.time(), started_at=time.time(), owner=owner, pid=os.getpid(), cleanup="running")
         store.save_job(connection, job)
         run["verification"] = {"status": "running", "job_id": job_id}
         store.save_run(connection, run)
@@ -277,8 +283,14 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                         capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time(), input_binding)
                     require(environment["top_level_runtime"] == runtime_identity(execution), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
                     measured_runtime = capture.get("provenance") or {}
+                    timing = measured_runtime.get("timingMs")
+                    if isinstance(timing, dict) and all(type(timing.get(key)) in (int, float) and 0 <= timing[key] < 3600000
+                                                        for key in ("setup", "execution", "observation", "cleanup")):
+                        runtime_cost["observed_commands"] += 1
+                        for key in ("setup", "execution", "observation", "cleanup"):
+                            runtime_cost[key + "_ms"] += timing[key]
                     environment["sandbox"] = {key: measured_runtime[key] for key in ("backend", "containment", "network", "kernel", "distro") if key in measured_runtime}
-                    parameters = {"kind": "command", "argv": execution["argv"], "cwd": execution["cwd"], "expectedExitCode": 0}
+                    parameters = {"kind": "command", "argv": execution["argv"], "cwd": execution["cwd"], "expectedExitCode": execution.get("expectedExitCode", 0)}
                     if capture["status"] in {"completed", "error"} and capture.get("capture"):
                         receipt = capture["capture"]
                         require(receipt["argv"] == execution["argv"] and receipt["cwd"] == execution["cwd"], "RECEIPT_BINDING", "Command receipt identity mismatch")
@@ -384,6 +396,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                 return
             current["cleanup"] = "complete"
             current["heartbeat_at"] = time.time()
+            current["timings"] = {"worker_elapsed_ms": round((time.monotonic() - began) * 1000, 3),
+                                  "sandbox": runtime_cost,
+                                  "meaning": "sandbox_phases_are_within_worker_time_not_additional_elapsed_time"}
             valid = (current["status"] == "running" and active["status"] == "active" and active["active_job"] == job_id
                      and active["generation"] == job["generation"] and time.time() < job["deadline_at"] and not abort.is_set())
             if valid:

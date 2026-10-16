@@ -88,6 +88,24 @@ changes into the user's workspace.
 
 ### API and contract
 
+Original specifications can travel with `start` as `sources: [{id,label,text}]`.
+Core pins their exact UTF-8 text/digests in intent; Develop `source_refs` link
+requirements to 1-based inclusive lines in `goal` or a source ID. The Skill helper
+reads explicit files with `--goal-file` and repeated `--source ID=/absolute/file`.
+Use `describe --domain develop` on the helper to query Domain/adapter schemas.
+
+`domain_preparation.verification_plan` reports unmapped literal R-numbered source
+items, missing scenario links and observation gaps. `verification_scope` keeps
+gap counts and selected gate scope visible in compact reads and completion
+responses. These are advisory projections: exploratory policy and gate semantics
+are unchanged, and source references do not establish semantic completeness.
+
+The external process adapter supports disposable fixtures, expected nonzero exits
+and externally observed file contents/preservation. Caller `--trace-file` measures
+local time/bytes; Job `timings` separates worker and Sandbox phases. See the
+[caller protocol](skills/harness-workflow/references/protocol.md) for usage and
+[policy guide](POLICIES.md) for external observation scope.
+
 - `start`: pin original goal, Develop policy revision, parameters and verifier
   implementation digest. `--budget` accepts a JSON file containing `max_actions`,
   `max_verifications`, `timeout_seconds` (defaults 50, 3, 3600).

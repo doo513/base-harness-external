@@ -31,7 +31,7 @@ def normalize(value, inputs, preparation):
             and set(allowed) <= {"passed", "skipped", "xfail", "xpass"}, "CASE_OUTCOMES", "Invalid normalized outcomes")
     selected = preparation.selection(value["adapter_id"], value["selector"], inputs, required)
     from .domain import check_identity
-    return {"kind": "command", "expectedExitCode": 0,
+    return {"kind": "command", "expectedExitCode": selected.get("expected_exit_code", 0),
             "timeout_seconds": integer(value.get("timeout_seconds", 30), 1, 120, "timeout_seconds"),
             "adapter": {"id": value["adapter_id"], **selected,
                         "rules": {"required_case_ids": list(required), "allowed_outcomes": list(allowed), "minimum_selected": 1,
