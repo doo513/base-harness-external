@@ -4,7 +4,7 @@ import re
 from collections import Counter
 
 from . import develop_cases
-from .errors import fields, require
+from .errors import fields, require, HarnessError
 
 KINDS = {"input", "output", "behavior", "preservation", "conflict", "failure"}
 
@@ -40,11 +40,40 @@ def normalize(values):
     return result
 
 
+def resolve_references(references, check_index, *, path="/check_ids", eligible_ids=None):
+    allowed = set(check_index) if eligible_ids is None else set(eligible_ids)
+    aliases = {}
+    for key, check in check_index.items():
+        definition = check.get("check_key", check.get("definition_key")) or ""
+        if definition.startswith("named:"):
+            aliases.setdefault(definition[6:], set()).add(key)
+    resolved, diagnostics = [], []
+    for index, ref in enumerate(references):
+        # Canonical IDs retain their original meaning. Aliases are a fallback,
+        # never another candidate when the caller already supplied an exact ID.
+        options = {ref} if ref in check_index else aliases.get(ref, set())
+        if len(options) != 1 or not options <= allowed:
+            diagnostics.append({"path": path + "/" + str(index), "code": "REQUIREMENT_REFERENCE",
+                                "message": "Use one admitted logical Check ID: " + ", ".join(sorted(allowed)[:16])})
+        else:
+            resolved.append(next(iter(options)))
+    if diagnostics:
+        raise HarnessError("REQUIREMENT_REFERENCE", "Unknown, ambiguous or inadmissible Check reference", diagnostics=diagnostics[:64], diagnostic_count=len(diagnostics))
+    require(len(set(resolved)) == len(resolved), "REQUIREMENT_REFERENCE", "References resolve to the same Check more than once")
+    return resolved
+
+
+def reference_map(checks):
+    return [{"input_id": item["check_key"][6:], "check_id": item["check_id"]}
+            for item in checks if (item.get("check_key") or "").startswith("named:")]
+
+
 def validate_bindings(requirements, check_index, *, eligible_ids=None, allow_unmapped=True):
     allowed = set(check_index) if eligible_ids is None else set(eligible_ids)
     mapped = set()
-    for item in requirements:
-        references = item["check_ids"]
+    for index, item in enumerate(requirements):
+        references = resolve_references(item["check_ids"], check_index, path="/requirements/" + str(index) + "/check_ids", eligible_ids=allowed)
+        item["check_ids"] = references
         require(allow_unmapped or bool(references), "REQUIREMENT_UNMAPPED",
                 "Acceptance requirement " + item["id"] + " must reference at least one admitted Check")
         require(set(references) <= allowed and set(references) <= set(check_index),

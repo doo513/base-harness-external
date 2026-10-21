@@ -44,7 +44,7 @@ def unmeasured():
 
 def compare(items, job, run):
     """Paired check outcomes, not a score or instruction to the Host."""
-    if not job.get("baseline"):
+    if job.get("purpose") == "diagnostic" or not job.get("baseline"):
         return {"status": "not_requested", "changes": []}
     by_key = {(item["subject_role"], item["check_id"]): item for item in items}
     same_input_scope = ({f["path"] for f in job["baseline"]["manifest"]["files"]}
@@ -89,3 +89,46 @@ def compare(items, job, run):
             "changes": changes, "meaning": "check_improvement_not_full_goal_proof",
             "limitations": ["Environment identity covers the recorded runtime, not every transitive dependency or nondeterministic input.",
                             "Pinned declared tests are not proof of independent authorship or sufficient goal coverage."]}
+
+
+def diagnostic_pair(items, job):
+    """Generic paired facts, not a judgment about tests, regressions or goals."""
+    if job.get("purpose") != "diagnostic":
+        return None
+    from .paired_inputs import validate
+    validate(job)
+    indexed = {(item["subject_role"], item["check_id"]): item for item in items}
+    changes = []
+    same_scope = {f["path"] for f in job["baseline"]["manifest"]["files"]} == {f["path"] for f in job["candidate"]["manifest"]["files"]}
+    for check in job["checks"]:
+        before, after = indexed.get(("baseline", check["check_id"])), indexed.get(("candidate", check["check_id"]))
+        reasons = [] if same_scope else ["input_scope_changed"]
+        if not before or not after:
+            reasons.append("measurement_side_missing")
+        else:
+            if before["environment_hash"] != after["environment_hash"]:
+                reasons.append("recorded_environment_changed")
+            if before["execution_status"] != "completed" or after["execution_status"] != "completed":
+                reasons.append("execution_not_completed")
+            for item in (before, after):
+                summary = item.get("case_summary")
+                if summary and not (summary.get("collection_complete") and summary.get("session_complete")):
+                    reasons.append("case_observation_incomplete")
+            if before.get("case_summary") and after.get("case_summary") and before["case_summary"].get("case_scope_hash") != after["case_summary"].get("case_scope_hash"):
+                reasons.append("observed_case_scope_changed")
+        status = "inconclusive"
+        if not reasons:
+            status = {("failed", "passed"): "before_failed_after_passed", ("passed", "passed"): "both_passed",
+                      ("passed", "failed"): "before_passed_after_failed", ("failed", "failed"): "both_failed"}.get(
+                          (before["comparison_status"], after["comparison_status"]), "inconclusive")
+        changes.append({"check_id": check["check_id"], "check_ref": check["ref"], "status": status,
+                        "incomparable_reasons": list(dict.fromkeys(reasons)),
+                        "before_observation_id": before["observation_id"] if before else None,
+                        "after_observation_id": after["observation_id"] if after else None})
+    binding = job["comparison_binding"]
+    return {"status": "compared" if all(c["status"] != "inconclusive" for c in changes) else "incomplete",
+            "binding_hash": binding["binding_hash"], "reference_hash": binding["reference"]["candidate_hash"],
+            "current_hash": binding["current"]["candidate_hash"], "shared_input_hash": binding["shared_input_hash"],
+            "changes": changes, "gate_eligible": False, "meaning": "paired_observations_not_defect_or_goal_proof",
+            "limitations": ["Caller-selected shared inputs are not independently authored criteria.",
+                            "A failing command need not have reached the intended fault or assertion."]}

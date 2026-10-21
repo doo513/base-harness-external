@@ -169,6 +169,7 @@ def facts_at(api, connection, snapshot):
         rows = connection.execute("""SELECT m.data,r.ref FROM measurements m JOIN run_records r
             ON json_extract(r.data,'$.observation_id')=m.observation_id AND r.run_id=m.run_id
             WHERE m.run_id=? AND json_extract(m.data,'$.check_ref')=? AND json_extract(m.data,'$.subject')=?
+            AND coalesce(json_extract(m.data,'$.purpose'),'verification')='verification'
             AND r.kind='measurements' AND r.created_seq<=? ORDER BY r.position DESC LIMIT 1""",
             (snapshot["run_id"], canonical_bytes(check).decode(), canonical_bytes(run["candidate"]["subject"]).decode(), snapshot["seq"]))
         for data, ref in rows:

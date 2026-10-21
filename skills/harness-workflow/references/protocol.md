@@ -19,6 +19,13 @@ selects an operator-configured acceptance registry. It is configuration, not a
 field the caller can replace in a task request. Configured Domain defaults cannot
 be overridden by selecting a weaker policy.
 
+New helper-built starts use separate task stores under that root. Saved v2
+bindings carry the task selector; v1 envelopes remain on the original root DB.
+The application routes both CLI and socket envelopes before invoking the same
+Core. See [task stores and reusable notes](task-storage.md) for discovery,
+continuations and optional post-closeout publication. Omitted routing fields
+never silently choose a task or move old data.
+
 ## Low-overhead workflow
 
 `describe --domain develop [--adapter process-observations-v1]` queries the
@@ -56,8 +63,13 @@ Those remain Host-reported counters; absent tokens/billing are null, not inferre
 from response bytes. Job `timings.sandbox` reports setup/execution/observation/
 cleanup within worker time; do not add nested timing categories together.
 
-`describe --operation NAME` returns actual accepted fields and a CLI template
-without loading configuration or invoking Core. A missing installation reports
+`describe --operation NAME` returns a versioned, generated Core syntax catalog
+and a CLI template without configuration. `input_schema` describes caller syntax;
+`core_input_schema` also shows historical Core defaults (the helper asks for an
+explicit start policy/provenance). Add `--runtime` to inspect the configured Core
+and `matches_bundled_schema`; do not guess through a version mismatch. Domain
+and adapter parameter definitions still come from their own discovery ports.
+A missing installation reports
 `CONFIG_MISSING`; select its config or set `BASE_HARNESS_CLIENT_CONFIG` once.
 Core validation errors can include bounded `diagnostics` with JSON-pointer
 `path`, `code`, and `message`, plus `diagnostic_count` and
@@ -103,7 +115,11 @@ python3 <skill>/scripts/harness_client.py --config /absolute/client.json call \
   --action-id note-1 --output /absolute/note-1.json
 ```
 
-Mutations require `--output`: the normalized exact request is saved before dispatch.
+Mutations save the normalized exact request before dispatch. `--output` is
+optional when `--binding` or `--binding-output` supplies a location: requests go
+in `.harness-requests` beside it, keyed by configuration, operation and action ID,
+not payload. A changed payload for that intent conflicts rather than creating a
+new action. Without a binding location, supply `--output` explicitly.
 An existing identical file is reused; different content is rejected without sending.
 Responses include `caller_request` so the same file can be replayed with `call
 --request`, including after a timeout. A killed foreground process can also leave
@@ -111,6 +127,11 @@ that known output file; do not invent a new action ID. Read operations need neit
 an action ID nor an output file. This removes a helper process, not necessarily a
 model turn: a Host could already batch shell commands. The helper does not retry
 automatically or store another authoritative Run ledger.
+New start action labels are scoped to the configured store, workspace and Domain;
+they do not collide merely because two projects both choose `start`. Changing the
+goal within that scope still requires a new intentional label. After a helper
+upgrade, replay an old saved start with `--request` to retain its original ID;
+do not reconstruct it with the new ID builder. Existing envelopes remain valid.
 
 The original two-step form remains available: `request --binding ... --operation observe --arguments
 'json:{"data":{"note":"Decision and next step"}}' --action-id note-1 --output
@@ -182,6 +203,9 @@ After restoring context, use `resume` arguments `{"view":"compact"}` for repeate
 progress checks. `summary` remains the default and includes fuller working
 context. Compact `details.snapshot` identifies the source; it is not a cursor
 proving that the Host has received the omitted context.
+On direct status/resume calls, `--format compact` also selects that Core view.
+An explicitly conflicting view is rejected. `bind` reuses an identical existing
+binding after validating Core references, never overwrites conflicting references.
 `operation_constraints` lists known blockers for submit, verify and completed
 closeout. It is a read projection, not authorization: invocation still checks
 the current revision, files, runtime and execution ownership.
@@ -327,6 +351,37 @@ Arguments use the CLI's option names with underscores: `run_id`, `check_workspac
 not paths or pre-encoded JSON strings. The helper handles encoding without a shell.
 
 ## Existing Run, revisions and measurements
+
+### Optional workspace invariants and paired diagnostics
+
+For explicitly forbidden edits, start accepts:
+`workspace_constraints: {"unchanged_files":[{"path":"SPEC.md","source_refs":[{"source_id":"goal","start_line":1,"end_line":1}]}]}`.
+These must be existing individual files. Core pins their bytes/executable bits
+and checks the actual workspace at submit/completed finish, even if an acceptance
+bundle overlays that path. Changed/missing/unreadable/link files reject admission.
+They cannot be relaxed in the same Run. Partial/abandoned closeout records the
+violation. Ordinary reads show the last check time; status with check_workspace
+performs a new read. This is not an edit hook, proof of author identity, continuous
+change history or product behavior verification.
+
+`compare` is a mutation requiring the same binding/action/replay rules. Supply
+`expected_candidate_hash` from the submitted Candidate, `reference: "baseline"`
+(the only supported reference), and Domain-owned `parameters`. Develop accepts
+`{"check_ids":["domain.behavior"],"test_paths":["tests/new_test.py"]}`; use its
+`comparison_schema` for exact fields. Shared paths must be admitted non-artifact
+inputs present in the current Candidate; they are applied identically to both
+execution views. Capture baseline before edits; missing originals are never
+reconstructed. The original snapshots are retained unchanged.
+
+This uses the existing verification budget, lease, cancellation and strict
+Sandbox, but records `purpose: diagnostic` separately from ordinary verification.
+Poll its returned Job with wait/status; inspect `diagnostic_comparison` and both
+measurement sides. Diagnostics do not satisfy gates or become current assessment
+citations. Both passing means this comparison did not distinguish the subjects;
+a failing command may have failed before the intended assertion. No automated
+test-quality or goal-success conclusion is issued.
+
+### Interpretation and measurements
 
 Every Run operation includes context to reject cross-workspace/Domain mixups:
 

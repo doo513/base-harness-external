@@ -40,6 +40,11 @@ class NeedAnalysisDomain(Protocol):
     def normalize_need(self, details: dict, contract: dict) -> dict: ...
 
 
+class ComparisonPreparationDomain(Protocol):
+    """Optional pure selector. Core owns snapshots/jobs, not selection meaning."""
+    def prepare_comparison(self, parameters: dict, contract: dict, *, checks: list[dict]) -> dict: ...
+
+
 class AnalysisGuidanceDomain(Protocol):
     """Optional pure view over a stored map; Core does not interpret selectors."""
     def select_analysis_guidance(self, guidance: dict, selection: dict) -> dict: ...
@@ -82,6 +87,8 @@ class DomainRegistry:
                 and len(set(identity_file_ids)) == len(identity_file_ids),
                 "DOMAIN_IDENTITY_UNAVAILABLE", "identity_file_ids must uniquely name each Domain identity file")
         functions = [module.prepare, module.normalize_check]
+        if callable(getattr(module, "prepare_comparison", None)):
+            functions.append(module.prepare_comparison)
         if callable(getattr(module, "prepare_acceptance", None)):
             functions.append(module.prepare_acceptance)
         if callable(getattr(module, "normalize_need", None)):

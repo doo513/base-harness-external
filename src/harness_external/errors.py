@@ -6,6 +6,11 @@ from typing import Any
 from harness.common import canonical_hash
 
 
+# Reference existence checks and their advertised schemas share this bound.
+# This is not a record-page size or a Domain's Check-admission limit.
+OBSERVATION_REFERENCE_LIMIT = 128
+
+
 class HarnessError(ValueError):
     def __init__(self, code: str, message: str, *, diagnostics=(), diagnostic_count=None):
         self.code = code

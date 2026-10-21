@@ -47,7 +47,7 @@ def operation_constraints(run, gates):
             if not semantics.current_checks(run):
                 reasons.append("CHECKS_REQUIRED")
         if operation == "finish_completed":
-            if run["domain_questions"] or gates["status"] not in {"passed", "not_required"} or (
+            if gates["status"] not in {"passed", "not_required"} or (
                     run["policy"]["mode"] == "strict" and run["verification"]["status"] != "passed"):
                 reasons.append("VERIFICATION_REQUIRED")
             if run["contract"]["rules"].get("snapshot_required", False) and run["candidate"] is None:
@@ -57,9 +57,9 @@ def operation_constraints(run, gates):
 
 
 def job_view(job, *, compact=False):
-    value = {**{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
+    value = {"purpose": job.get("purpose", "verification"), **{key: job.get(key) for key in ("job_id", "run_id", "status", "cleanup", "heartbeat_at",
             "deadline_at", "completed_checks", "total_checks", "observed_cases", "completed_cases", "error", "check_set_hash", "candidate_hash", "timings")},
-            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison", "requirement_observations")} if job.get("result") else None}
+            "result": {key: job["result"].get(key) for key in ("status", "result_hash", "check_set_hash", "measurement_scope", "baseline_comparison", "requirement_observations", "diagnostic_comparison")} if job.get("result") else None}
     if compact and value["result"]:
         result = value["result"]
         scope = result.get("measurement_scope") or {}
@@ -74,6 +74,11 @@ def job_view(job, *, compact=False):
         value["detail_source"] = {"kind": "jobs", "record_id": job["job_id"],
                                   "record_digest": digest, "path": [], "sha256": digest}
     return value
+
+
+def diagnostic_view(run):
+    return {key: value for key, value in run.get("diagnostic", {"status": "not_requested"}).items()
+            if key in {"status", "job_id", "result_hash", "diagnostic_comparison"}}
 
 
 def run_view(run):

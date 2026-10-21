@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import socket
 import sys
@@ -20,36 +21,11 @@ import time
 MAX_INPUT = 256 * 1024
 MAX_OUTPUT = 8 * 1024 * 1024
 API_VERSION = "external-harness-v2"
-MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "finish", "checkpoint"}
-# Only CLI syntax lives here. Domain payloads and policy semantics belong to Harness.
-OPTIONS = {
-    "describe": {"domain_id": "str", "adapter_id": "str"},
-    "start": {"domain": "str", "goal": "str", "workspace": "str", "mode": "str",
-              "parameters": "json", "budget": "json", "constraints": "json", "provenance": "json", "analysis_selection": "json", "sources": "json",
-              "required_check": "repeat", "deferred_check": "repeat", "policy_id": "str",
-              "predecessor_run_id": "str", "policy_change_reason": "str", "continuation_reason": "str", "capture_baseline": "bool"},
-    "invoke": {"request": "json"},
-    "context": {"run_id": "str", "after": "str", "page": "str", "limit": "int"},
-    "checkpoint": {"run_id": "str", "compare_baseline": "bool", "wait_seconds": "number"},
-    "wait": {"run_id": "str", "job_id": "str", "wait_seconds": "number"},
-    "doctor": {"sandbox": "bool"},
-    "list-runs": {"offset": "int", "limit": "int"},
-    **{name: {"run_id": "str", "data": "json"} for name in ("observe", "revise", "check", "retire-check", "assess")},
-    **{name: {"run_id": "str"} for name in ("submit", "verify", "resume")},
-    "resume": {"run_id": "str", "view": "str", "analysis_selection": "json"},
-    "verify": {"run_id": "str", "compare_baseline": "bool", "expected_candidate_hash": "str"},
-    "cancel": {"run_id": "str", "job_id": "str"},
-    "status": {"run_id": "str", "job_id": "str", "check_workspace": "bool", "view": "str"},
-    "records": {"run_id": "str", "kind": "str", "job_id": "str", "offset": "int", "limit": "int", "view": "str", "detail": "json", "outcomes": "json", "subject_role": "str"},
-    "cleanup": {"run_id": "str", "apply": "bool", "min_age_seconds": "int"},
-    "finish": {"run_id": "str", "outcome": "str", "summary": "str", "assessment": "json"},
-}
-REQUIRED = {
-    "invoke": {"request"}, "wait": {"run_id", "job_id"},
-    "start": {"domain", "goal", "workspace", "mode", "provenance"},
-    **{name: {"run_id", "data"} for name in ("observe", "revise", "check", "retire-check", "assess")},
-    "cancel": {"run_id", "job_id"}, "records": {"run_id", "kind"}, "finish": {"run_id", "outcome"},
-}
+MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "finish", "checkpoint", "knowledge-publish"}
+# Generated Core syntax, not another set of Domain/policy rules.
+CATALOG = json.loads(Path(__file__).with_name("operation_catalog.json").read_text(encoding="utf-8"))
+OPTIONS = CATALOG["options"]
+REQUIRED = {key: set(value) for key, value in CATALOG["required"].items()}
 
 
 class ClientError(Exception):
@@ -159,14 +135,14 @@ def compact_call_result(operation, result):
         return result
     require(operation in {"start", "finish"}, "COMPACT_OPERATION", "Compact call projection supports start/finish.")
     common = {key: copy.deepcopy(result[key]) for key in (
-        "api_version", "ok", "assurance", "ready", "run_id", "caller_request", "binding_file", "transport", "verification_scope") if key in result}
+        "api_version", "ok", "assurance", "ready", "run_id", "task_id", "caller_request", "binding_file", "transport", "verification_scope", "knowledge_publication") if key in result}
     common.update(view="caller-compact", meaning="read_projection_not_a_complete_context_transfer")
     if operation == "start":
         contract = result["contract"]
         common.update(goal=contract["original_goal"], constraints=copy.deepcopy(result.get("constraints", [])),
                       contract_projection={key: copy.deepcopy(value) for key, value in contract.items()
                                            if key not in {"original_goal", "verifier", "source_domain"}},
-                      **{key: copy.deepcopy(result[key]) for key in ("context", "policy", "phase", "limits", "questions", "domain_preparation", "acceptance") if key in result},
+                      **{key: copy.deepcopy(result[key]) for key in ("context", "policy", "phase", "limits", "questions", "domain_preparation", "acceptance", "workspace_constraints") if key in result},
                       details={"operation": "context", "run_id": result["run_id"], "contract_hash": contract["contract_hash"],
                                "omitted": ["contract.verifier", "contract.source_domain", "interpretation"]})
     else:
@@ -238,6 +214,8 @@ def attention_report(current, job, cases, *, limit=20):
         "run_id": current.get("run_id") or current.get("run", {}).get("run_id"),
         **{key: current[key] for key in ("run", "intent_ref", "policy_ref", "candidate", "gates", "assessment", "limits", "usage", "details", "operation_constraints") if key in current},
         "measurement": current.get("measurement"),
+        "workspace_constraints": current.get("workspace_constraints", {"status": "not_queried"}),
+        "diagnostic": current.get("diagnostic", {"status": "not_queried"}),
         "verification_scope": {key: value for key, value in declared_scope.items() if key != "gaps"},
         "attention": returned, "attention_page_complete": complete, "listed_attention_count": len(returned),
         "total_known_attention_count": len(items), "omitted_attention_count": len(items) - len(returned),
@@ -248,6 +226,9 @@ def attention_report(current, job, cases, *, limit=20):
         "framework_reported_requirement_ids": [item["requirement_id"] for item in requirements if item.get("status") == "framework_reported_only"],
         "known_gaps": [{"requirement_id": item["requirement_id"], "known_gap_ids": item["known_gap_ids"]} for item in requirements if item["known_gap_ids"]]}
     if job:
+        payload["selected_job"]["purpose"] = job.get("purpose", "verification")
+        if result.get("diagnostic_comparison") is not None:
+            payload["selected_job"]["diagnostic_comparison"] = result["diagnostic_comparison"]
         payload["selected_job"]["result_status"] = result.get("status")
         measured = current.get("measurement")
         payload["selected_job"]["is_current_verification"] = measured.get("job_id") == job["job_id"] if measured is not None else None
@@ -349,10 +330,6 @@ def describe(operation=None):
                 "detail": "describe --operation NAME", "domain_fields_are_opaque": True}
     require(operation in OPTIONS and operation != "invoke", "OPERATION_INVALID", "Select a public operation.")
     options = OPTIONS[operation]
-    types = {"str": "string", "int": "integer", "bool": "boolean", "number": "number", "repeat": "array", "json": ["object", "array"]}
-    properties = {key: {"type": types[kind], **({"items": {"type": "string"}} if kind == "repeat" else {})}
-                  for key, kind in options.items()}
-    required = REQUIRED.get(operation, {"run_id"} if "run_id" in options else set())
     argv = ["python3", "<harness_client.py>", "--config", "<client.json>", "call", "--operation", operation,
             "--arguments", "json:<operation arguments only>"]
     if "run_id" in options:
@@ -362,7 +339,12 @@ def describe(operation=None):
     if operation == "start":
         argv.extend(["--binding-output", "<new-binding.json>", "--format", "compact"])
     return {"ok": True, "operation": operation, "mutates": operation in MUTATIONS, "call_argv_template": argv,
-            "input_schema": {"type": "object", "properties": properties, "required": sorted(required), "additionalProperties": False},
+            "input_schema": copy.deepcopy(CATALOG["operations"][operation]),
+            "core_input_schema": copy.deepcopy(CATALOG["core_operations"][operation]),
+            "source": "bundled_core_catalog", "catalog_hash": CATALOG["sha256"],
+            "application_capabilities": CATALOG.get("application_capabilities", {}),
+            **({"optional_finish_knowledge": CATALOG["finish_knowledge_schema"]} if operation == "finish" else {}),
+            "runtime_check": "describe --operation " + operation + " --runtime",
             "binding_supplies": ["run_id", "context"] if "run_id" in options else [],
             "request_rule": "explicit stable action-id and saved output request" if operation in MUTATIONS else "no action-id",
             "domain_fields_are_opaque": True}
@@ -415,6 +397,15 @@ class Client:
         self.cost_events = []
         self.trace_warnings = []
 
+    def database_path(self, request):
+        root = Path(self.config["state_dir"])
+        if "task_id" in request:
+            task_id = request["task_id"]
+            require(isinstance(task_id, str) and re.fullmatch(r"task_[a-f0-9]{32}", task_id),
+                    "TASK_ID_INVALID", "Use the exact task ID returned by Harness.")
+            root = root / "tasks" / task_id
+        return root / "runs.sqlite3"
+
     def execute(self, operation, arguments, request_id=None):
         if self.trace_file is None:
             return self._execute(operation, arguments, request_id)
@@ -452,8 +443,9 @@ class Client:
             require(operation == "invoke" and request_id is None, "TRANSPORT_OPERATION", "Socket transport accepts guarded invoke envelopes only.")
             return self._socket_execute(arguments["request"])
         effective = arguments["request"]["operation"] if operation == "invoke" else operation
-        if effective not in {"start", "doctor", "describe"}:
-            require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
+        envelope = arguments["request"] if operation == "invoke" else {}
+        if effective not in {"start", "doctor", "describe", "list-tasks", "knowledge-find", "knowledge-read"}:
+            require(self.database_path(envelope).is_file(), "STATE_NOT_FOUND",
                     "Configured state is missing; check storage/configuration. Do not silently start a replacement Run.")
         # No shell, no model calls, no worker loop, no automatic retry/cancellation.
         with tempfile.TemporaryDirectory(prefix="harness-client-json-") as transport, tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
@@ -544,18 +536,22 @@ class Client:
         cli_arguments(request.get("operation"), request.get("arguments"))
         if request["operation"] in MUTATIONS:
             if request["operation"] != "start" and not self.config.get("server_socket"):
-                require((Path(self.config["state_dir"]) / "runs.sqlite3").is_file(), "STATE_NOT_FOUND",
+                require(self.database_path(request).is_file(), "STATE_NOT_FOUND",
                         "Configured state is missing; do not initialize a replacement store.")
-            key = request["arguments"].get("run_id", "start")
+            key = request["arguments"].get("run_id", request.get("task_id", "start"))
             with self.serialized(key):
                 return self._call(request)
         return self._call(request)
 
     def normalize_request(self, request):
-        require(isinstance(request, dict) and set(request) <= {"operation", "arguments", "request_id", "context"}
+        require(isinstance(request, dict) and set(request) <= {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}
                 and {"operation", "arguments"} <= request.keys(), "REQUEST_INVALID", "Use operation, arguments, optional request_id and context.")
         operation, arguments = request["operation"], request["arguments"]
         cli_arguments(operation, arguments)
+        if "task_id" in request:
+            self.database_path(request)
+        require("knowledge" not in request or operation == "finish" and isinstance(request["knowledge"], dict),
+                "KNOWLEDGE_ARGUMENT", "A selected knowledge object is optional on finish only.")
         request_id = request.get("request_id")
         require((isinstance(request_id, str) and 0 < len(request_id) <= 128 and "\x00" not in request_id)
                 if operation in MUTATIONS else request_id is None, "REQUEST_ID_REQUIRED",
@@ -578,12 +574,26 @@ class Client:
         result = self.execute("invoke", {"request": request})
         if not result["ok"] and result.get("error", {}).get("code") in {"RUN_CONTEXT_MISMATCH", "BINDING_IDENTITY_CHANGED"}:
             raise ClientError(result["error"]["code"], result["error"]["message"])
+        if result.get("ok") and "task_id" in request:
+            require(result.get("task_id") == request["task_id"], "TASK_STORE_MISMATCH",
+                    "Response is not bound to the selected task store. Upgrade/check the runtime; do not fall back to a legacy store.")
         return result
 
-    def call_operation(self, operation, arguments, *, binding=None, action_id=None, output=None, binding_output=None):
+    def call_operation(self, operation, arguments, *, binding=None, action_id=None, output=None, binding_output=None, binding_path=None,
+                       task_id=None, knowledge=None):
         """Save one explicit intent, then send it. No automatic ID change/retry."""
-        request = self.normalize_request(self.make_request(operation, arguments, binding=binding, action_id=action_id)["request"])
-        require(operation not in MUTATIONS or output is not None, "REQUEST_FILE_REQUIRED", "Mutations need --output to save their exact request before dispatch.")
+        request = self.normalize_request(self.make_request(operation, arguments, binding=binding, action_id=action_id,
+                                                          task_id=task_id, knowledge=knowledge)["request"])
+        if operation in MUTATIONS and output is None:
+            anchor = binding_path or binding_output
+            require(anchor is not None, "REQUEST_FILE_REQUIRED", "Supply --output or a binding file location to save the exact request.")
+            parent = Path(anchor).absolute().parent / ".harness-requests"
+            require(not any(p.is_symlink() for p in (parent, *parent.parents)), "REQUEST_FILE_PATH", "Request directory must not use symlinks")
+            parent.mkdir(mode=0o700, exist_ok=True)
+            # Content is deliberately NOT in the key: changing an existing action
+            # must conflict, not silently create another request file.
+            key = digest({"config": self.config, "operation": operation, "request_id": request["request_id"]})
+            output = parent / (key + ".json")
         require(binding_output is None or operation == "start", "BINDING_OPERATION", "Only start can save a new binding from its receipt.")
         reference = {}
         if output is not None:
@@ -610,6 +620,8 @@ class Client:
                 "CORE_UPGRADE_REQUIRED", "Start receipt lacks binding references. Preserve/replay the saved request; do not start another Run.")
         binding = {"schema_version": "harness-caller-binding-v1", "config": copy.deepcopy(self.config),
                    "run_id": result["run_id"], **copy.deepcopy(context)}
+        if "task_id" in result:
+            binding.update(schema_version="harness-caller-binding-v2", task_id=result["task_id"])
         self.binding_context(binding)
         path = Path(output).absolute()
         try:
@@ -619,21 +631,33 @@ class Client:
                     "BINDING_CONFLICT", "Binding file belongs to different references; preserve the saved start request and select a new binding path.")
         return str(path)
 
-    def bind(self, run_id, workspace, domain, output):
+    def bind(self, run_id, workspace, domain, output, *, task_id=None):
         resumed = self.call({"operation": "resume", "arguments": {"run_id": run_id},
-                             "context": {"workspace": workspace, "domain": domain}})
+                             "context": {"workspace": workspace, "domain": domain},
+                             **({"task_id": task_id} if task_id is not None else {})})
         if not resumed["ok"]:
             return resumed
         binding = {"schema_version": "harness-caller-binding-v1", "config": self.config,
                    "run_id": run_id, "workspace": resumed["run"]["workspace"], "domain": domain,
                    "intent_ref": resumed["intent"]["ref"], "policy_ref": resumed["policy"]["ref"]}
-        write_new_json(output, binding)
+        if task_id is not None:
+            binding.update(schema_version="harness-caller-binding-v2", task_id=task_id)
+        try:
+            write_new_json(output, binding)
+        except FileExistsError:
+            require(not Path(output).is_symlink() and read_json(str(output)) == binding,
+                    "BINDING_CONFLICT", "Existing binding has different references; it was not overwritten.")
         return {"ok": True, "binding_file": str(output), "binding": binding,
                 "note": "A pinned reference, not a Run database; Harness is always revalidated."}
 
     def binding_context(self, binding):
-        require(isinstance(binding, dict) and set(binding) == {"schema_version", "config", "run_id", "workspace", "domain", "intent_ref", "policy_ref"}
-                and binding["schema_version"] == "harness-caller-binding-v1", "BINDING_INVALID", "Invalid caller binding.")
+        require(isinstance(binding, dict), "BINDING_INVALID", "Invalid caller binding.")
+        scoped = binding.get("schema_version") == "harness-caller-binding-v2"
+        require(set(binding) == {"schema_version", "config", "run_id", "workspace", "domain", "intent_ref", "policy_ref"} | ({"task_id"} if scoped else set())
+                and binding["schema_version"] in {"harness-caller-binding-v1", "harness-caller-binding-v2"},
+                "BINDING_INVALID", "Invalid caller binding.")
+        if scoped:
+            self.database_path(binding)
         require(binding["config"] == self.config, "BINDING_CONFIG_MISMATCH", "Binding belongs to another Harness/store configuration.")
         return {"workspace": str(absolute_path(binding["workspace"])), "domain": binding["domain"],
                 "intent_ref": binding["intent_ref"], "policy_ref": binding["policy_ref"]}
@@ -641,25 +665,47 @@ class Client:
     def validate_binding(self, binding):
         context = self.binding_context(binding)
         result = self._call({"operation": "resume", "arguments": {"run_id": binding["run_id"]},
-                             "context": context})
+                             "context": context, **({"task_id": binding["task_id"]} if "task_id" in binding else {})})
         if result["ok"]:
             require(result["intent"]["ref"] == binding["intent_ref"] and result["policy"]["ref"] == binding["policy_ref"],
                     "BINDING_IDENTITY_CHANGED", "Run intent or policy differs from the selected binding.")
         return result
 
-    def make_request(self, operation, arguments, *, action_id=None, binding=None):
+    def make_request(self, operation, arguments, *, action_id=None, binding=None, task_id=None, knowledge=None):
         require(isinstance(arguments, dict), "ARGUMENTS_INVALID", "Arguments must be an object.")
         value = {"operation": operation, "arguments": dict(arguments)}
         if binding is not None:
             context = self.binding_context(binding)
             require("run_id" not in arguments, "BINDING_ARGUMENT_CONFLICT", "The binding supplies run_id.")
-            value["arguments"]["run_id"] = binding["run_id"]
-            value["context"] = context
+            if operation == "start":
+                require(arguments.get("predecessor_run_id") == binding["run_id"], "TASK_CONTINUATION",
+                        "Starting through an old binding requires its explicit predecessor Run.")
+            else:
+                value["arguments"]["run_id"] = binding["run_id"]
+                value["context"] = context
+            require(task_id is None or task_id == binding.get("task_id"), "TASK_STORE_MISMATCH", "Binding and task selector differ.")
+            task_id = binding.get("task_id")
         cli_arguments(operation, value["arguments"])
         if operation in MUTATIONS:
-            value["request_id"] = action_key(binding, action_id)
+            start_scope = None
+            if operation == "start" and binding is None:
+                # Start has no Run ID yet. Scope the label to explicit mechanical
+                # context, NOT the payload: changing a goal must still conflict.
+                # Exclude socket/runtime paths so reconnecting does not invent an intent.
+                start_scope = "start-scope-v1:" + digest({"state_dir": self.config["state_dir"],
+                    "workspace": str(absolute_path(arguments["workspace"])), "domain": arguments["domain"]})
+            value["request_id"] = action_key(binding, action_id, start_scope=start_scope)
         else:
             require(action_id is None, "REQUEST_ID_REQUIRED", "Read operations do not need an action ID.")
+        if task_id is None and binding is None and operation == "start" and not arguments.get("predecessor_run_id"):
+            task_id = "task_" + digest({"request_id": value["request_id"],
+                "workspace": str(absolute_path(arguments["workspace"])), "domain": arguments["domain"]})[:32]
+        if task_id is not None:
+            self.database_path({"task_id": task_id})
+            value["task_id"] = task_id
+        if knowledge is not None:
+            require(operation == "finish" and isinstance(knowledge, dict), "KNOWLEDGE_ARGUMENT", "Selected knowledge is an object on finish.")
+            value["knowledge"] = copy.deepcopy(knowledge)
         return {"ok": True, "request": value}
 
     def checkpoint(self, binding, action_id, *, compare_baseline=False, wait_seconds=0):
@@ -776,12 +822,13 @@ class Client:
             require(cases.get("ok"), cases.get("error", {}).get("code", "ATTENTION_FAILED"), cases.get("error", {}).get("message", "Case lookup failed"))
         return attention_report(response, job, cases, limit=limit)
 
-    def find(self, workspace, domain, goal=None, max_pages=10):
+    def find(self, workspace, domain, goal=None, max_pages=10, *, task_id=None):
         workspace = str(absolute_path(workspace))
         require(type(max_pages) is int and 1 <= max_pages <= 100, "PAGE_LIMIT", "max_pages must be 1..100.")
         offset, matches = 0, []
         for _ in range(max_pages):
-            page = self.execute("list-runs", {"offset": offset, "limit": 100})
+            page = self.call({"operation": "list-runs", "arguments": {"offset": offset, "limit": 100},
+                              **({"task_id": task_id} if task_id is not None else {})})
             if not page["ok"]:
                 return page
             matches.extend(item for item in page["items"] if item["workspace"] == workspace
@@ -803,12 +850,14 @@ def validate_wait(value):
     require(type(value) in (int, float) and 0 <= value <= 3600, "WAIT_INVALID", "Wait must be 0..3600 seconds.")
 
 
-def action_key(binding, value):
+def action_key(binding, value, *, start_scope=None):
     require(isinstance(value, str) and 0 < len(value) <= 128 and "\x00" not in value,
             "ACTION_ID_REQUIRED", "Give this intentional action a stable ID; reuse it only for retransmission.")
     require(binding is None or isinstance(binding, dict) and isinstance(binding.get("run_id"), str),
             "BINDING_INVALID", "A valid explicit binding is required.")
-    scope = binding["run_id"] if binding is not None else "start"
+    require(start_scope is None or binding is None and isinstance(start_scope, str) and bool(start_scope),
+            "ACTION_SCOPE_INVALID", "Start scope cannot override a Run binding")
+    scope = binding["run_id"] if binding is not None else start_scope or "start"
     return "caller-" + hashlib.sha256((scope + "\x00" + value).encode()).hexdigest()
 
 
@@ -900,6 +949,8 @@ def main(argv=None):
         schema.add_argument("--operation", choices=tuple(name for name in OPTIONS if name != "invoke"))
         schema.add_argument("--domain", help="query the configured Harness for Domain-owned parameter schemas")
         schema.add_argument("--adapter", help="limit Domain discovery to one registered adapter")
+        schema.add_argument("--runtime", action="store_true", help="query the configured Core's actual operation schema")
+        schema.add_argument("--helper", choices=("find", "bind", "context", "checkpoint", "wait"), help="show exact helper arguments")
         setup = commands.add_parser("configure", help="create a NEW config; never overwrite")
         setup.add_argument("--harness-repo", required=True)
         setup.add_argument("--state-dir", required=True)
@@ -911,30 +962,35 @@ def main(argv=None):
         source.add_argument("--request", help="replay a saved JSON request: path, '-' stdin, or json:{...}")
         source.add_argument("--operation", choices=tuple(OPTIONS), help="construct and send one existing operation")
         call.add_argument("--binding", type=Path)
+        call.add_argument("--task-id", help="explicit discovered task selector; new start derives one automatically")
+        call.add_argument("--knowledge", help="finish only: selected reusable note as JSON file, stdin or json:{...}")
         call.add_argument("--arguments", default="json:{}", help="JSON arguments; binding supplies run_id")
         call.add_argument("--goal-file", type=Path, help="start only: read the original goal as UTF-8, without summarizing it")
         call.add_argument("--source", action="append", default=[], help="start only: ID=/absolute/specification; repeat for original documents")
         call.add_argument("--action-id", help="stable explicit intent; mutations only")
-        call.add_argument("--output", type=Path, help="save the exact request before dispatch; required for a direct mutation")
+        call.add_argument("--output", type=Path, help="save exact request; defaults beside --binding/--binding-output for mutations")
         call.add_argument("--binding-output", type=Path, help="start only: save binding from the same Core receipt, without another resume")
         call.add_argument("--resolve-detail", action="store_true", help="decode only the selected records detail, starting at byte zero")
-        call.add_argument("--format", choices=("raw", "attention", "compact"), default="raw", help="attention for bound reads; compact start/finish preserves criteria and omits implementation manifests")
+        call.add_argument("--format", choices=("raw", "attention", "compact"), default="raw", help="attention for bound reads; compact start/finish or status/resume")
         call.add_argument("--attention-limit", type=int, default=20)
         find = commands.add_parser("find", help="list matching Runs without choosing/resuming one")
         find.add_argument("--workspace", required=True)
         find.add_argument("--domain", required=True)
         find.add_argument("--goal", help="optional exact original goal filter")
         find.add_argument("--max-pages", type=int, default=10)
+        find.add_argument("--task-id", help="search one selected task; omission searches the legacy store")
         bind = commands.add_parser("bind", help="save explicit Run/context references, never choose the newest Run")
         bind.add_argument("--run-id", required=True)
         bind.add_argument("--workspace", required=True)
         bind.add_argument("--domain", required=True)
         bind.add_argument("--output", type=Path, required=True)
+        bind.add_argument("--task-id", help="exact task ID from list-tasks/start; omitted for legacy Runs")
         prepare = commands.add_parser("request", help="serialize a request once; resend the saved envelope after response loss")
         prepare.add_argument("--binding", type=Path)
         prepare.add_argument("--operation", required=True, choices=tuple(OPTIONS))
         prepare.add_argument("--arguments", default="json:{}", help="JSON arguments; the binding supplies Run context")
         prepare.add_argument("--action-id")
+        prepare.add_argument("--task-id")
         prepare.add_argument("--output", type=Path, required=True)
         checkpoint = commands.add_parser("checkpoint", help="submit + verify, with no assessment, repair loop or finish")
         checkpoint.add_argument("--binding", type=Path, required=True)
@@ -954,7 +1010,12 @@ def main(argv=None):
         context.add_argument("--max-pages", type=int, default=64)
         commands.add_parser("preflight", help="measure actual strict Sandbox availability; no task run is created")
         args = parser.parse_args(argv)
-        if args.command == "describe" and not args.domain:
+        if args.command == "describe" and args.helper:
+            require(not (args.domain or args.operation or args.runtime or args.adapter), "CLI_ARGUMENTS", "Choose one discovery target")
+            target = commands.choices[args.helper]
+            result = {"ok": True, "helper": args.helper, "help": target.format_help(),
+                      "required": [a.option_strings[0] for a in target._actions if a.required]}
+        elif args.command == "describe" and not args.domain and not args.runtime:
             require(not args.adapter, "CLI_ARGUMENTS", "--adapter requires --domain")
             result = describe(args.operation)
         elif args.command == "configure":
@@ -965,18 +1026,23 @@ def main(argv=None):
                     ". Use --config PATH or BASE_HARNESS_CLIENT_CONFIG for the installed configuration; do not select another store from a workspace binding.")
             client = Client(read_json(str(args.config)), timeout=args.call_timeout, trace_file=args.trace_file)
             if args.command == "describe":
-                require(args.operation is None, "CLI_ARGUMENTS", "Choose local --operation or configured --domain discovery")
-                result = client.call({"operation": "describe", "arguments": {"domain_id": args.domain,
-                                      **({"adapter_id": args.adapter} if args.adapter else {})}})
+                require((args.operation is None) != bool(args.runtime), "CLI_ARGUMENTS", "--runtime requires --operation; Domain discovery uses --domain")
+                require(not args.runtime or not (args.domain or args.adapter), "CLI_ARGUMENTS", "Choose operation or Domain discovery")
+                fields = {"operation": args.operation} if args.runtime else {"domain_id": args.domain, **({"adapter_id": args.adapter} if args.adapter else {})}
+                result = client.call({"operation": "describe", "arguments": fields})
+                if args.runtime and result.get("ok"):
+                    result["matches_bundled_schema"] = result["input_schema"] == CATALOG["core_operations"][args.operation]
             elif args.command == "call":
                 binding = read_json(str(args.binding)) if args.binding else None
                 if args.request is not None:
-                    require(args.action_id is None and args.output is None and args.arguments == "json:{}" and not args.goal_file and not args.source,
+                    require(args.action_id is None and args.output is None and args.arguments == "json:{}" and not args.goal_file and not args.source
+                            and args.task_id is None and args.knowledge is None,
                             "CLI_ARGUMENTS", "Saved request replay cannot also construct an intent")
                     saved = client.normalize_request(read_json(args.request))
                     operation, arguments = saved["operation"], saved["arguments"]
                     if binding is not None:
-                        require(saved.get("context") == client.binding_context(binding) and arguments.get("run_id") == binding["run_id"],
+                        require(saved.get("context") == client.binding_context(binding) and arguments.get("run_id") == binding["run_id"]
+                                and saved.get("task_id") == binding.get("task_id"),
                                 "RUN_CONTEXT_MISMATCH", "Saved request and binding differ")
                     result = None
                 else:
@@ -989,7 +1055,10 @@ def main(argv=None):
                         "CLI_ARGUMENTS", "Detail resolution requires records, a binding and raw format")
                 require(args.format != "attention" or operation in {"status", "resume", "checkpoint", "wait"} and binding is not None,
                         "CLI_ARGUMENTS", "Attention requires an explicit bound read/checkpoint/wait")
-                require(args.format != "compact" or operation in {"start", "finish"}, "CLI_ARGUMENTS", "Compact call format supports start/finish")
+                require(args.format != "compact" or operation in {"start", "finish", "status", "resume"}, "CLI_ARGUMENTS", "Compact supports start/finish/status/resume")
+                if args.format == "compact" and operation in {"status", "resume"}:
+                    require(arguments.get("view", "compact") == "compact", "CLI_ARGUMENTS", "--format compact conflicts with the explicit view")
+                    arguments["view"] = "compact"
                 require(args.binding_output is None or operation == "start", "BINDING_OPERATION", "Only start can save a new binding")
                 if args.resolve_detail:
                     detail_arguments = {key: value for key, value in arguments.items() if key != "run_id"}
@@ -1000,8 +1069,9 @@ def main(argv=None):
                         result = {**result, "binding_file": client.bind_started(result, args.binding_output)}
                 else:
                     result = client.call_operation(operation, arguments, binding=binding, action_id=args.action_id, output=args.output,
-                                                   binding_output=args.binding_output)
-                if args.format == "compact":
+                                                   binding_output=args.binding_output, binding_path=args.binding, task_id=args.task_id,
+                                                   knowledge=read_json(args.knowledge) if args.knowledge is not None else None)
+                if args.format == "compact" and operation in {"start", "finish"}:
                     result = compact_call_result(operation, result)
                 if args.format == "attention":
                     reference = result.get("caller_request")
@@ -1013,12 +1083,12 @@ def main(argv=None):
                     if reference:
                         result["caller_request"] = reference
             elif args.command == "find":
-                result = client.find(args.workspace, args.domain, args.goal, args.max_pages)
+                result = client.find(args.workspace, args.domain, args.goal, args.max_pages, task_id=args.task_id)
             elif args.command == "bind":
-                result = client.bind(args.run_id, args.workspace, args.domain, args.output)
+                result = client.bind(args.run_id, args.workspace, args.domain, args.output, task_id=args.task_id)
             elif args.command == "request":
                 result = client.make_request(args.operation, read_json(args.arguments), action_id=args.action_id,
-                                             binding=read_json(str(args.binding)) if args.binding else None)
+                                             binding=read_json(str(args.binding)) if args.binding else None, task_id=args.task_id)
                 if result["ok"]:
                     write_new_json(args.output, result["request"])
                     result = {"ok": True, "request_file": str(args.output), "request_id": result["request"].get("request_id")}

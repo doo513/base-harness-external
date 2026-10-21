@@ -42,10 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="External Develop Harness — local advisory reports, never Ready attestations")
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
     parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
+    parser.add_argument("--task-id", help="explicit task store selector; omission preserves the legacy store")
     commands = parser.add_subparsers(dest="command", required=True)
     describe = commands.add_parser("describe", help="read Domain and registered adapter input schemas without starting a Run")
     describe.add_argument("--domain-id", default="develop")
     describe.add_argument("--adapter-id")
+    describe.add_argument("--operation")
     server = commands.add_parser("serve", help="serve existing Harness requests outside a restricted Host; no MCP or model runtime")
     server.add_argument("--socket", required=True, help="Unix socket in a private runtime directory, outside workspaces")
     server.add_argument("--workspace-root", action="append", required=True, help="explicit allowed workspace root; repeat for multiple roots")
@@ -68,13 +70,30 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--deferred-check", action="append", default=[], help="explicitly required check to be defined later; exploratory mode only")
     start.add_argument("--provenance", help=JSON_HELP + "; declared_author and optional unverified approval_reference")
     start.add_argument("--constraints", help=JSON_HELP + "; string array of original constraints")
+    start.add_argument("--workspace-constraints", help=JSON_HELP + "; explicit unchanged_files with original source_refs")
     start.add_argument("--budget", help=JSON_HELP + "; max_actions/max_verifications/timeout_seconds")
     doctor = commands.add_parser("doctor")
     doctor.add_argument("--sandbox", action="store_true", help="run a controlled command through the strict Sandbox")
     listing = commands.add_parser("list-runs")
     listing.add_argument("--offset", type=int, default=0)
     listing.add_argument("--limit", type=int, default=20)
-    for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish", "context"):
+    tasks = commands.add_parser("list-tasks", help="bounded task connection metadata; never chooses a Run")
+    tasks.add_argument("--workspace")
+    tasks.add_argument("--domain")
+    tasks.add_argument("--offset", type=int, default=0)
+    tasks.add_argument("--limit", type=int, default=20)
+    publish = commands.add_parser("knowledge-publish", help="publish selected advice from an explicitly closed Run")
+    publish.add_argument("--run-id", required=True)
+    publish.add_argument("--data", required=True, help=JSON_HELP)
+    publish.add_argument("--request-id", required=True)
+    search = commands.add_parser("knowledge-find", help="find short advisory document references")
+    search.add_argument("--query", default="")
+    search.add_argument("--domain")
+    search.add_argument("--offset", type=int, default=0)
+    search.add_argument("--limit", type=int, default=10)
+    read = commands.add_parser("knowledge-read", help="read one selected advisory document")
+    read.add_argument("--entry-id", required=True)
+    for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "status", "resume", "records", "cleanup", "finish", "context"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--run-id", required=True)
         if name in {"observe", "revise", "check", "retire-check", "assess"}:
@@ -86,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "verify":
             cmd.add_argument("--compare-baseline", action="store_true", help="measure the pinned original and current Candidate with identical checks")
             cmd.add_argument("--expected-candidate-hash", help="reject a concurrent or superseding submission")
+        elif name == "compare":
+            cmd.add_argument("--reference", choices=("baseline",), default="baseline")
+            cmd.add_argument("--expected-candidate-hash", required=True)
+            cmd.add_argument("--parameters", required=True, help=JSON_HELP + "; Domain-owned comparison selection")
         elif name == "cancel":
             cmd.add_argument("--job-id", required=True)
         elif name == "records":
@@ -116,23 +139,53 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
     try:
-        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "assessment", "provenance", "detail", "analysis_selection", "outcomes", "sources")) > 1:
+        if sum(getattr(args, key, None) == "-" for key in ("data", "parameters", "budget", "constraints", "workspace_constraints", "assessment", "provenance", "detail", "analysis_selection", "outcomes", "sources")) > 1:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
+        if args.task_id and args.command == "serve":
+            raise HarnessError("TASK_ARGUMENT", "The server routes tasks per request, not by changing its configured root")
+        from .application_schema import OPTIONS as APP_OPTIONS
+        if args.command != "invoke" and (args.task_id or args.command in APP_OPTIONS):
+            from .dispatch import invoke
+            from .operation_schema import OPTIONS
+            from .task_storage import TaskStores
+            arguments = {}
+            for key, kind in OPTIONS[args.command].items():
+                value = getattr(args, key, None)
+                if value is not None:
+                    arguments[key] = load_json(value) if kind == "json" else value
+            envelope = {"operation": args.command, "arguments": arguments}
+            if args.task_id:
+                envelope["task_id"] = args.task_id
+            if getattr(args, "request_id", None):
+                envelope["request_id"] = args.request_id
+            if "run_id" in arguments:
+                selected = TaskStores(api).selected(args.task_id) if args.task_id else api
+                with selected.store.transaction(write=False) as connection:
+                    current = selected.store.run(connection, args.run_id)
+                    envelope["context"] = {"workspace": current["workspace"], "domain": current["contract"]["domain_id"]}
+            result = invoke(api, envelope)
+            print(canonical_bytes({"ok": True, **result}).decode("utf-8"))
+            return 0
         if args.command == "serve":
             from .local_transport import serve
             serve(api, args.socket, args.workspace_root)
             return 0
         if args.command == "describe":
-            result = api.describe(args.domain_id, args.adapter_id)
+            result = api.describe(args.domain_id, args.adapter_id, operation=args.operation)
         elif args.command == "doctor":
             from . import diagnostics
             from .service import response
             result = response(**diagnostics.doctor(api.store, sandbox=args.sandbox))
         elif args.command == "invoke":
             from .dispatch import invoke
-            result = invoke(api, load_json(args.request))
+            request = load_json(args.request)
+            if args.task_id:
+                if request.get("task_id", args.task_id) != args.task_id:
+                    raise HarnessError("TASK_ARGUMENT", "CLI and request task selectors differ")
+                request["task_id"] = args.task_id
+            result = invoke(api, request)
         elif args.command == "context":
             result = api.context(args.run_id, after=args.after, page=args.page, limit=args.limit)
         elif args.command == "list-runs":
@@ -158,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                                policy_id=args.policy_id, predecessor_run_id=args.predecessor_run_id, policy_change_reason=args.policy_change_reason,
                                capture_baseline=args.capture_baseline, continuation_reason=args.continuation_reason,
                                analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None,
+                               workspace_constraints=load_json(args.workspace_constraints) if args.workspace_constraints else None,
                                sources=load_json(args.sources) if args.sources else None)
         elif args.command == "observe":
             result = api.observe(args.run_id, load_json(args.data), args.request_id)
@@ -172,6 +226,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "verify":
             result = api.verify(args.run_id, args.request_id, compare_baseline=args.compare_baseline,
                                 expected_candidate_hash=args.expected_candidate_hash)
+        elif args.command == "compare":
+            result = api.compare(args.run_id, args.request_id, reference=args.reference,
+                                 expected_candidate_hash=args.expected_candidate_hash, parameters=load_json(args.parameters))
         elif args.command == "status":
             result = api.status(args.run_id, args.job_id, check_workspace=args.check_workspace, view=args.view)
         else:

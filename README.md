@@ -11,11 +11,29 @@ configure durable state and install the Skill into an existing Host. The Skill
 guides the caller; Domain/Core remain the source of contract and lifecycle rules.
 There is no second agent loop or Run database in the helper.
 
+New Skill-helper starts automatically create one database per independent task,
+under `state_dir/tasks/<task_id>/`. Reuse its binding across sessions; a different
+task uses a different start action even in the same project. Existing envelopes
+without task routing retain the legacy root DB; no old records are migrated.
+Optional caller-selected reusable notes are published to `state_dir/knowledge/`
+after closeout. `knowledge-find` returns short references and `knowledge-read`
+loads only a selected MD document. These are historical advice, never a new
+task's evidence, approval or completion policy. Publication failure does not undo
+Core closeout. See [task storage and knowledge](skills/harness-workflow/references/task-storage.md).
+
 [Configured acceptance policies](POLICIES.md) separate operator-provided mandatory
 checks and pinned test/fixture bundles from model exploratory probes. Optional
 baseline comparison records check improvement or regression without claiming
 goal correctness. The helper supports explicit `bind`, mechanical `checkpoint`
 and bounded `wait`, without automatic assessment, repair or closeout.
+
+Core-owned nested request schemas are available through `describe`; Domain and
+adapter schemas remain separately owned. Explicit `workspace_constraints` pin
+unchanged files at start and reject violating submissions/completed closeouts.
+The optional `compare` diagnostic applies identical selected auxiliary inputs to
+the original baseline and current Candidate. It consumes the existing execution
+budget but never satisfies normal gates. See the [caller protocol](skills/harness-workflow/references/protocol.md#optional-workspace-invariants-and-paired-diagnostics)
+for selection, recovery and the limits of these local observations.
 
 For external callers and agent shell tools, see [caller usage](CALLER_USAGE.md).
 Develop also supports [pytest case observations](POLICIES.md#pytest-case-observations):

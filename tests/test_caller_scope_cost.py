@@ -71,7 +71,11 @@ def test_cli_source_and_schema_work_without_an_existing_run(tmp_path):
         capture_output=True, text=True, encoding="utf-8", timeout=30)
     result = json.loads(response.stdout)
     assert response.returncode == 0 and result["ok"], result
-    restored = Harness(config["state_dir"]).resume(result["run_id"])
+    # New helper starts intentionally live outside the legacy root database.
+    # Follow the returned binding, without guessing a task's physical path.
+    saved_binding = helper.read_json(str(binding))
+    assert saved_binding["task_id"] == result["task_id"]
+    restored = helper.Client(config).call_operation("resume", {}, binding=saved_binding)
     assert restored["intent"]["sources"][0]["text"] == source.read_bytes().decode("utf-8")
     assert result["client_cost"]["transport_calls"] == 1
     assert result["client_cost"]["model_tokens"] is None

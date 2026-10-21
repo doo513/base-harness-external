@@ -37,7 +37,7 @@ def cleanup(store, run_id, *, apply=False, min_age_seconds=3600):
     import fcntl
     items = []
     for path in sorted(directory.iterdir()):
-        if not re.fullmatch(r"\.submit_[a-z0-9_]{8}", path.name):
+        if not re.fullmatch(r"\.(?:submit|compare)_[a-z0-9_]{8}", path.name):
             continue
         try:
             no_links(path)

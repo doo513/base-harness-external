@@ -76,7 +76,7 @@ class _Handler(socketserver.StreamRequestHandler):
                     "Harness code changed after this server started. Restart the operator server; retain the existing store and request IDs.")
             envelope = packet["request"]
             self.server.authorize(envelope)
-            result = invoke(self.server.api, envelope)
+            result = invoke(self.server.api, envelope, allowed_workspace=self.server.allowed)
             if envelope["operation"] == "list-runs":
                 # Pagination remains over Core's physical cursor; no second
                 # ledger is created. Never disclose another workspace's rows.
@@ -138,11 +138,15 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
         return any(value == root or value.is_relative_to(root) for root in self.workspace_roots)
 
     def authorize(self, envelope):
-        fields(envelope, {"operation", "arguments", "request_id", "context"}, {"operation", "arguments"})
+        from .application_schema import OPTIONS as APP_OPTIONS
+        from .task_storage import TaskStores
+        fields(envelope, {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}, {"operation", "arguments"})
         operation, arguments = envelope["operation"], envelope["arguments"]
-        require(isinstance(operation, str) and operation in {*METHODS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
+        require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
         require(isinstance(arguments, dict), "INVALID_PARAMETERS", "Arguments must be an object")
-        if operation in {"doctor", "list-runs", "describe"}:
+        if operation in {"doctor", "list-runs", "describe", "list-tasks", "knowledge-find", "knowledge-read"}:
+            # Global knowledge reads are filtered inside the application before
+            # text is returned; scoped reads also validate their task manifest.
             return
         if operation == "start":
             value = arguments.get("workspace")
@@ -151,8 +155,9 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
             no_links(target)
             target = target.resolve()
         else:
-            with self.api.store.transaction(write=False) as connection:
-                target = Path(self.api.store.current(connection, arguments.get("run_id"))["workspace"])
+            selected = TaskStores(self.api).selected(envelope["task_id"]) if "task_id" in envelope else self.api
+            with selected.store.transaction(write=False) as connection:
+                target = Path(selected.store.current(connection, arguments.get("run_id"))["workspace"])
         require(self.allowed(target), "WORKSPACE_NOT_ALLOWED", "Workspace is outside this server's configured roots")
 
     def process_request(self, connection, address):

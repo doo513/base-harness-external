@@ -18,8 +18,10 @@ operator-started external Harness; the same endpoint handles preflight and work.
 Missing setup or an unavailable Sandbox is a limitation, not permission to run
 verification directly on the Host. Do not guess another checkout or state store.
 
-Use `describe --operation NAME` to see exact input fields without config or a
-Core call. Read [the protocol](references/protocol.md) for installation/recovery,
+Use `describe --operation NAME` for the bundled Core input schema, including
+nested assessment fields; add `--runtime` to query the configured Core. For
+helper-only arguments use `describe --helper find` (or bind/context/checkpoint/wait).
+Read [the protocol](references/protocol.md) for installation/recovery,
 a missing schema detail, advanced records, or runtime transitions; ordinary calls
 do not require loading the entire reference.
 
@@ -41,10 +43,15 @@ Use `call --operation start --arguments json:{...} --action-id ...
 --output REQUEST_FILE --binding-output BINDING_FILE --format compact` to start
 and save a binding in one call. The arguments are operation fields, not another
 request envelope. `describe` includes the exact CLI template.
+New starts prepared by the helper automatically select a separate task DB.
+Keep the returned binding: it pins both `task_id` and `run_id`. A new session
+continues that binding; an unrelated request uses a new start action.
 
 For an existing Run, inspect its goal, workspace, Domain and lifecycle before
 binding it. Never choose the newest Run automatically. Save one explicit binding
-with `bind --run-id ... --workspace ... --domain ... --output ...`.
+with `bind --task-id ... --run-id ... --workspace ... --domain ... --output ...`.
+Omit task ID only for legacy Runs. For lost bindings or task discovery, see
+[task storage and reusable notes](references/task-storage.md).
 Bindings cache references only; Core remains authoritative.
 
 ## Investigate and implement
@@ -81,7 +88,10 @@ At an intentional checkpoint use `checkpoint --binding ... --action-id ...
 A new action ID means a new intentional action. After response loss, replay the
 IDENTICAL saved request/ID or query its Run; never automatically invent another.
 For other mutations, `call --operation ... --arguments json:{...} --binding ...
---action-id ... --output REQUEST_FILE` saves the exact request before dispatch.
+--action-id ...` saves the exact request beside the binding before dispatch;
+`--output REQUEST_FILE` overrides that location. Preserve the returned request
+path for identical replay. Rebinding identical references is safe; conflicting
+references are never overwritten.
 
 After context loss, use `context --binding ... --complete` without a cursor and
 read its contents. Afterwards use its cursor for deltas, or `resume` with
@@ -94,6 +104,15 @@ framework-only reports, known gaps and pagination. Fetch an exact raw detail
 with `records` and `--resolve-detail` when needed.
 Capture a baseline before edits if comparing original and revised behavior.
 A baseline improvement concerns that check, not complete goal correctness.
+For newly added tests, `compare` measures both subjects with the same explicit
+shared inputs; discover the Domain's `comparison_schema`. It is a diagnostic,
+not normal verification or permission to finish. Neither side passing proves
+that the test reached the intended failure. See the protocol for this optional mode.
+
+When the user explicitly forbids changing particular existing files, declare
+`workspace_constraints.unchanged_files` at start with their original source
+references. Core checks those actual workspace bytes at submit/completed finish,
+separately from product tests. No Host edit hook or continuous protection exists.
 
 Verifier facts do not order a retry. Decide whether to repair, explore, retain
 uncertainty or stop. Direct Host tests remain caller observations, not Harness
@@ -104,11 +123,21 @@ measurements. A Linux result does not establish Windows behavior.
 Compare current submitted files with the verified Candidate; inspect current
 gates, observation scope, unresolved work and uncertainty before choosing
 `finish`. Keep measured facts, model assessment and lifecycle closure separate.
+Check Domain clarification separately: a `NEEDS_INPUT` diagnostic requests a
+Domain declaration, not new approval or a weaker verification policy.
 Do not edit Harness state, rewrite original intent, weaken mandatory criteria,
 or quietly reset budgets through a new Run. A terminal Run/policy/runtime change
 needs the explicit linked continuation described in the protocol.
 An empty failure list with no declared requirements is unknown coverage.
 Include the reported evidence gaps even when all configured checks passed.
+
+When a reusable lesson exists, pass a selected note with `call --operation finish
+... --knowledge NOTE_JSON`; `describe --operation finish` exposes its schema.
+The application publishes it after Core closeout, without another model call.
+Do not invent a lesson to fill a template. Treat `knowledge_publication.status`
+separately from closeout; a publication failure needs `knowledge-publish`, not
+another verification. For later work use `knowledge-find` then `knowledge-read`
+on selected entries only. These notes are advice, not policy or current evidence.
 
 Report the deliverable, actual measurements and skips, remaining uncertainty,
 and Run ID. Results are unsigned `local-advisory`, `ready=false`; neither Skill

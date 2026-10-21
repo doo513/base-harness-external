@@ -2,8 +2,9 @@
 from . import semantics, need_records
 from . import read_core
 from .read_core import COLLECTIONS, RECENT_JOB_LIMIT, page_bounds, records
-from .views import job_view, run_view, operation_constraints, verification_scope
+from .views import job_view, run_view, operation_constraints, verification_scope, diagnostic_view
 from .errors import require
+from .workspace_constraints import view as workspace_constraints_view
 
 
 def job_summary(api, run_id, job_id, *, compact=False):
@@ -41,9 +42,13 @@ def resume(api, run_id, *, view="summary", analysis_selection=None):
             result = compact_resume(run, checked, counts, gate_results, cursor(snapshot) if snapshot else None)
             if analysis_selection is not None:
                 result["domain_preparation"] = preparation
+            result["workspace_constraints"] = workspace_constraints_view(run)
+            result["diagnostic"] = diagnostic_view(run)
             return result
         jobs = [job_view(job) for job in checked]
         return {"view": "summary", "run": run_view(run), "intent": run["intent"], "policy": run["policy"],
+                "workspace_constraints": workspace_constraints_view(run),
+                "diagnostic": diagnostic_view(run),
                 "verification_scope": verification_scope(run, gate_results),
                 "operation_constraints": operation_constraints(run, gate_results),
                 "resolution": semantics.resolution(run, gate_results), "check_set_hash": semantics.check_set_hash(checks),

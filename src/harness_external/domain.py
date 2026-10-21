@@ -316,8 +316,8 @@ def build_contract(domain_id: str, goal: str, parameters: dict, verifier: dict, 
 
 class DevelopModule:
     identity_files = tuple(str(files("harness_external").joinpath(name)) for name in
-                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py", "develop_need_compat.py", "develop_plan.py"))
-    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis", "develop-need-compat", "develop-verification-plan")
+                           ("develop_manifest.json", "develop_cases.py", "develop_requirements.py", "develop_analysis.py", "develop_need_compat.py", "develop_plan.py", "develop_comparison.py"))
+    identity_file_ids = ("develop-manifest", "develop-case-semantics", "develop-requirements", "develop-analysis", "develop-need-compat", "develop-verification-plan", "develop-comparison")
     domain_id = "develop"
     revision = DEVELOP_REVISION
 
@@ -342,6 +342,7 @@ class DevelopModule:
         token = _COMPILATION.set({})
         try:
             result = self._compile_acceptance(goal, parameters, verifier, policy=policy, intent=intent)
+            result["check_references"] = develop_requirements.reference_map(result["contract"]["checks"])
             if analysis_selection is not None:
                 result["analysis_guidance"] = self.select_analysis_guidance(result["analysis_guidance"], analysis_selection)
             return result
@@ -473,7 +474,7 @@ class DevelopModule:
         if not exploratory or not missing:
             contract = build_contract(self.domain_id, goal, parameters, verifier, check_preparation=self._checks, intent=intent)
             result = {"status": "proceed", "questions": [], "contract": contract, "available_operations": ["submit", "verify", "finish_completed"],
-                      "analysis_guidance": advice}
+                      "analysis_guidance": advice, "check_references": develop_requirements.reference_map(contract["checks"])}
             if "requirement_summary" in contract:
                 result["requirements_summary"] = copy.deepcopy(contract["requirement_summary"])
             if perspective:
@@ -511,11 +512,17 @@ class DevelopModule:
 
     def describe_parameters(self):
         from .develop_schema import schema
+        from .develop_comparison import schema as comparison_schema
         return {"schema_version": "domain-input-schema-v1", "input_schema": schema(),
+                "comparison_schema": comparison_schema(),
                 "notes": ["Named Check id x is referenced as domain.x.",
                           "Partial exploratory declarations are allowed; inspect verification_plan and questions.",
                           "Source references address 1-based inclusive lines in goal or start.sources.",
                           "Schema describes syntax; cross-field scope and policy checks run during preparation."]}
+
+    def prepare_comparison(self, parameters, contract, *, checks=None):
+        from .develop_comparison import prepare
+        return prepare(parameters, contract, checks=checks)
 
     def normalize_need(self, details, contract):
         from .develop_need_compat import normalize

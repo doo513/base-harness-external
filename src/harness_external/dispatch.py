@@ -2,12 +2,14 @@
 import inspect
 import os
 from pathlib import Path
+import sqlite3
 import time
 
-from .errors import fields, require
+from harness.common import canonical_hash
+from .errors import HarnessError, fields, require
 
 METHODS = {name: name.replace("-", "_") for name in (
-    "start", "observe", "revise", "assess", "submit", "verify", "cancel", "status", "resume", "records", "cleanup", "finish", "list-runs", "context", "describe")}
+    "start", "observe", "revise", "assess", "submit", "verify", "compare", "cancel", "status", "resume", "records", "cleanup", "finish", "list-runs", "context", "describe")}
 METHODS.update(check="register_check", **{"retire-check": "retire_check"})
 READS = {"status", "resume", "records", "cleanup", "list-runs", "context", "doctor", "wait", "describe"}
 
@@ -25,7 +27,73 @@ def waiting(api, run_id, job_id, wait_seconds):
         time.sleep(min(1, remaining))
 
 
-def invoke(api, request):
+def invoke(api, request, *, allowed_workspace=None):
+    """Application envelope; routing metadata is never a Domain parameter."""
+    from .task_storage import TaskStores
+    from .service import response
+    from .application_schema import OPTIONS as APP_OPTIONS
+    fields(request, {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}, {"operation", "arguments"})
+    operation = request["operation"]
+    require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"},
+            "OPERATION_UNSUPPORTED", "Unknown operation")
+    require(isinstance(request["arguments"], dict), "INVALID_PARAMETERS", "Arguments must be an object")
+    require("knowledge" not in request or operation == "finish", "REQUEST_INVALID", "Automatic publication belongs only to finish")
+    if request["operation"] == "list-tasks":
+        require(set(request) <= {"operation", "arguments"} and isinstance(request["arguments"], dict),
+                "REQUEST_INVALID", "Task discovery is a global read")
+        fields(request["arguments"], {"workspace", "domain", "offset", "limit"})
+        return response(**TaskStores(api).list(**request["arguments"], allowed_workspace=allowed_workspace))
+    if operation.startswith("knowledge-"):
+        return _knowledge(api, request, allowed_workspace)
+    inner = {k: v for k, v in request.items() if k != "knowledge"}
+    if "task_id" in request:
+        result = TaskStores(api).invoke(inner, _invoke_core, allowed_workspace=allowed_workspace)
+    else:
+        result = _invoke_core(api, inner)
+    if operation == "finish" and "knowledge" in request:
+        publication = {**inner, "operation": "knowledge-publish",
+                       "arguments": {"run_id": request["arguments"]["run_id"], "data": request["knowledge"]},
+                       "request_id": "finish-note-" + canonical_hash({"request_id": request["request_id"]})[:48]}
+        try:
+            result["knowledge_publication"] = _knowledge(api, publication, allowed_workspace)
+        except (HarnessError, OSError, ValueError, sqlite3.Error) as error:
+            # Core's committed closeout is authoritative even if this projection
+            # failed. Re-publish the note, never re-run verification to repair MD.
+            result["knowledge_publication"] = {"status": "failed", "run_closed": True,
+                "error": error.as_dict() if isinstance(error, HarnessError) else {"code": "KNOWLEDGE_IO", "message": str(error)[:1000]},
+                "retry_operation": "knowledge-publish"}
+    return result
+
+
+def _knowledge(api, request, allowed_workspace):
+    from .knowledge import KnowledgeLibrary
+    from .task_storage import TaskStores
+    from .service import response
+    library = KnowledgeLibrary(api.store.root)
+    operation, arguments = request["operation"], request["arguments"]
+    if operation in {"knowledge-find", "knowledge-read"}:
+        require(set(request) <= {"operation", "arguments"}, "REQUEST_INVALID", "Knowledge lookup is a global read")
+        if operation == "knowledge-find":
+            fields(arguments, {"query", "domain", "offset", "limit"})
+            return response(**library.find(**arguments, allowed_workspace=allowed_workspace))
+        fields(arguments, {"entry_id"}, {"entry_id"})
+        return response(**library.read(**arguments, allowed_workspace=allowed_workspace))
+    fields(arguments, {"run_id", "data"}, {"run_id", "data"})
+    request_id = request.get("request_id")
+    require(isinstance(request_id, str) and 0 < len(request_id) <= 128, "REQUEST_ID_REQUIRED", "Publishing needs a stable request ID")
+    selected = TaskStores(api).selected(request["task_id"]) if "task_id" in request else api
+    _invoke_core(selected, {"operation": "resume", "arguments": {"run_id": arguments["run_id"], "view": "compact"},
+                           "context": request.get("context")})
+    # Validate the same Core context guard even for terminal Runs, then enforce
+    # server source visibility before any shared document is read or written.
+    context = request["context"]
+    require(allowed_workspace is None or allowed_workspace(Path(context["workspace"])),
+            "WORKSPACE_NOT_ALLOWED", "Source workspace is outside the configured roots")
+    result = library.publish(selected, arguments["run_id"], arguments["data"], request_id, task_id=request.get("task_id"))
+    return response(**result, **({"task_id": request["task_id"]} if "task_id" in request else {}))
+
+
+def _invoke_core(api, request):
     fields(request, {"operation", "arguments", "request_id", "context"}, {"operation", "arguments"})
     operation, arguments = request["operation"], request["arguments"]
     require(isinstance(operation, str) and operation in {*METHODS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")

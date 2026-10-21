@@ -258,6 +258,7 @@ class Store:
         for ref in run["gate_bindings"].values():
             rows = connection.execute("""SELECT data FROM measurements WHERE run_id=?
                 AND json_extract(data,'$.check_ref')=? AND json_extract(data,'$.subject')=?
+                AND coalesce(json_extract(data,'$.purpose'),'verification')='verification'
                 ORDER BY rowid DESC LIMIT 1""", (run["run_id"], canonical_bytes(ref).decode(),
                                                   canonical_bytes(run["candidate"]["subject"]).decode()))
             result.extend(Store._measurement_rows(rows, run["run_id"]))
@@ -265,6 +266,9 @@ class Store:
 
     @staticmethod
     def validate_result(connection, job):
+        if job.get("purpose") == "diagnostic":
+            from .paired_inputs import validate
+            validate(job)
         value = job.get("result")
         if not value:
             return
@@ -326,6 +330,7 @@ class Store:
                 and item["check_set_hash"] == job["check_set_hash"] and item["attempt"] == job.get("attempt")
                 and item["policy_ref"] == job["policy_ref"] and item["interpretation_ref"] == job["interpretation_ref"]
                 and item.get("acceptance_binding_hash") == job.get("acceptance_binding_hash") and item["domain_identity"] == job["domain_identity"]
+                and item.get("purpose", "verification") == job.get("purpose", "verification")
                 and any(c["ref"] == item["check_ref"] and c["check_id"] == item["check_id"] for c in job["checks"])
                 and item["adapter_identity"] == job["adapter_bindings"].get(item["check_id"]),
                 "CASE_OBSERVATION_BINDING", "Case observation does not belong to its execution")
@@ -395,7 +400,8 @@ class Store:
         require(subject is not None and item["run_id"] == run["run_id"] and item["job_id"] == job_id and item["subject"] == subject["subject"]
                 and item["candidate_hash"] == subject["candidate_hash"]
                 and any(check["ref"] == item["check_ref"] for check in job["checks"]), "CHECKPOINT_BINDING", "Measurement/check/subject binding mismatch")
-        require(item.get("check_set_hash") == job.get("check_set_hash"), "CHECKPOINT_BINDING", "Measurement check set mismatch")
+        require(item.get("check_set_hash") == job.get("check_set_hash") and item.get("purpose", "verification") == job.get("purpose", "verification"),
+                "CHECKPOINT_BINDING", "Measurement check set/purpose mismatch")
         observation = item["report"]["observation"]
         require(observation["runId"] == run["run_id"] and observation["taskId"] == job_id and observation["subject"] == item["subject"]
                 and observation["checkRef"] == item["check_ref"] and observation["observationId"] == item["observation_id"],

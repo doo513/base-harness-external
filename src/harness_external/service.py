@@ -12,7 +12,7 @@ from contextlib import contextmanager
 
 from harness.common import canonical_bytes, canonical_hash, redact
 from . import API_VERSION, ASSURANCE
-from .errors import HarnessError, fields, integer, limits, require
+from .errors import HarnessError, fields, integer, limits, require, OBSERVATION_REFERENCE_LIMIT
 from .snapshots import capture, no_links, read_file, validate_candidate
 from .store import Store, StopRun, identifier
 from . import semantics
@@ -22,10 +22,13 @@ from .check_preparation import AdapterCheckPreparation
 from . import queries, maintenance
 from .views import verification_scope
 from . import acceptance, evidence, observation_links, need_records, intent_sources
+from . import workspace_constraints as workspace_rules
 from .identity import verifier_identity
 
 
 LEASE_SECONDS = 20
+DOMAIN_REFERENCE_MAP_MAX_ITEMS = 256
+DOMAIN_REFERENCE_MAP_MAX_BYTES = 32000
 
 
 def response(**data) -> dict:
@@ -39,11 +42,15 @@ class Harness:
         self.domains = domains or builtin_registry(check_preparation=AdapterCheckPreparation(self.adapters))
         self.policies = acceptance.PolicyRegistry(policy_root)
 
-    def describe(self, domain_id="develop", adapter_id=None):
+    def describe(self, domain_id="develop", adapter_id=None, operation=None):
+        if operation is not None:
+            from .operation_schema import describe
+            require(adapter_id is None, "INVALID_PARAMETERS", "Operation schemas do not select an adapter")
+            return response(**describe(operation))
         module = self.domains.resolve(domain_id)
         describe = getattr(module, "describe_parameters", None)
         require(callable(describe), "DOMAIN_SCHEMA_UNAVAILABLE", "Selected Domain has no discovery schema")
-        schema = fields(describe(), {"schema_version", "input_schema", "notes"}, {"schema_version", "input_schema"})
+        schema = fields(describe(), {"schema_version", "input_schema", "notes", "comparison_schema"}, {"schema_version", "input_schema"})
         require(isinstance(schema["schema_version"], str) and isinstance(schema["input_schema"], dict)
                 and isinstance(schema.get("notes", []), list) and all(isinstance(item, str) for item in schema.get("notes", []))
                 and len(canonical_bytes(schema)) <= 64000,
@@ -63,6 +70,14 @@ class Harness:
         if "requirements_summary" in preparation:
             # Opaque Domain metadata; declarations do not grant completion.
             result["requirements"] = copy.deepcopy(preparation["requirements_summary"])
+        if "check_references" in preparation:
+            refs = preparation["check_references"]
+            # Generic presentation bounds must accommodate the admitted
+            # contract; Domain modules still own their actual Check limits.
+            require(isinstance(refs, list) and len(refs) <= DOMAIN_REFERENCE_MAP_MAX_ITEMS
+                    and len(canonical_bytes(refs)) <= DOMAIN_REFERENCE_MAP_MAX_BYTES,
+                    "DOMAIN_REFERENCE_MAP", "Domain reference descriptions must be bounded")
+            result["check_references"] = copy.deepcopy(refs)
         if "verification_plan" in preparation:
             require(isinstance(preparation["verification_plan"], dict) and len(canonical_bytes(preparation["verification_plan"])) <= 32000,
                     "DOMAIN_VERIFICATION_PLAN", "Domain plan diagnostics must be bounded")
@@ -97,7 +112,8 @@ class Harness:
         ):
             job.update(status="interrupted", error={"code": "WORKER_INTERRUPTED", "message": "Worker lease or verification deadline expired; no work was automatically resumed"})
             self.store.save_job(connection, job)
-            run.update(active_job=None, phase="review", verification={"status": "interrupted", "job_id": job_id})
+            run.update(active_job=None, phase="review")
+            run["diagnostic" if job.get("purpose") == "diagnostic" else "verification"] = {"status": "interrupted", "job_id": job_id}
             self.store.save_run(connection, run)
 
     def _admit(self, connection, run, *, verification=False, request=None):
@@ -118,6 +134,8 @@ class Harness:
                 job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
                 self.store.save_job(connection, job)
                 run["active_job"] = None
+                if job.get("purpose") == "diagnostic":
+                    run["diagnostic"] = {"status": "cancelled", "job_id": job["job_id"]}
             self.store.save_run(connection, run)
             if request:
                 scope, request_id, fingerprint = request
@@ -208,11 +226,13 @@ class Harness:
               mode: str | None = None, required_checks: list[str] | None = None, deferred_checks: list[str] | None = None,
               constraints: list[str] | None = None, provenance: dict | None = None, policy_id: str | None = None,
               predecessor_run_id: str | None = None, policy_change_reason: str | None = None, capture_baseline: bool = False,
-              continuation_reason: str | None = None, analysis_selection: dict | None = None, sources: list | None = None):
+              continuation_reason: str | None = None, analysis_selection: dict | None = None, sources: list | None = None,
+              workspace_constraints: dict | None = None):
         # Request identity does not depend on mutable registry contents. A replay
         # returns the originally selected policy, even after operator revision.
         requested_mode = mode
         pinned_sources = intent_sources.normalize(sources) if sources is not None else []
+        workspace_declaration = workspace_rules.normalize(workspace_constraints, goal, pinned_sources)
         require(not (continuation_reason is not None and policy_change_reason is not None), "TRANSITION_REASON", "Choose one transition reason")
         transition_kind = "runtime_transition" if continuation_reason is not None else "policy_change"
         if continuation_reason is not None:
@@ -238,6 +258,8 @@ class Harness:
                    "workspace": str(source), "parameters": parameters, "budget": budget}
         if sources is not None:
             request["sources"] = sources
+        if workspace_constraints is not None:
+            request["workspace_constraints"] = workspace_declaration
         if analysis_selection is not None:
             request["analysis_selection"] = analysis_selection
         if mode not in (None, "strict") or required_checks:
@@ -282,8 +304,12 @@ class Harness:
                         "POLICY_CHANGE_LINK", "Policy changes require the same task and a terminal predecessor Run")
                 require(predecessor["intent"].get("sources", []) == pinned_sources,
                         "POLICY_CHANGE_LINK", "A continuation must preserve the original source documents")
+                if transition_kind == "runtime_transition":
+                    require(predecessor["intent"].get("workspace_constraints", {"unchanged_files": []}) == workspace_declaration,
+                            "WORKSPACE_CONSTRAINTS_PINNED", "Runtime continuation must retain the declared workspace constraints")
             run_id = "run_" + uuid.uuid4().hex
             original_intent = semantics.record("intent:" + run_id, 1, {"original_goal": goal, "domain_id": domain_id, "constraints": constraints or [],
+                                              **({"workspace_constraints": workspace_declaration} if workspace_constraints is not None else {}),
                                               **({"sources": pinned_sources} if sources is not None else {})})
             if selected:
                 require(callable(getattr(module, "prepare_acceptance", None)), "DOMAIN_POLICY_UNSUPPORTED", "Domain has no acceptance policy compiler")
@@ -308,6 +334,12 @@ class Harness:
         # captured files while committing the idempotent start request.
         with tempfile.TemporaryDirectory(prefix=".start_", dir=self.store.root) as temporary, maintenance.capture_lease(temporary):
             staging = Path(temporary)
+            guard, guard_check = workspace_rules.pin(workspace_declaration, source, run_id) if workspace_declaration["unchanged_files"] else (None, None)
+            if predecessor and transition_kind == "runtime_transition" and predecessor.get("workspace_constraints"):
+                semantics.validate(predecessor["workspace_constraints"])
+                guard = copy.deepcopy(predecessor["workspace_constraints"])
+                guard_check = workspace_rules.inspect(guard, source)
+                workspace_rules.enforce(guard_check)
             binding = acceptance.pin(selected, staging) if selected else None
             baseline = None
             if capture_baseline:
@@ -322,6 +354,8 @@ class Harness:
                    "observations": [], "verification": {"status": "not_run"}, "active_job": None, "record": None}
             if binding:
                 run["acceptance"] = binding
+            if guard:
+                run.update(workspace_constraints=guard, workspace_constraints_check=guard_check)
             if capture_baseline:
                 run["baseline"] = baseline
             if predecessor:
@@ -339,6 +373,7 @@ class Harness:
             if preparation["status"] == "needs_input":
                 run["phase"] = "waiting_input"
             result = response(run_id=run_id, contract=contract, phase=run["phase"], limits=bound,
+                              workspace_constraints=workspace_rules.view(run),
                               verification_scope=verification_scope(run),
                               context={"workspace": str(source), "domain": domain_id,
                                        "intent_ref": original_intent["ref"], "policy_ref": run["policy"]["ref"]},
@@ -370,8 +405,8 @@ class Harness:
             return result
 
     def observe(self, run_id: str, observation: dict, request_id: str):
-        fields(observation, {"note", "references", "kind", "record_id", "task_id", "parent_task_id", "depends_on", "state",
-                             "observation_ids", "interpretation_revision", "related_activity_id", "relation", "task_revision", "need"}, {"note"})
+        from .operation_schema import OBSERVE, validate_shape
+        validate_shape(observation, OBSERVE, types=False)
         require(("need" in observation) == (observation.get("kind") == "need"), "NEED_REQUIRED", "Need data requires kind=need and vice versa")
         require(observation.get("kind") != "need" or not (set(observation) & {"task_id", "task_revision", "parent_task_id", "depends_on", "state"}),
                 "NEED_FIELDS", "Task fields cannot change a Need; put its state inside need")
@@ -445,7 +480,7 @@ class Harness:
             return result
 
     def _observations_exist(self, connection, run_id, ids):
-        require(isinstance(ids, list) and len(ids) <= 128 and all(isinstance(i, str) for i in ids)
+        require(isinstance(ids, list) and len(ids) <= OBSERVATION_REFERENCE_LIMIT and all(isinstance(i, str) for i in ids)
                 and len(set(ids)) == len(ids), "OBSERVATION_REFERENCE", "Invalid observation references")
         if not ids:
             return []
@@ -472,7 +507,8 @@ class Harness:
                 and set(ids) <= {a["ref"]["id"] for a in run["activity"]}, "ACTIVITY_REFERENCE", "Activity does not belong to this Run")
 
     def revise(self, run_id: str, proposal: dict, request_id: str):
-        fields(proposal, {"expected_revision", "goal_summary", "parameters", "assumptions", "open_questions", "observation_ids", "activity_ids"}, {"expected_revision"})
+        from .operation_schema import REVISE, validate_shape
+        validate_shape(proposal, REVISE, types=False)
         fingerprint = canonical_hash({"operation": "revise", "proposal": proposal})
         prior, run = self._mutation_snapshot(run_id, request_id, fingerprint)
         if prior:
@@ -540,7 +576,8 @@ class Harness:
         return self._publish_prepared_run(run, expected_revision, request_id, fingerprint, result)
 
     def register_check(self, run_id: str, proposal: dict, request_id: str):
-        fields(proposal, {"check_id", "parameters", "expected_revision", "interpretation_revision", "provenance"}, {"check_id", "parameters", "interpretation_revision"})
+        from .operation_schema import CHECK, validate_shape
+        validate_shape(proposal, CHECK, types=False)
         fingerprint = canonical_hash({"operation": "check", "proposal": proposal})
         prior, run = self._mutation_snapshot(run_id, request_id, fingerprint)
         if prior:
@@ -572,8 +609,8 @@ class Harness:
         return self._publish_prepared_run(run, expected_revision, request_id, fingerprint, result)
 
     def retire_check(self, run_id: str, proposal: dict, request_id: str):
-        fields(proposal, {"check_id", "expected_revision", "interpretation_revision", "reason"},
-               {"check_id", "expected_revision", "interpretation_revision", "reason"})
+        from .operation_schema import RETIRE, validate_shape
+        validate_shape(proposal, RETIRE, types=False)
         require(isinstance(proposal["reason"], str) and 0 < len(proposal["reason"]) <= 2000, "INVALID_PARAMETERS", "A bounded retirement reason is required")
         fingerprint = canonical_hash({"operation": "retire-check", "proposal": proposal})
         with self.store.transaction() as connection:
@@ -598,12 +635,8 @@ class Harness:
             return result
 
     def _assessment_record(self, connection, run, assessment):
-        fields(assessment, {"status", "summary", "uncertainties", "cited_observation_ids", "interpretation_revision"},
-               {"status", "summary", "uncertainties", "cited_observation_ids", "interpretation_revision"})
-        require(isinstance(assessment["status"], str) and assessment["status"] in {"satisfied", "partial", "unsolved", "not_assessed"} and isinstance(assessment["summary"], str)
-                and len(assessment["summary"]) <= 16000, "ASSESSMENT_INVALID", "Invalid model assessment")
-        require(isinstance(assessment["uncertainties"], list) and len(assessment["uncertainties"]) <= 100
-                and all(isinstance(u, str) and len(u) <= 2000 for u in assessment["uncertainties"]), "ASSESSMENT_INVALID", "Invalid uncertainty list")
+        from .operation_schema import ASSESSMENT, validate_shape
+        validate_shape(assessment, ASSESSMENT)
         latest = run["interpretations"][-1]["ref"]
         require(type(assessment["interpretation_revision"]) is int and assessment["interpretation_revision"] == latest["revision"], "STALE_INTERPRETATION", "Assessment refers to an older interpretation")
         cited = self._observations_exist(connection, run["run_id"], assessment["cited_observation_ids"])
@@ -619,7 +652,8 @@ class Harness:
                              "interpretation_ref": item["interpretation_ref"], "check_set_hash": item.get("check_set_hash"),
                              "current_subject": current_subject, "current_interpretation": current_interpretation,
                              "current_check_set": current_check_set,
-                             "relevance": "current" if current_subject and current_interpretation and current_check_set else "contextual"})
+                             **({"purpose": "diagnostic"} if item.get("purpose") == "diagnostic" else {}),
+                             "relevance": "current" if current_subject and current_interpretation and current_check_set and item.get("purpose") != "diagnostic" else "contextual"})
         summary = {"current": sum(item["relevance"] == "current" for item in bindings),
                    "contextual": sum(item["relevance"] == "contextual" for item in bindings)}
         created = semantics.record("assessment:" + run["run_id"] + ":" + uuid.uuid4().hex, 1,
@@ -663,6 +697,8 @@ class Harness:
                 overlays = {path: acceptance.bundle_payload(run["acceptance"], directory)
                             for path in run["acceptance"]["definition"]["bundle"]["files"]}
             candidate = capture(Path(run["workspace"]), run["contract"]["inputs"], Path(staging), overlays=overlays)
+            guard_check = workspace_rules.inspect(run.get("workspace_constraints"), run["workspace"])
+            workspace_rules.enforce(guard_check)
             published = None
             try:
                 with self.store.transaction() as connection:
@@ -678,6 +714,8 @@ class Harness:
                     published = target
                     current.update(candidate=candidate, generation=current["generation"] + 1,
                                    phase="submitted", verification={"status": "not_run"})
+                    if current.get("workspace_constraints"):
+                        current["workspace_constraints_check"] = guard_check
                     self.store.save_run(connection, current)
                     result = response(run_id=run_id, candidate=candidate)
                     self.store.remember(connection, run_id, request_id, fingerprint, result)
@@ -696,6 +734,17 @@ class Harness:
             require(isinstance(expected_candidate_hash, str) and len(expected_candidate_hash) == 64
                     and all(c in "0123456789abcdef" for c in expected_candidate_hash), "INVALID_PARAMETERS", "Invalid expected Candidate hash")
             request["expected_candidate_hash"] = expected_candidate_hash
+        return self._queue_measurement(run_id, request_id, request, expected_candidate_hash=expected_candidate_hash)
+
+    def compare(self, run_id: str, request_id: str, *, expected_candidate_hash: str, parameters: dict, reference="baseline"):
+        require(reference == "baseline", "COMPARISON_REFERENCE", "Only this Run's captured baseline is supported")
+        require(isinstance(expected_candidate_hash, str) and len(expected_candidate_hash) == 64
+                and all(c in "0123456789abcdef" for c in expected_candidate_hash), "INVALID_PARAMETERS", "Pin the current Candidate hash")
+        require(isinstance(parameters, dict), "INVALID_PARAMETERS", "Comparison parameters belong to the Domain")
+        request = {"operation": "compare", "reference": reference, "expected_candidate_hash": expected_candidate_hash, "parameters": parameters}
+        return self._queue_measurement(run_id, request_id, request, expected_candidate_hash=expected_candidate_hash)
+
+    def _queue_measurement(self, run_id, request_id, request, *, expected_candidate_hash):
         fingerprint = canonical_hash(request)
         # Optional runtime packaging can perform substantial file I/O. Keep it
         # outside the writer transaction so other Runs can checkpoint/heartbeat.
@@ -709,6 +758,15 @@ class Harness:
         initial_check_hash = semantics.check_set_hash(initial_checks)
         require(initial["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Verifier code changed; start a new Run with the new version")
         self._validate_checks(initial, initial["contract"])
+        selected = None
+        if request["operation"] == "compare":
+            require(initial.get("baseline") is not None, "BASELINE_REQUIRED", "This Run has no pre-edit baseline; edited files cannot reconstruct it")
+            prepare = getattr(self._module(initial), "prepare_comparison", None)
+            require(callable(prepare), "DOMAIN_COMPARISON_UNSUPPORTED", "Selected Domain has no pure comparison preparation port")
+            from . import paired_inputs
+            selected = paired_inputs.selection(prepare(copy.deepcopy(request["parameters"]), copy.deepcopy(initial["contract"]),
+                                                       checks=copy.deepcopy(initial_checks)), initial_checks, initial["candidate"])
+            initial_checks = [c for c in initial_checks if c["check_id"] in selected["check_ids"]]
         if initial.get("acceptance"):
             acceptance.validate(initial["acceptance"], self.store.directory(run_id))
             acceptance.validate_subject(initial["acceptance"], initial["candidate"])
@@ -719,6 +777,20 @@ class Harness:
         prepared_registrations = self.adapters.export(prepared_bindings)
         self.adapters.validate_bindings(prepared_bindings)
         self.adapters.pin_implementations([], prepared_implementations)
+        common = dict(expected_candidate_hash=expected_candidate_hash, initial=initial,
+                      initial_check_hash=initial_check_hash, initial_checks=initial_checks,
+                      prepared_implementations=prepared_implementations, prepared_bindings=prepared_bindings,
+                      prepared_registrations=prepared_registrations, compare_baseline=request.get("compare_baseline", False))
+        if selected:
+            with paired_inputs.prepare(initial, selected, self.store.directory(run_id)) as pair:
+                return self._publish_measurement(run_id, request_id, fingerprint, pair=pair, **common)
+        return self._publish_measurement(run_id, request_id, fingerprint, **common)
+
+    def _publish_measurement(self, run_id, request_id, fingerprint, *, expected_candidate_hash, initial,
+                             initial_check_hash, initial_checks, prepared_implementations, prepared_bindings,
+                             prepared_registrations, compare_baseline=False, pair=None):
+        from . import paired_inputs
+        compare_baseline = compare_baseline or pair is not None
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -734,8 +806,8 @@ class Harness:
             require(run["revision"] == initial["revision"], "VERIFICATION_CONFLICT", "Run changed while preparing verification")
             job_id = "job_" + uuid.uuid4().hex
             now = time.time()
-            checks = copy.deepcopy(semantics.current_checks(run))
-            require(semantics.check_set_hash(checks) == initial_check_hash, "VERIFICATION_CONFLICT", "Checks changed while preparing adapter runtimes")
+            require(semantics.check_set_hash(semantics.current_checks(run)) == initial_check_hash, "VERIFICATION_CONFLICT", "Checks changed while preparing adapter runtimes")
+            checks = copy.deepcopy(initial_checks)
             require(all(old.get("status") == "unavailable" or prepared_bindings.get(key) == old
                         for key, old in run.get("adapter_bindings", {}).items()), "ADAPTER_RUNTIME_CHANGED", "Another request pinned a different runtime")
             require(all(prepared_implementations.get(key) == value for key, value in run.get("adapter_implementations", {}).items()),
@@ -757,16 +829,26 @@ class Harness:
                        completed_checks=0, total_checks=len(checks) * (2 if compare_baseline else 1))
             if compare_baseline:
                 job["baseline"] = copy.deepcopy(run["baseline"])
+            if pair is not None:
+                paired_inputs.publish(pair, self.store.directory(run_id))
+                job.update(purpose="diagnostic", comparison_binding=copy.deepcopy(pair["binding"]),
+                           baseline=copy.deepcopy(pair["binding"]["before"]), candidate=copy.deepcopy(pair["binding"]["after"]),
+                           candidate_hash=pair["binding"]["after"]["candidate_hash"])
+                paired_inputs.validate(job)
             job.update(check_set_hash=semantics.check_set_hash(checks), domain_identity=copy.deepcopy(run["domain_module"]))
             if run.get("acceptance"):
                 job["acceptance_binding_hash"] = run["acceptance"]["binding_hash"]
             require(job["total_checks"] > 0, "CHECKS_REQUIRED", "Register a measurement before verification")
-            run.update(active_job=job_id, phase="verifying", verification={"status": "queued", "job_id": job_id},
+            run.update(active_job=job_id, phase="verifying",
                        verification_attempts=run["verification_attempts"] + 1)
+            run["diagnostic" if pair is not None else "verification"] = {"status": "queued", "job_id": job_id}
             self.store.save_job(connection, job)
             self.store.save_run(connection, run)
-            result = response(run_id=run_id, job_id=job_id, status="queued", check_set_hash=job["check_set_hash"])
+            result = response(run_id=run_id, job_id=job_id, status="queued", check_set_hash=job["check_set_hash"],
+                              purpose=job.get("purpose", "verification"))
             self.store.remember(connection, run_id, request_id, fingerprint, result)
+        if pair is not None:
+            pair["committed"] = True
         # Durable queue entry exists before spawning. Replayed requests never spawn twice.
         from .worker import spawn_worker
         try:
@@ -778,7 +860,8 @@ class Harness:
                 if job["status"] == "queued" and run["status"] == "active" and run["active_job"] == job_id and run["generation"] == job["generation"]:
                     job.update(status="error", cleanup="complete", error={"code": "WORKER_START_FAILED", "message": "Could not start verifier worker"})
                     self.store.save_job(connection, job)
-                    run.update(active_job=None, phase="review", verification={"status": "error", "job_id": job_id})
+                    run.update(active_job=None, phase="review")
+                    run["diagnostic" if job.get("purpose") == "diagnostic" else "verification"] = {"status": "error", "job_id": job_id}
                     self.store.save_run(connection, run)
         return result
 
@@ -797,7 +880,8 @@ class Harness:
                 job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
                 self.store.save_job(connection, job)
                 if run["active_job"] == job_id:
-                    run.update(active_job=None, verification={"status": "cancelled", "job_id": job_id})
+                    run.update(active_job=None)
+                    run["diagnostic" if job.get("purpose") == "diagnostic" else "verification"] = {"status": "cancelled", "job_id": job_id}
                     if run["status"] == "active":
                         run["phase"] = "review"
                     self.store.save_run(connection, run)
@@ -832,6 +916,7 @@ class Harness:
                 with self.store.transaction(write=False) as connection:
                     run = self.store.run(connection, run_id)
                     result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])
+                result["workspace_constraints"] = workspace_rules.inspect(run.get("workspace_constraints"), run["workspace"])
             return result
         self._refresh_for_read(run_id)
         with self.store.transaction(write=False) as connection:
@@ -858,6 +943,7 @@ class Harness:
                                         "termination_reason": run.get("termination_reason")})
         if check_workspace:
             result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, (run["candidate"] or {}).get("candidate_hash"))
+            result["workspace_constraints"] = workspace_rules.inspect(run.get("workspace_constraints"), run["workspace"])
             result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])
         return result
 
@@ -880,8 +966,20 @@ class Harness:
 
     def _validate_completion(self, connection, run, gate_results, *, validate_result=False):
         require(run["status"] == "active" and time.time() < run["deadline_at"], "RUN_CLOSED", "Expired/blocked Runs can only finish as partial or abandoned")
-        require(not run["active_job"] and "finish_completed" in run["domain_preparation"]["available_operations"] and gate_results["status"] in {"passed", "not_required"},
-                "VERIFICATION_REQUIRED", "Pinned completion gates have not been satisfied")
+        # Keep the same admission conditions and public error code, but report
+        # the actual owner of the blocker. Domain clarification is not a demand
+        # for independent observers, human approval, or new completion gates.
+        require(not run["active_job"], "VERIFICATION_REQUIRED", "A verification job is still active; wait or cancel it")
+        if "finish_completed" not in run["domain_preparation"]["available_operations"]:
+            questions = run["domain_questions"]
+            diagnostics = [{"path": "/domain_questions/" + str(index), "code": "NEEDS_INPUT",
+                            "message": "Domain requested: " + canonical_bytes(question).decode("utf-8")[:1700]}
+                           for index, question in enumerate(questions[:16])]
+            raise HarnessError("VERIFICATION_REQUIRED", "Domain preparation has not admitted completed closeout; inspect its questions and revise parameters",
+                               diagnostics=diagnostics or [{"path": "/domain_preparation/available_operations", "code": "NEEDS_INPUT",
+                                                           "message": "Selected Domain has not admitted finish_completed"}],
+                               diagnostic_count=max(1, len(questions)))
+        require(gate_results["status"] in {"passed", "not_required"}, "VERIFICATION_REQUIRED", "Pinned completion gates have not been satisfied")
         if run["policy"]["mode"] == "strict":
             require(run["verification"]["status"] == "passed", "VERIFICATION_REQUIRED", "Strict policy requires all measurements to pass")
         require(not run["contract"]["rules"].get("snapshot_required", False) or run["candidate"] is not None,
@@ -931,6 +1029,15 @@ class Harness:
             prior, prepared = self._completion_snapshot(run_id, request_id, fingerprint)
             if prior:
                 return prior
+        else:
+            with self.store.transaction(write=False) as connection:
+                prior = self.store.replay(connection, run_id, request_id, fingerprint)
+                if prior:
+                    return prior
+                prepared = self.store.run(connection, run_id)
+        guard_check = workspace_rules.inspect(prepared.get("workspace_constraints"), prepared["workspace"])
+        if outcome == "completed":
+            workspace_rules.enforce(guard_check)
         with self.store.transaction() as connection:
             prior = self.store.replay(connection, run_id, request_id, fingerprint)
             if prior:
@@ -949,7 +1056,8 @@ class Harness:
                 job = self.store.job(connection, run["active_job"])
                 job.update(status="cancelled", cleanup="complete" if job["status"] == "queued" else "pending")
                 self.store.save_job(connection, job)
-                run.update(active_job=None, verification={"status": "cancelled", "job_id": job["job_id"]})
+                run.update(active_job=None)
+                run["diagnostic" if job.get("purpose") == "diagnostic" else "verification"] = {"status": "cancelled", "job_id": job["job_id"]}
             record = {"schema_version": "local-verification-record-v1", "run_id": run_id, "outcome": outcome,
                       "assurance": ASSURANCE, "ready": False, "signature": None,
                       "candidate_hash": run["candidate"]["candidate_hash"] if run["candidate"] else None,
@@ -962,6 +1070,7 @@ class Harness:
                           measurement=copy.deepcopy(run["verification"]), assessment=semantics.assessment_view(run), gates=gate_results,
                           unresolved_work=[task["task_id"] for task in run["logical_tasks"] if task["state"] != "settled"])
             record.update(check_set_hash=semantics.check_set_hash(semantics.current_checks(run)), domain_identity=run["domain_module"],
+                          workspace_constraints=guard_check,
                           adapter_bindings=copy.deepcopy(run.get("adapter_bindings", {})),
                           acceptance=acceptance.view(run.get("acceptance")), predecessor=run.get("predecessor"),
                           baseline_comparison=run["verification"].get("baseline_comparison"),
@@ -969,6 +1078,8 @@ class Harness:
             record["unresolved_verification_jobs"] = [row[0] for row in connection.execute("SELECT job_id FROM jobs WHERE run_id=?", (run_id,))
                                                       if self.store.job(connection, row[0]).get("cleanup") not in {"complete", "not_started"}]
             run.update(status="finished", phase="finished", record=record, termination_reason=reason)
+            if run.get("workspace_constraints"):
+                run["workspace_constraints_check"] = guard_check
             record["resolution"] = semantics.resolution(run, gate_results)
             record["record_hash"] = canonical_hash(record)
             # Run containers detach caller-owned values for dirty tracking. Pin

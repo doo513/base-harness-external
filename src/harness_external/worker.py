@@ -166,7 +166,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             return
         job.update(status="running", heartbeat_at=time.time(), started_at=time.time(), owner=owner, pid=os.getpid(), cleanup="running")
         store.save_job(connection, job)
-        run["verification"] = {"status": "running", "job_id": job_id}
+        slot = "diagnostic" if job.get("purpose") == "diagnostic" else "verification"
+        run[slot] = {"status": "running", "job_id": job_id}
         store.save_run(connection, run)
 
     def heartbeat():
@@ -203,6 +204,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
             require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
             require(job.get("check_set_hash") == semantics.check_set_hash(job["checks"]), "CHECK_SET_CHANGED", "Pinned check set changed")
+            if job.get("purpose") == "diagnostic":
+                from .paired_inputs import validate
+                validate(job)
             from .adapter_registry import AdapterRegistry
             adapters = AdapterRegistry.restore(job.get("adapter_registrations", {}))
             adapters.validate_bindings(job.get("adapter_bindings", {}))
@@ -266,7 +270,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                                     "domain_identity": job["domain_identity"],
                                     "acceptance_binding_hash": job.get("acceptance_binding_hash"), "runtime_environment_hash": canonical_hash(environment),
                                     "execution_observation_id": "observation:" + job_id + ":" + str(index),
-                                    "origin": "verifier", "observation_boundary": observation_boundary,
+                                    "origin": "verifier", "purpose": job.get("purpose", "verification"), "observation_boundary": observation_boundary,
                                     "trust": "locally_measured" if observation_boundary == "external_capture" else "framework_reported",
                                     "case": {**case, "phases": redact(case["phases"])}}
                             item["record_hash"] = canonical_hash(item)
@@ -322,7 +326,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                               "check_set_hash": job["check_set_hash"], "domain_identity": job["domain_identity"],
                               "comparison_status": semantics.comparison_status(report), "origin": "verifier", "trust": "locally_measured",
                               "report": item}
-                checkpoint.update(measurement_kind=check["kind"], execution_status=evidence.execution_status(report, provenance),
+                checkpoint.update(purpose=job.get("purpose", "verification"), measurement_kind=check["kind"], execution_status=evidence.execution_status(report, provenance),
                                   role=check_record.get("role", "mandatory" if check_record["check_id"] in run["gate_bindings"] else "exploratory"),
                                   acceptance_binding_hash=job.get("acceptance_binding_hash"), subject_role=subject_role)
                 if case_summary is not None:
@@ -359,7 +363,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                       "baseline_comparison": evidence.compare(measured_scope, job, run),
                       "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
             result.update(case_observation_refs=case_reports,
-                          requirement_observations=observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
+                          requirement_observations=None if slot == "diagnostic" else observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
+            if slot == "diagnostic":
+                result.update(purpose="diagnostic", diagnostic_comparison=evidence.diagnostic_pair(measured_scope, job), requirement_observations=None)
             result["result_hash"] = canonical_hash(result)
             # Finish resource cleanup before the final fresh scan. Keep heartbeats
             # alive until publication; hashing must not hold SQLite's writer lock.
@@ -378,7 +384,9 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                           "baseline_comparison": evidence.compare(measured_scope, job, run),
                           "acceptance_binding_hash": job.get("acceptance_binding_hash"), "finished_at": time.time()}
                 result.update(case_observation_refs=case_reports,
-                              requirement_observations=observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
+                              requirement_observations=None if slot == "diagnostic" else observation_links.report(run["contract"].get("observation_links"), check_items, case_items, job))
+                if slot == "diagnostic":
+                    result.update(purpose="diagnostic", diagnostic_comparison=evidence.diagnostic_pair(measured_scope, job), requirement_observations=None)
                 result["result_hash"] = canonical_hash(result)
         finally:
             if engine is not None:
@@ -403,17 +411,21 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                      and active["generation"] == job["generation"] and time.time() < job["deadline_at"] and not abort.is_set())
             if valid:
                 current.update(status="error" if failure else "completed", result=result, error=failure)
-                active.update(active_job=None, phase="review", verification={"status": "error" if failure else result["status"],
+                active.update(active_job=None, phase="review")
+                active[slot] = {"status": "error" if failure else result["status"],
                               "job_id": job_id, "result_hash": result["result_hash"] if result else None, "check_set_hash": job["check_set_hash"],
                               "measurement_scope": evidence.scope([s for s in measured_scope if s["subject_role"] == "candidate"]),
-                              "baseline_comparison": evidence.compare(measured_scope, job, run)})
+                              "baseline_comparison": evidence.compare(measured_scope, job, run)}
+                if slot == "diagnostic":
+                    active[slot]["diagnostic_comparison"] = result.get("diagnostic_comparison") if result else None
                 store.save_run(connection, active)
             elif current["status"] == "running":
                 current.update(status="interrupted", error={"code": "LATE_RESULT_DISCARDED", "message": "Result arrived after ownership or deadline changed"})
                 if failure:
                     current["error"]["cause"] = failure
                 if active["active_job"] == job_id:
-                    active.update(active_job=None, phase="review", verification={"status": "interrupted", "job_id": job_id})
+                    active.update(active_job=None, phase="review")
+                    active[slot] = {"status": "interrupted", "job_id": job_id}
                     store.save_run(connection, active)
             store.save_job(connection, current)
     finally:

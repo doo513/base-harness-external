@@ -1,138 +1,138 @@
 {
   "analysis_perspectives": [
     {
-      "ask": "What must change, and what must be preserved?",
+      "ask": "Which interpretation changes the user's result or what must be preserved?",
       "id": "outcome",
       "knowledge_refs": [
         "compatibility",
         "verification"
       ],
       "investigation": {
-        "inspect": "Read the request, public contract and one representative input/output.",
-        "decide": "Identify which unresolved interpretation would change success or preservation.",
-        "check": "Choose a boundary or conflicting input that distinguishes those interpretations."
+        "inspect": "Compare the original request with a user action, input and resulting state; distinguish assumptions.",
+        "decide": "Resolve interpretations that change behavior or preservation. Ask about externally owned choices; label assumptions.",
+        "check": "Find an input where interpretations produce different outputs. Tests do not establish user intent."
       }
     },
     {
-      "ask": "Which code actually produces and consumes this behavior?",
+      "ask": "Which path produces this behavior, and what distinguishes competing explanations?",
       "id": "existing_behavior",
       "knowledge_refs": [
         "structure",
         "compatibility"
       ],
       "investigation": {
-        "inspect": "Find the entrypoint, follow its immediate caller/callee and inspect the relevant assertion.",
-        "decide": "Separate intended compatibility from accidental behavior using those sources.",
-        "check": "Run or specify a case that exposes a mismatch between the contract and the current implementation."
+        "inspect": "Follow the entrypoint to consumers and assertions. Reproduce a failure's input/state before unrelated edits.",
+        "decide": "Separate intended behavior from accidents; compare competing causes' predictions at the suspected boundary.",
+        "check": "Vary one relevant condition to distinguish causes; verify the fix on the original path, not only a toy reproduction."
       }
     },
     {
-      "ask": "Which component should own this change?",
+      "ask": "Which data representation and boundary fit the task without unnecessary complexity?",
       "id": "design",
       "knowledge_refs": [
         "structure",
         "runtime"
       ],
       "investigation": {
-        "inspect": "Inspect data ownership, state lifetime and direct dependents of the proposed boundary.",
-        "decide": "Compare the smallest viable designs against the observed constraints.",
-        "check": "Identify a failure or dependency change that would invalidate each design."
+        "inspect": "Read usage, state lifetime, scale and deployment constraints; trace existing owners only when present.",
+        "decide": "Compare viable representations and boundaries on dependencies and operating cost. Identify what would reverse the choice; no design quota.",
+        "check": "If uncertain, try the distinguishing workload or interaction on the proposed path; judge behavior and cost, not explanation length."
       }
     },
     {
-      "ask": "What else can this change affect?",
+      "ask": "Where can this change leave partial effects or alter another behavior?",
       "id": "change",
       "knowledge_refs": [
         "structure",
         "recovery"
       ],
       "investigation": {
-        "inspect": "Trace writes, retries and downstream consumers from the affected symbol; stop when the next decision is supported.",
-        "decide": "Choose ordering, atomicity and invalidation behavior from those dependencies.",
-        "check": "Exercise an interrupted operation, repeated request or changed dependency relevant to this task."
+        "inspect": "Trace the entrypoint's writes, transaction/resource boundaries and consumers. Identify what must survive failure or retry.",
+        "decide": "Choose ordering, rollback or recovery. Check the caller's preconditions before transferring a helper's guarantees.",
+        "check": "If partial effects matter, fail the actual read or write that drives the decision; distinguish absent data from an observation error. Confirm that exact failure site was reached, inspect preserved state, then retry."
       }
     },
     {
-      "ask": "What would a plausible but wrong implementation do?",
+      "ask": "Would these assertions reject a plausible wrong result under the promised conditions?",
       "id": "verification",
       "knowledge_refs": [
         "verification",
         "runtime"
       ],
       "investigation": {
-        "inspect": "Read actual assertions and failure output, not only test names or success counts.",
-        "decide": "Select an observable result that distinguishes the required behavior; note what it cannot establish.",
-        "check": "Pair a counterexample with the expected result, including equivalent inputs only when the API promises equivalence."
+        "inspect": "Match setup, actions and assertions to the claim; an earlier exception may mask the intended fault. A passing test need not distinguish a wrong implementation; compare against a pinned pre-change subject when useful.",
+        "decide": "Choose a counterexample or invariant separating correct behavior from a likely mistake. Derive equivalence only from the contract.",
+        "check": "Test the difference on the actual path and relevant state combinations. Report untested conditions, not full coverage from pass counts."
       }
     }
   ],
-  "boundary": "The Host reasons and uses its tools. Advice cannot change permissions, budgets, state, contracts, gates or observations.",
+  "boundary": "Domain offers questions; the Host chooses, answers and acts. A Claim is provisional, not approval or verifier evidence. Advice cannot change permissions, budgets, state, contracts, gates or observations.",
   "discovery": {
-    "select": "Choose a task-specific question, then a relevant perspective. No quotas or goal-keyword routing.",
-    "inspect": "Use Host tools: start at the symbol, caller and assertion. Expand only while the question remains unresolved.",
-    "apply": "Connect the finding to a design, edit or check. No Need records or extra Harness calls are required.",
-    "revisit": "Refine the question when evidence contradicts an assumption; stop when the next action is supported."
+    "select": "Choose a question that could change the next action. Skip answered or irrelevant considerations; no quotas or goal-keyword routing.",
+    "inspect": "Use Host tools on the relevant source or call path; expand to answer the question, not to read every hint.",
+    "apply": "Keep, revise or reject a choice. A Need is a consideration expressed as a question, not a feature checklist. No extra tracking calls.",
+    "revisit": "Revisit contradicted assumptions; stop when the next action is supported. If checks add no information, change the probe or report uncertainty."
   },
   "knowledge_map": [
     {
-      "enables": "Choose preservation/conflict behavior; leave externally owned decisions to the user.",
-      "helps_answer": "Which behavior or data must survive?",
+      "enables": "Separate change from preservation; resolve ambiguity that changes behavior.",
+      "helps_answer": "What must survive, including less common user paths?",
       "id": "compatibility",
-      "limitation": "Existing behavior can be a bug; examples are not approval.",
+      "limitation": "Existing behavior may be a bug; tests do not approve an inferred requirement.",
       "source_hints": [
-        "Public contract and its callers",
-        "Relevant conversion/conflict code",
-        "Representative preservation tests"
+        "Original request and public contract",
+        "Actual callers, conversion and conflict paths",
+        "Inputs and states distinguishing interpretations"
       ],
-      "when": "Existing APIs, schemas or consumers"
+      "when": "Unsettled outcomes or compatibility with existing consumers"
     },
     {
-      "enables": "Separate local facts from dependent results; choose invalidation boundaries.",
-      "helps_answer": "Which producers, consumers and dependencies affect this result?",
+      "enables": "Choose representation and ownership using dependency and change costs.",
+      "helps_answer": "Which data owners, consumers and workloads constrain the design?",
       "id": "structure",
-      "limitation": "Directory names do not prove runtime relationships.",
+      "limitation": "Pattern names do not prove a useful boundary; a working prototype is not proof of the best design.",
       "source_hints": [
-        "Affected symbol and direct callers",
-        "State owners and derived-state users",
-        "Import/package layout when relevant"
+        "User workflow, input sizes and state lifetime",
+        "Real producers, consumers and derived-state users",
+        "Current design and a smaller viable alternative"
       ],
-      "when": "Choosing boundaries or invalidation"
+      "when": "New structures or consequential boundary changes"
     },
     {
-      "enables": "Choose a supported environment; label untested platforms.",
+      "enables": "Test environment assumptions under the implementation's actual conditions.",
       "helps_answer": "Which environment assumptions can change the result?",
       "id": "runtime",
-      "limitation": "One environment's result does not establish another's behavior.",
+      "limitation": "Different connection, process or filesystem settings may invalidate a probe's conclusions.",
       "source_hints": [
-        "Dependency/build configuration",
-        "Supported-platform claims",
-        "A bounded capability probe"
+        "Actual runtime configuration and versioned API documentation",
+        "Call-site options and supported-platform claims",
+        "A bounded probe matching those preconditions"
       ],
-      "when": "Runtime or packaging compatibility"
+      "when": "An unsettled runtime or packaging assumption could change behavior"
     },
     {
-      "enables": "Choose ordering, retry and cleanup from observed failure paths.",
-      "helps_answer": "Who owns partial effects, retries and cleanup?",
+      "enables": "Choose rollback, recoverable partial state or rejection from preservation needs.",
+      "helps_answer": "What remains after failure, and what will a retry actually do?",
       "id": "recovery",
-      "limitation": "Happy-path success does not establish recovery or concurrency safety.",
+      "limitation": "Reached paths do not establish safety for all crashes, power loss or concurrency.",
       "source_hints": [
-        "Write sites and effectful helpers",
-        "Transaction/resource ownership",
-        "A targeted failure or replay probe"
+        "Actual write order and transaction/resource start and end",
+        "Retry entrypoint and partially updated state",
+        "Failure injection with proof it reached the intended operation"
       ],
-      "when": "Persistent state or fallible operations"
+      "when": "Partial effects could violate preservation; unnecessary for pure local changes"
     },
     {
-      "enables": "Use the observation to keep, revise or reject the approach.",
+      "enables": "Reject weak tests or narrow a claim to the behavior actually observed.",
       "helps_answer": "What observation distinguishes a plausible wrong implementation?",
       "id": "verification",
-      "limitation": "Passing linked checks does not establish complete coverage.",
+      "limitation": "Linked checks and case counts do not establish goal coverage.",
       "source_hints": [
-        "Requirement and counterexample",
-        "Actual assertions, not test names",
-        "Baseline and Candidate observations"
+        "Promised behavior and a plausible wrong result",
+        "Actual setup, competing operations and assertions",
+        "Baseline and Candidate observations with their scope"
       ],
-      "when": "Selecting tests or diagnosing failure"
+      "when": "Selecting evidence for a material claim or diagnosing a failure"
     }
   ],
   "meaning": "advisory_reasoning_support_not_workflow",
@@ -144,12 +144,12 @@
     "verification"
   ],
   "need_quality": {
-    "unknown": "Ask about a genuine unresolved fact, not an already stated requirement.",
-    "decision_relevant": "Name the decision that would change with the answer.",
-    "investigable": "Identify a specific code location, document or observation that can answer it.",
-    "sufficient": "State what is enough for the next action; keep facts, assumptions and user decisions distinct."
+    "unknown": "Question an unresolved consideration; do not invent requirements to populate the map.",
+    "decision_relevant": "Which answer changes the design, implementation or test?",
+    "investigable": "Choose a source or observation that separates plausible answers.",
+    "sufficient": "Support the next decision; distinguish intent, assumptions, provisional claims and measured facts."
   },
   "persistence_required": false,
-  "revision": "4",
+  "revision": "6",
   "schema_version": "develop-analysis-v2"
 }

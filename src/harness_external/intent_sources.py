@@ -2,7 +2,21 @@
 import hashlib
 import re
 
-from .errors import fields, require
+from .errors import fields, require, integer
+
+
+def validate_references(refs, goal, sources):
+    """Identity/range checks only; a line reference is not approval or interpretation."""
+    require(isinstance(refs, list) and len(refs) <= 16, "REQUIREMENT_SOURCE", "At most sixteen source references")
+    texts = {"goal": goal, **{item["id"]: item["text"] for item in sources}}
+    for ref in refs:
+        fields(ref, {"source_id", "start_line", "end_line"}, {"source_id", "start_line", "end_line"})
+        key = ref["source_id"]
+        require(isinstance(key, str) and key in texts, "REQUIREMENT_SOURCE", "Unknown original source")
+        count = len(texts[key].splitlines())
+        begin = integer(ref["start_line"], 1, max(1, count), "start_line")
+        integer(ref["end_line"], begin, count, "end_line")
+    return refs
 
 
 def normalize(values):

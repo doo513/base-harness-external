@@ -238,7 +238,7 @@ def gates(run, measurements):
         if ref and key in checks and checks[key]["ref"] != ref:
             state = "binding_mismatch"
         elif ref and candidate:
-            matching = [item for item in measurements if item["check_ref"] == ref and item["subject"] == candidate["subject"]]
+            matching = [item for item in measurements if item.get("purpose") != "diagnostic" and item["check_ref"] == ref and item["subject"] == candidate["subject"]]
             if matching:
                 latest = matching[-1]
                 state, observed_id = latest["comparison_status"], latest["observation_id"]
@@ -286,12 +286,16 @@ def resolution(run, gate_results):
     label = "closed_unverified" if measurement in {"not_run", "queued", "running", "cancelled", "interrupted", "error"} else "closed_checks_" + measurement
     from .acceptance import view as acceptance_view
     from .evidence import unmeasured
+    from .workspace_constraints import view as workspace_constraints_view
     result = {"lifecycle": lifecycle(run), "display_status": label if closed else lifecycle(run),
             "requested_outcome": run["record"]["outcome"] if run.get("record") else None,
             "measurement_status": measurement, "assessment_status": assessment_view(run)["status"],
             "gate_status": gate_results["status"], "policy_approval": run["policy"].get("provenance", {}).get("approval", {"status": "unknown"}),
             "certification": "not_issued", "acceptance": acceptance_view(run.get("acceptance")),
             "measurement_scope": run["verification"].get("measurement_scope", unmeasured())}
+    result["workspace_constraints"] = workspace_constraints_view(run)
+    result["diagnostic"] = {key: value for key, value in run.get("diagnostic", {"status": "not_requested"}).items()
+                            if key in {"status", "job_id", "result_hash", "diagnostic_comparison"}}
     preparation = run.get("domain_preparation") or {}
     inventory = preparation.get("coverage_inventory") if isinstance(preparation, dict) else None
     if inventory is not None:
