@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { promises as fs, constants as fsConstants } from "node:fs"
+import { promises as fs, constants as fsConstants, watch as watchFileSystem } from "node:fs"
 import type { BigIntStats } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -62,6 +62,8 @@ export interface SandboxRequest {
   fixtures?: { path: string; text: string }[]
   /** Explicit bounded paths observed by the parent, outside the Candidate namespace. */
   observedFiles?: string[]
+  /** Fixture paths whose attempted mutation invalidates an otherwise restored result. */
+  protectedFiles?: string[]
 }
 
 export interface InputFile { path: string; sha256: string; size: number; executable: boolean }
@@ -98,6 +100,7 @@ export interface SandboxResult {
   changes?: SandboxFileChange[]
   inputReceipt?: ExecutionInputReceipt
   fileObservations?: { path: string; before: FileState; after: FileState; afterBase64?: string; contentStatus?: string }[]
+  protectedChanges?: string[]
 }
 
 interface FileState { kind: "absent" | "directory" | "file"; sha256?: string; size?: number; executable?: boolean; mtimeNs?: string }
@@ -123,8 +126,8 @@ export const isolationPolicy = (input: IsolationConfig = {}): SandboxPolicy => (
   strictBackend: input.strictBackend ?? "auto",
   wslDistro: input.wslDistro ?? "Ubuntu-24.04",
   timeoutMs: input.timeoutMs ?? 120_000,
-  memoryMiB: input.memoryMiB ?? 4096,
-  maxProcesses: input.maxProcesses ?? 128,
+  memoryMiB: input.memoryMiB ?? 1024,
+  maxProcesses: input.maxProcesses ?? 32,
   maxOutputBytes: input.maxOutputBytes ?? 10 * 1024 * 1024,
   maxInputBytes: input.maxInputBytes ?? 2 * 1024 * 1024 * 1024,
 })
@@ -143,8 +146,12 @@ export async function validateSandboxWorkspace(workspace: string, maxInputBytes:
     throw new SandboxError("SANDBOX_UNAVAILABLE", "Sandbox workspace does not exist")
   })
   let bytes = 0
-  const visit = async (directory: string): Promise<void> => {
+  let entries = 0
+  const visit = async (directory: string, depth = 0): Promise<void> => {
+    if (depth > 64) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox directory depth exceeds 64")
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      entries += 1
+      if (entries > 4096) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox file/directory count exceeds 4096")
       const target = path.join(directory, entry.name)
       const stat = await fs.lstat(target)
       if (stat.isSymbolicLink()) {
@@ -154,7 +161,7 @@ export async function validateSandboxWorkspace(workspace: string, maxInputBytes:
         }
         continue
       }
-      if (stat.isDirectory()) await visit(target)
+      if (stat.isDirectory()) await visit(target, depth + 1)
       else if (stat.isFile()) bytes += stat.size
       else throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Unsupported sandbox filesystem entry: ${target}`)
       if (bytes > maxInputBytes) {
@@ -170,7 +177,7 @@ type Capture = { code: number; stdout: string; stderr: string }
 
 async function execute(
   argv: string[],
-  options: { cwd?: string; timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal },
+  options: { cwd?: string; timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal; monitor?: (pid: number) => Promise<void> },
 ): Promise<Capture> {
   options.signal?.throwIfAborted()
   const child = Bun.spawn(argv, {
@@ -182,6 +189,8 @@ async function execute(
   })
   let exceeded = false
   let timedOut = false
+  let monitorFailure: unknown
+  let monitorTask: Promise<void> | undefined
   const read = async (stream: ReadableStream<Uint8Array>) => {
     const reader = stream.getReader()
     const chunks: Uint8Array[] = []
@@ -206,23 +215,70 @@ async function execute(
     timedOut = true
     child.kill()
   }, options.timeoutMs + 5_000)
+  let monitoring = false
+  const monitor = options.monitor ? setInterval(() => {
+    if (monitoring || monitorFailure) return
+    monitoring = true
+    monitorTask = options.monitor!(child.pid).catch((error) => { monitorFailure = error; child.kill() })
+      .finally(() => { monitoring = false })
+  }, 200) : undefined
   try {
     const [code, stdout, stderr] = await Promise.all([
       child.exited,
       read(child.stdout as ReadableStream<Uint8Array>),
       read(child.stderr as ReadableStream<Uint8Array>),
     ])
+    if (monitorTask) await monitorTask
     if (exceeded) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox output exceeded maxOutputBytes")
+    if (monitorFailure) throw monitorFailure
     if (timedOut) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox process exceeded timeoutMs")
     if (options.signal?.aborted) throw new SandboxError("SANDBOX_POLICY_DENIED", "Sandbox execution was cancelled")
     return { code, stdout, stderr }
   } finally {
     clearTimeout(timer)
+    if (monitor) clearInterval(monitor)
     options.signal?.removeEventListener("abort", abort)
   }
 }
 
-const runner = String.raw`
+async function checkWorkspaceBudget(root: string, maxBytes: number, maxEntries = 4096, maxDepth = 64) {
+  let bytes = 0
+  let entries = 0
+  const visit = async (directory: string, depth = 0): Promise<void> => {
+    if (depth > maxDepth) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", `Workspace depth exceeds ${maxDepth}`)
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      entries += 1
+      if (entries > maxEntries) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", `Workspace entries exceed ${maxEntries}`)
+      const target = path.join(directory, entry.name)
+      const info = await fs.lstat(target)
+      if (info.isDirectory()) await visit(target, depth + 1)
+      else if (info.isFile()) bytes += info.size
+      else if (!info.isSymbolicLink()) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Unsupported workspace entry appeared")
+      if (bytes > maxBytes) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Workspace output exceeds the aggregate byte limit")
+    }
+  }
+  await visit(root)
+}
+
+async function checkProcessBudget(rootPid: number, maxRssKiB: number, maxProcesses: number) {
+  const pending = [rootPid]
+  const seen = new Set<number>()
+  let rss = 0
+  while (pending.length) {
+    const pid = pending.pop()!
+    if (seen.has(pid)) continue
+    seen.add(pid)
+    if (seen.size > maxProcesses) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox process tree exceeds the aggregate process limit")
+    const status = await fs.readFile(`/proc/${pid}/status`, "utf8").catch(() => "")
+    const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status)
+    if (match) rss += Number(match[1])
+    if (rss > maxRssKiB) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Sandbox process tree exceeds the aggregate RSS limit")
+    const children = await fs.readFile(`/proc/${pid}/task/${pid}/children`, "utf8").catch(() => "")
+    pending.push(...children.trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger))
+  }
+}
+
+export const runner = String.raw`
 root=$1
 workspace=$2
 workdir=$3
@@ -232,15 +288,64 @@ processes=$6
 filesize=$7
 command=$8
 resource=$9
+shift 9
+inputs=$1
 mount -t tmpfs -o mode=755 tmpfs "$root"
 mkdir -p "$root/bin" "$root/usr" "$root/lib" "$root/lib64" "$root/etc" "$root/dev" "$root/proc" "$root/sys" "$root/tmp" "$root/workspace"
-for source in /bin /usr /lib /lib64 /etc /dev /sys; do
+readonly_tree() {
+  source=$1
+  target=$2
+  mount --rbind "$source" "$target"
+  mount --make-rslave "$target"
+  findmnt -Rrn -o TARGET "$target" | sort -r | while IFS= read -r mounted; do
+    mount -o remount,ro,bind "$mounted"
+  done
+}
+for source in /bin /usr /lib /lib64; do
   [ -e "$source" ] || continue
-  mount --rbind "$source" "$root$source"
-  mount -o remount,ro,bind "$root$source"
+  readonly_tree "$source" "$root$source"
 done
+for source in /etc/ld.so.cache /etc/localtime; do
+  [ -f "$source" ] || continue
+  target="$root$source"
+  mkdir -p "$(dirname "$target")"
+  : > "$target"
+  mount --bind "$source" "$target"
+  mount -o remount,ro,bind "$target"
+done
+printf 'root:x:0:0:root:/tmp/home:/bin/sh\n' > "$root/etc/passwd"
+printf 'root:x:0:\n' > "$root/etc/group"
+printf 'passwd: files\ngroup: files\nhosts: files dns\n' > "$root/etc/nsswitch.conf"
+chmod 0444 "$root/etc/passwd" "$root/etc/group" "$root/etc/nsswitch.conf"
+if [ -d /etc/ssl/certs ]; then
+  mkdir -p "$root/etc/ssl/certs"
+  readonly_tree /etc/ssl/certs "$root/etc/ssl/certs"
+fi
+mount -t tmpfs -o mode=755,size=16m tmpfs "$root/dev"
+for source in /dev/null /dev/zero /dev/random /dev/urandom; do
+  target="$root$source"
+  : > "$target"
+  mount --bind "$source" "$target"
+  mount -o remount,ro,bind "$target"
+done
+mkdir -p "$root/dev/shm"
+mount -t tmpfs -o mode=1777,size=16m tmpfs "$root/dev/shm"
+ln -s /proc/self/fd "$root/dev/fd"
+ln -s /proc/self/fd/0 "$root/dev/stdin"
+ln -s /proc/self/fd/1 "$root/dev/stdout"
+ln -s /proc/self/fd/2 "$root/dev/stderr"
 mount --bind "$workspace" "$root/workspace"
 mount -o remount,rw,bind "$root/workspace"
+if [ -n "$inputs" ]; then
+  while IFS= read -r relative; do
+    [ -n "$relative" ] || continue
+    source="$workspace/$relative"
+    target="$root/workspace/$relative"
+    [ -f "$source" ] && [ ! -L "$source" ] || exit 92
+    mount --bind "$source" "$target"
+    mount -o remount,ro,bind "$target"
+  done < "$inputs"
+fi
 if [ -n "$resource" ]; then
   mkdir -p "$root/opt/harness-runtime"
   mount --bind "$resource" "$root/opt/harness-runtime"
@@ -250,7 +355,7 @@ mount -t proc proc "$root/proc"
 mount -t tmpfs -o mode=1777 tmpfs "$root/tmp"
 mkdir -p "$root/tmp/home"
 ip link set lo up
-exec chroot "$root" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/home TMPDIR=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=dumb /usr/bin/prlimit --as="$memory" --nproc="$processes" --fsize="$filesize" --cpu="$seconds" /usr/bin/timeout --signal=TERM --kill-after=5s "$seconds"s /usr/bin/setsid /bin/sh -lc "cd \"$workdir\" && exec /bin/sh -lc \"\$1\"" sandbox-command "$command"
+exec chroot "$root" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/home TMPDIR=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=dumb /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all /usr/bin/prlimit --as="$memory" --nproc="$processes" --nofile=256 --fsize="$filesize" --cpu="$seconds" /usr/bin/timeout --signal=TERM --kill-after=5s "$seconds"s /usr/bin/setsid /bin/sh -c 'cd "$1" && exec /bin/sh -lc "$2"' sandbox-command "$workdir" "$command"
 `
 
 const safeId = () => randomUUID().replaceAll("-", "")
@@ -297,7 +402,7 @@ function watchArtifact(workspace: string, artifact: SandboxRequest["observationA
   const drain = async () => {
     let file
     try {
-      file = await fs.open(path.join(workspace, artifact.path), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+      file = await fs.open(path.join(workspace, artifact.path), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK)
     } catch (error: any) {
       if (error?.code === "ENOENT") return
       throw error
@@ -343,14 +448,18 @@ async function scanWorkspace(root: string, maxBytes: number, before?: WorkspaceS
     const links = new Map<string, string>()
     const directories = new Set<string>()
     let bytes = 0
-    const visit = async (directory: string): Promise<void> => {
+    let entries = 0
+    const visit = async (directory: string, depth = 0): Promise<void> => {
+      if (depth > 64) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Snapshot directory depth exceeds 64")
       const directoryBefore = await fs.lstat(directory, { bigint: true })
       if (!directoryBefore.isDirectory() || directoryBefore.isSymbolicLink()) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Snapshot directory changed")
       for (const item of await fs.readdir(directory, { withFileTypes: true })) {
+        entries += 1
+        if (entries > 4096) throw new SandboxError("SANDBOX_LIMIT_EXCEEDED", "Snapshot file/directory count exceeds 4096")
         const target = path.join(directory, item.name)
         const relative = path.relative(root, target).split(path.sep).join("/")
         const stat = await fs.lstat(target, { bigint: true })
-        if (stat.isDirectory()) { directories.add(relative); await visit(target) }
+        if (stat.isDirectory()) { directories.add(relative); await visit(target, depth + 1) }
         else if (stat.isSymbolicLink()) links.set(relative, await fs.readlink(target))
         else if (stat.isFile()) {
           if (stat.nlink !== 1n) throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", `Snapshot has a hard link: ${relative}`)
@@ -439,7 +548,9 @@ function scenarioPath(value: unknown): string {
 function validateScenario(request: SandboxRequest) {
   const fixtures = request.fixtures ?? []
   const observed = request.observedFiles ?? []
-  if (!Array.isArray(fixtures) || fixtures.length > 32 || !Array.isArray(observed) || observed.length > 32) {
+  const protectedFiles = request.protectedFiles ?? []
+  if (!Array.isArray(fixtures) || fixtures.length > 32 || !Array.isArray(observed) || observed.length > 32 ||
+      !Array.isArray(protectedFiles) || protectedFiles.length > 32) {
     throw new SandboxError("SANDBOX_POLICY_DENIED", "Scenario setup/observation exceeds bounds")
   }
   let total = 0
@@ -456,6 +567,12 @@ function validateScenario(request: SandboxRequest) {
   }
   observed.forEach(scenarioPath)
   if (new Set(observed.map(p => p.toLowerCase())).size !== observed.length) throw new SandboxError("SANDBOX_POLICY_DENIED", "Duplicate observed paths")
+  protectedFiles.forEach(scenarioPath)
+  if (new Set(protectedFiles.map(p => p.toLowerCase())).size !== protectedFiles.length ||
+      protectedFiles.some(name => !fixtures.some(fixture => fixture.path === name)) ||
+      protectedFiles.some(name => !observed.includes(name))) {
+    throw new SandboxError("SANDBOX_POLICY_DENIED", "Protected files must be unique observed fixture paths")
+  }
 }
 
 async function seedFixtures(workspace: string, before: WorkspaceScan, fixtures: NonNullable<SandboxRequest["fixtures"]>) {
@@ -489,6 +606,25 @@ function observeFiles(before: WorkspaceScan, after: WorkspaceScan, paths: string
   })
 }
 
+function watchProtectedFiles(workspace: string, names: string[]) {
+  const changed = new Set<string>()
+  let failure: unknown
+  let stopped = false
+  const watchers = names.map(name => {
+    const watcher = watchFileSystem(path.join(workspace, name), { persistent: false }, () => changed.add(name))
+    watcher.on("error", error => { failure ??= error })
+    return watcher
+  })
+  return async () => {
+    if (!stopped) {
+      stopped = true
+      watchers.forEach(watcher => watcher.close())
+    }
+    if (failure) throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Protected fixture observation failed")
+    return [...changed].sort(byteOrder)
+  }
+}
+
 async function checked(argv: string[], timeoutMs = 30_000) {
   const result = await execute(argv, { timeoutMs, maxOutputBytes: 1024 * 1024 })
   if (result.code !== 0) {
@@ -497,16 +633,35 @@ async function checked(argv: string[], timeoutMs = 30_000) {
   return result.stdout.trim()
 }
 
+async function workspaceCwd(root: string, cwd: string) {
+  const resolved = await fs.realpath(cwd).catch(() => {
+    throw new SandboxError("SANDBOX_POLICY_DENIED", "Sandbox working directory does not exist")
+  })
+  const info = await fs.lstat(resolved)
+  if (!info.isDirectory() || !inside(root, resolved)) {
+    throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Sandbox working directory is outside workspace or is not a directory")
+  }
+  return path.relative(root, resolved)
+}
+
+async function inputManifest(base: string, binding?: ExecutionInputBinding) {
+  const paths = binding?.files.map(item => item.path) ?? []
+  if (!paths.length) return ""
+  const target = path.join(base, "pinned-inputs")
+  await fs.writeFile(target, paths.join("\n") + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" })
+  return target
+}
+
 async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: string, inputBytes: number) {
   const prefix = ["wsl.exe", "-d", policy.wslDistro, "--exec"]
-  const probe = await checked([...prefix, "/bin/sh", "-lc", "command -v unshare prlimit timeout setsid mount chroot ip >/dev/null && uname -r"])
+  const probe = await checked([...prefix, "/bin/sh", "-lc", "command -v unshare prlimit timeout setsid setpriv findmnt mount chroot ip >/dev/null && uname -r"])
   const home = await checked([...prefix, "/bin/sh", "-lc", 'printf %s "$HOME"'])
   const source = await checked([...prefix, "/usr/bin/wslpath", "-a", root])
   const id = safeId()
   const base = `${home}/.local/state/base-harness/sandboxes/${id}`
   const workspace = `${base}/workspace`
   const mountRoot = `${base}/root`
-  const relative = path.relative(root, request.cwd).replaceAll("\\", "/")
+  const relative = (await workspaceCwd(root, request.cwd)).replaceAll("\\", "/")
   if (relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) {
     throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Sandbox working directory is outside workspace")
   }
@@ -515,6 +670,7 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
   try {
     await checked([...prefix, "/bin/mkdir", "-p", workspace, mountRoot])
     await checked([...prefix, "/bin/cp", "-a", "--no-preserve=links", `${source}/.`, workspace], Math.max(30_000, policy.timeoutMs))
+    const pinned = await inputManifest(base, request.inputBinding)
     const before = request.captureChanges ? await scanWorkspace(root, policy.maxInputBytes) : undefined
     const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
     const result = await execute(
@@ -528,6 +684,8 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
         "--fork",
         "--kill-child=KILL",
         "--net",
+        "--ipc",
+        "--uts",
         "/bin/sh",
         "-eu",
         "-c",
@@ -539,9 +697,10 @@ async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: stri
         String(seconds),
         String(policy.memoryMiB * 1024 * 1024),
         String(policy.maxProcesses),
-        String(512 * 1024 * 1024),
+        String(16 * 1024 * 1024),
         request.command,
         "",
+        pinned,
       ],
       { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
     )
@@ -584,21 +743,23 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
   const base = path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "base-harness", "sandboxes", id)
   const workspace = path.join(base, "workspace")
   const mountRoot = path.join(base, "root")
-  const relative = path.relative(root, request.cwd)
+  const relative = await workspaceCwd(root, request.cwd)
   if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
     throw new SandboxError("SANDBOX_ESCAPE_ATTEMPT", "Sandbox working directory is outside workspace")
   }
   await fs.mkdir(mountRoot, { recursive: true })
   let stopObserving = async () => {}
+  let stopProtecting = async (): Promise<string[]> => []
   const began = performance.now()
   const timingMs = { setup: 0, execution: 0, observation: 0, cleanup: 0 }
   const elapsed = (start: number) => Math.round((performance.now() - start) * 1000) / 1000
   try {
     await fs.cp(root, workspace, { recursive: true, dereference: false, verbatimSymlinks: true })
-    const scenario = Boolean(request.fixtures?.length || request.observedFiles?.length)
+    const scenario = Boolean(request.fixtures?.length || request.observedFiles?.length || request.protectedFiles?.length)
     const original = request.captureChanges || request.inputBinding || scenario ? await scanWorkspace(workspace, policy.maxInputBytes) : undefined
     if (request.inputBinding) admitInputs(original!, request.inputBinding)
     if (request.fixtures?.length) await seedFixtures(workspace, original!, request.fixtures)
+    const pinned = await inputManifest(base, request.inputBinding)
     const before = request.fixtures?.length ? await scanWorkspace(workspace, policy.maxInputBytes) : original
     if (request.inputBinding && request.fixtures?.length && !inputReceipt(original!, before!, request.inputBinding, new Date().toISOString()).unchanged) {
       throw new SandboxError("EXECUTION_INPUT_MISMATCH", "Scenario setup changed submitted inputs")
@@ -607,6 +768,7 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
     const seconds = Math.max(1, Math.ceil(policy.timeoutMs / 1000))
     // No command or case event runs before admitting the actual copied tree.
     stopObserving = watchArtifact(workspace, request.observationArtifact)
+    stopProtecting = watchProtectedFiles(workspace, request.protectedFiles ?? [])
     timingMs.setup = elapsed(began)
     const executionStarted = performance.now()
     const result = await execute(
@@ -619,6 +781,8 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
         "--fork",
         "--kill-child=KILL",
         "--net",
+        "--ipc",
+        "--uts",
         "/bin/sh",
         "-eu",
         "-c",
@@ -630,11 +794,18 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
         String(seconds),
         String(policy.memoryMiB * 1024 * 1024),
         String(policy.maxProcesses),
-        String(512 * 1024 * 1024),
+        String(16 * 1024 * 1024),
         request.command,
         request.readonlyResource ?? "",
+        pinned,
       ],
-      { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal },
+      { timeoutMs: policy.timeoutMs, maxOutputBytes: policy.maxOutputBytes, signal: request.signal,
+        monitor: async (pid) => {
+          await Promise.all([
+            checkWorkspaceBudget(workspace, Math.max(policy.maxInputBytes * 4, 32 * 1024 * 1024)),
+            checkProcessBudget(pid, policy.memoryMiB * 1024, policy.maxProcesses),
+          ])
+        } },
     )
     timingMs.execution = elapsed(executionStarted)
     const observationStarted = performance.now()
@@ -642,6 +813,8 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
     const changes = request.captureChanges ? captureWorkspaceChanges(before!, after!) : undefined
     const receipt = request.inputBinding ? inputReceipt(original!, after!, request.inputBinding, checkedAt) : undefined
     const fileObservations = request.observedFiles ? observeFiles(before!, after!, request.observedFiles) : undefined
+    const protectedChanges = await stopProtecting()
+    stopProtecting = async () => protectedChanges
     timingMs.observation = elapsed(observationStarted)
     return {
       exitCode: result.code,
@@ -663,12 +836,15 @@ async function namespaceRun(request: SandboxRequest, policy: SandboxPolicy, root
       ...(changes ? { changes } : {}),
       ...(receipt ? { inputReceipt: receipt } : {}),
       ...(fileObservations ? { fileObservations } : {}),
+      ...(protectedChanges.length ? { protectedChanges } : {}),
     }
   } finally {
     const cleanupStarted = performance.now()
     try { await stopObserving() } finally {
-    await fs.rm(base, { recursive: true, force: true })
-    timingMs.cleanup = elapsed(cleanupStarted)
+      try { await stopProtecting() } finally {
+        await fs.rm(base, { recursive: true, force: true })
+        timingMs.cleanup = elapsed(cleanupStarted)
+      }
     }
   }
 }
@@ -684,7 +860,7 @@ export class SandboxManager {
     const backend = policy.strictBackend === "auto" ? (process.platform === "win32" ? "wsl2" : "namespace") : policy.strictBackend
     if (backend === "wsl2") {
       if (request.inputBinding) throw new SandboxError("SANDBOX_UNAVAILABLE", "Pinned execution input verification requires the namespace backend")
-      if (request.readonlyResource || request.observationArtifact || request.fixtures || request.observedFiles) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
+      if (request.readonlyResource || request.observationArtifact || request.fixtures || request.observedFiles || request.protectedFiles) throw new SandboxError("SANDBOX_UNAVAILABLE", "Structured adapter resources require the namespace backend")
       if (process.platform !== "win32") throw new SandboxError("SANDBOX_UNAVAILABLE", "WSL2 backend requires Windows")
       return wslRun(request, policy, input.root, input.bytes)
     }

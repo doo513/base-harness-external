@@ -60,8 +60,8 @@
         "runtime"
       ],
       "investigation": {
-        "inspect": "Match setup, actions and assertions to the claim; an earlier exception may mask the intended fault. A passing test need not distinguish a wrong implementation; compare against a pinned pre-change subject when useful.",
-        "decide": "Choose a counterexample or invariant separating correct behavior from a likely mistake. Derive equivalence only from the contract.",
+        "inspect": "Match setup, actions and assertions to the claim; an earlier exception may mask the fault. Passing tests may miss a wrong result; compare against a pinned pre-change subject when useful.",
+        "decide": "Find a distinguishing probe; when the contract equates omitted and explicit defaults, compare them through replay or later state.",
         "check": "Test the difference on the actual path and relevant state combinations. Report untested conditions, not full coverage from pass counts."
       }
     }
@@ -71,7 +71,7 @@
     "select": "Choose a question that could change the next action. Skip answered or irrelevant considerations; no quotas or goal-keyword routing.",
     "inspect": "Use Host tools on the relevant source or call path; expand to answer the question, not to read every hint.",
     "apply": "Keep, revise or reject a choice. A Need is a consideration expressed as a question, not a feature checklist. No extra tracking calls.",
-    "revisit": "Revisit contradicted assumptions; stop when the next action is supported. If checks add no information, change the probe or report uncertainty."
+    "revisit": "Revisit contradicted assumptions. Stop when evidence covers the agreed scope; otherwise choose an informative probe or report partial completion with limits."
   },
   "knowledge_map": [
     {
@@ -150,6 +150,6 @@
     "sufficient": "Support the next decision; distinguish intent, assumptions, provisional claims and measured facts."
   },
   "persistence_required": false,
-  "revision": "6",
+  "revision": "7",
   "schema_version": "develop-analysis-v2"
 }

@@ -14,7 +14,8 @@ import threading
 import time
 import uuid
 
-from harness.measurement_v5 import MeasurementEngine, decode
+from harness.measurement_v5 import MeasurementEngine
+from harness.json_codec import parse_message, render_message
 from harness.common import canonical_bytes, canonical_hash, redact
 from .errors import HarnessError, require
 from .snapshots import validate_candidate
@@ -23,20 +24,65 @@ from . import semantics, acceptance, evidence, observation_links
 from . import execution_inputs
 
 
+MAX_CONCURRENT_WORKERS = 2
+SYSTEM_COMMAND_ROOTS = tuple(Path(value).resolve() for value in
+                             ("/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin")) if os.name != "nt" else ()
+
+
+def trusted_bun():
+    selected = os.environ.get("BUN")
+    if selected:
+        require(Path(selected).is_absolute(), "RUNTIME_UNTRUSTED", "BUN must be an operator-selected absolute executable path")
+        return str(Path(selected).resolve())
+    standard = Path.home() / ".bun" / "bin" / "bun"
+    return str(standard.resolve()) if standard.is_file() else shutil.which("bun", path="/usr/local/bin:/usr/bin:/bin")
+
+
+def _worker_slot(state_dir: Path):
+    """Reserve one process-wide verification slot before spawning a worker."""
+    if os.name != "posix":
+        return None
+    import fcntl
+    state_dir = Path(state_dir).resolve()
+    state_root = state_dir.parent.parent if state_dir.parent.name == "tasks" and state_dir.name.startswith("task_") else state_dir
+    root = state_root / ".worker-slots"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for index in range(MAX_CONCURRENT_WORKERS):
+        descriptor = os.open(root / (str(index) + ".lock"), os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.set_inheritable(descriptor, True)
+            return descriptor
+        except BlockingIOError:
+            os.close(descriptor)
+    raise OSError("Verifier worker capacity is exhausted")
+
+
 def clean_environment() -> dict:
     # No provider credentials, Python module search overrides or application plugins.
-    keys = ("PATH", "Path", "PATHEXT", "SystemRoot", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL", "BUN")
-    return {key: os.environ[key] for key in keys if key in os.environ}
+    keys = ("PATHEXT", "SystemRoot", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL")
+    result = {key: os.environ[key] for key in keys if key in os.environ}
+    result["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" if os.name != "nt" else os.environ.get("Path", os.environ.get("PATH", ""))
+    bun = trusted_bun()
+    if bun:
+        result["BUN"] = bun
+    return result
 
 
 def spawn_worker(state_dir: Path, job_id: str) -> int:
     source = str(Path(__file__).resolve().parents[1])
     code = f"import sys; sys.path.insert(0, {source!r}); from harness_external.worker import main; main()"
     options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    child = subprocess.Popen([sys.executable, "-I", "-c", code, str(state_dir), job_id], cwd=source,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             env=clean_environment(), **options)
-    return child.pid
+    slot = _worker_slot(Path(state_dir))
+    try:
+        child = subprocess.Popen([sys.executable, "-I", "-c", code, str(state_dir), job_id,
+                                  str(slot) if slot is not None else ""], cwd=source,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 env=clean_environment(), pass_fds=(() if slot is None or os.name == "nt" else (slot,)), **options)
+        return child.pid
+    finally:
+        if slot is not None:
+            os.close(slot)
 
 
 def stop_child(child: subprocess.Popen) -> None:
@@ -83,12 +129,22 @@ def runtime_digest(filename, fingerprint):
     return digest.hexdigest()
 
 
-def runtime_identity(check):
+def runtime_identity(check, payload=None):
     """Identify top-level runtime binaries; not their entire dependency graph."""
-    binaries = {"adapter": shutil.which(os.environ.get("BUN", "bun")),
+    command_name = check["argv"][0]
+    command_path = None
+    if "/" in command_name and not Path(command_name).is_absolute():
+        require(payload is not None, "RUNTIME_IDENTITY_UNAVAILABLE", "Candidate-local runtime needs a pinned payload root")
+        command_path = (Path(payload) / check["cwd"] / command_name).resolve(strict=True)
+        require(command_path.is_relative_to(Path(payload).resolve()), "RUNTIME_ESCAPE", "Relative command escaped the Candidate snapshot")
+    elif Path(command_name).is_absolute():
+        command_path = Path(command_name).resolve(strict=True)
+        require(os.name == "nt" or any(command_path.is_relative_to(root) for root in SYSTEM_COMMAND_ROOTS),
+                "RUNTIME_UNTRUSTED", "Absolute commands must come from a mounted system executable directory")
+    binaries = {"adapter": trusted_bun(),
                 "verifier_python": sys.executable,
-                "command": shutil.which(check["argv"][0], path="/usr/local/bin:/usr/bin:/bin")
-                           if "/" not in check["argv"][0] or Path(check["argv"][0]).is_absolute() else None}
+                "command": str(command_path) if command_path is not None else
+                           shutil.which(command_name, path="/usr/local/bin:/usr/bin:/bin")}
     result = {}
     for name, filename in binaries.items():
         if filename is None:
@@ -96,7 +152,9 @@ def runtime_identity(check):
             continue
         path = Path(filename).resolve()
         before = path.stat()
-        require(before.st_size <= 256 * 1024 * 1024, "RUNTIME_IDENTITY_LIMIT", "Runtime executable exceeds identity bound")
+        require(path.is_file() and before.st_nlink == 1 and os.access(path, os.X_OK)
+                and before.st_size <= 256 * 1024 * 1024,
+                "RUNTIME_IDENTITY_LIMIT", "Runtime must be a single-link executable within the identity bound")
         digest = runtime_digest(str(path), file_fingerprint(before))
         after = path.stat()
         require(file_fingerprint(before) == file_fingerprint(after),
@@ -109,7 +167,7 @@ def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threadin
     """Return only a receipt generated by our adapter, never one supplied by a caller."""
     started = time.monotonic()
     bridge = Path(__file__).resolve().parents[2] / "runtime" / "script" / "external-harness-sandbox.ts"
-    bun = shutil.which(os.environ.get("BUN", "bun"))
+    bun = trusted_bun()
     if not bridge.is_file() or not bun:
         return {"status": "not_run", "reason": "SANDBOX_ADAPTER_UNAVAILABLE: source checkout and Bun are required for command checks"}
     require(not abort.is_set() and remaining > 0, "VERIFICATION_CANCELLED", "Verification was cancelled")
@@ -120,6 +178,8 @@ def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threadin
         request["fixtures"] = check["fixtures"]
     if "observed_files" in check:
         request["observedFiles"] = check["observed_files"]
+    if "protected_fixtures" in check:
+        request["protectedFiles"] = check["protected_fixtures"]
     environment = clean_environment()
     environment["XDG_STATE_HOME"] = str(state_dir / "sandbox-state")
     options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -135,12 +195,12 @@ def execute_sandbox(check: dict, payload: Path, state_dir: Path, abort: threadin
                 stop_child(child)
                 raise HarnessError("VERIFICATION_CANCELLED", "Verification cancelled or job deadline expired")
             try:
-                output, errors = child.communicate(canonical_bytes(request) if first else None, timeout=0.2)
+                output, errors = child.communicate(render_message(request) if first else None, timeout=0.2)
                 break
             except subprocess.TimeoutExpired:
                 first = False
         require(len(output) <= 1024 * 1024 and child.returncode == 0, "SANDBOX_ADAPTER_ERROR", "Sandbox adapter failed or exceeded protocol bounds")
-        value = decode(output.decode("utf-8"))
+        value = parse_message(output)
         require(isinstance(value, dict) and value.get("status") in {"completed", "not_run", "error"}, "SANDBOX_PROTOCOL", "Invalid sandbox adapter response")
         execution_inputs.validate_receipt(value, input_binding)
         return value
@@ -251,7 +311,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                     if check.get("adapter"):
                         from .adapter_execution import command as adapter_command
                         execution = adapter_command(check, adapters)
-                    environment["top_level_runtime"] = runtime_identity(execution)
+                    environment["top_level_runtime"] = runtime_identity(execution, payload)
                     environment["command_hash"] = canonical_hash({key: execution[key] for key in ("argv", "cwd", "timeout_seconds")})
                     input_binding = execution_inputs.job_binding(candidate, run["run_id"], job_id, owner, check_record["ref"], execution)
                     if check.get("adapter"):
@@ -285,7 +345,7 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
                     else:
                         environment.pop("adapter_identity", None)
                         capture = execute_sandbox(check, payload, store.root, abort, job["deadline_at"] - time.time(), input_binding)
-                    require(environment["top_level_runtime"] == runtime_identity(execution), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
+                    require(environment["top_level_runtime"] == runtime_identity(execution, payload), "RUNTIME_CHANGED", "Runtime executable changed during command execution")
                     measured_runtime = capture.get("provenance") or {}
                     timing = measured_runtime.get("timingMs")
                     if isinstance(timing, dict) and all(type(timing.get(key)) in (int, float) and 0 <= timing[key] < 3600000
@@ -435,6 +495,6 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in {3, 4}:
         raise SystemExit(2)
     execute_job(sys.argv[1], sys.argv[2])

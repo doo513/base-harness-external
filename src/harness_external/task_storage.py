@@ -18,10 +18,11 @@ def task_id_for(request_id, workspace, domain):
     require(isinstance(request_id, str) and 0 < len(request_id) <= 128
             and isinstance(workspace, str) and Path(workspace).is_absolute() and isinstance(domain, str),
             "TASK_START_CONTEXT", "Task creation requires the original request ID, absolute workspace and Domain")
-    return "task_" + canonical_hash({"request_id": request_id, "workspace": str(Path(workspace).absolute()), "domain": domain})[:32]
+    return "task_" + canonical_hash({"request_id": request_id, "workspace": os.path.abspath(workspace), "domain": domain})[:32]
 
 
 class TaskStores:
+    MAX_TASKS = 512
     def __init__(self, api):
         self.api = api
         self.root = api.store.root
@@ -46,7 +47,7 @@ class TaskStores:
 
     def selected(self, task_id):
         from .service import Harness
-        self.manifest(task_id)
+        manifest = self.manifest(task_id)
         directory = self.directory(task_id)
         no_links(directory / "runs.sqlite3")
         require((directory / "runs.sqlite3").is_file(), "TASK_STORE_MISSING",
@@ -54,11 +55,30 @@ class TaskStores:
         try:
             with closing(sqlite3.connect((directory / "runs.sqlite3").as_uri() + "?mode=ro", uri=True)) as connection:
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            require({"runs", "jobs", "requests", "measurements", "run_heads", "run_records", "case_observations"} <= tables,
-                    "TASK_STORE_CORRUPT", "Task database is incomplete; do not initialize a replacement")
+            from .store import LEGACY_TABLES, REQUIRED_TABLES
+            require((REQUIRED_TABLES if "store_schema" in tables else LEGACY_TABLES) <= tables,
+                    "TASK_STORE_CORRUPT", "Task database is incomplete; do not initialize or repair a replacement")
         except sqlite3.Error as error:
             raise HarnessError("TASK_STORE_CORRUPT", "Task database is unreadable; preserve it for recovery") from error
-        return Harness(directory, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root)
+        selected = Harness(directory, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root)
+        expected = (task_id, manifest["workspace"], manifest["domain"], manifest["start_request_id"], manifest["manifest_hash"])
+        with selected.store.transaction(write=False) as connection:
+            row = connection.execute("SELECT task_id,workspace,domain,start_request_id,manifest_hash FROM task_identity WHERE singleton=1").fetchone()
+            if row is not None:
+                require(row == expected, "TASK_STORE_IDENTITY", "Task manifest and database identity differ")
+                return selected
+        with selected.store.transaction() as connection:
+            row = connection.execute("SELECT task_id,workspace,domain,start_request_id,manifest_hash FROM task_identity WHERE singleton=1").fetchone()
+            if row is None:
+                ids = [item[0] for item in connection.execute("SELECT run_id FROM runs UNION SELECT run_id FROM run_heads")]
+                for run_id in ids:
+                    run = selected.store.run(connection, run_id)
+                    require(run["workspace"] == manifest["workspace"] and run["contract"]["domain_id"] == manifest["domain"],
+                            "TASK_STORE_IDENTITY", "Legacy task database belongs to another workspace or Domain")
+                connection.execute("INSERT INTO task_identity VALUES(1,?,?,?,?,?)", expected)
+            else:
+                require(row == expected, "TASK_STORE_IDENTITY", "Task manifest and database identity differ")
+        return selected
 
     @staticmethod
     def _allowed(manifest, allowed_workspace):
@@ -83,35 +103,49 @@ class TaskStores:
                 "STATE_WORKSPACE_OVERLAP", "Task storage and workspace must remain disjoint")
         self._allowed({"workspace": str(source)}, allowed_workspace)
         target = self.directory(task_id)
-        if not target.exists():
-            require(expected == task_id and not arguments.get("predecessor_run_id"),
-                    "TASK_START_CONFLICT", "New tasks require their original derived identity; continuations require an existing task")
+        # Different task IDs need one catalog lock while enforcing the global
+        # retention limit and publishing a new directory. Release it before the
+        # potentially slow Core start; that part remains serialized per task.
+        with locked(self.root, "task-catalog"):
+            with locked(self.root, task_id):
+                manifest_path = target / "task.json"
+                if manifest_path.exists():
+                    manifest = self.manifest(task_id)
+                    require(manifest["workspace"] == str(source) and manifest["domain"] == domain,
+                            "RUN_CONTEXT_MISMATCH", "Task belongs to another workspace/Domain")
+                    require(manifest["start_request_id"] == request["request_id"] or arguments.get("predecessor_run_id"),
+                            "TASK_START_CONFLICT", "Use a new task for unrelated work; existing tasks only admit explicit linked continuations")
+                else:
+                    require(not target.exists(), "TASK_STORE_CORRUPT", "Task directory has no connection metadata; preserve it for recovery")
+                    require(expected == task_id and not arguments.get("predecessor_run_id"),
+                            "TASK_START_CONFLICT", "New tasks require their original derived identity; continuations require an existing task")
+                    folder = self.root / "tasks"
+                    existing = sum(1 for path in folder.iterdir() if path.name.startswith("task_")) if folder.exists() else 0
+                    require(existing < self.MAX_TASKS, "TASK_LIMIT", "Task store limit reached; archive tasks before creating another")
+                    manifest = {"schema_version": "task-store-v1", "task_id": task_id, "workspace": str(source),
+                                "domain": domain, "start_request_id": request["request_id"], "created_at": time.time(),
+                                "database_created": True}
+                    # Publish connection metadata and an initialized DB together.
+                    # A lost start response never looks like permission to rebuild
+                    # a missing database, including a crash during initial setup.
+                    from .service import Harness
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    with tempfile.TemporaryDirectory(prefix=".task-init-", dir=target.parent) as temporary:
+                        staged = Path(temporary)
+                        provision = Harness(staged, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root)
+                        document = {**manifest, "manifest_hash": canonical_hash(manifest)}
+                        with provision.store.transaction() as connection:
+                            connection.execute("INSERT INTO task_identity VALUES(1,?,?,?,?,?)",
+                                               (task_id, manifest["workspace"], manifest["domain"], manifest["start_request_id"], document["manifest_hash"]))
+                        write_json(staged / "task.json", document)
+                        os.rename(staged, target)
+                        if os.name == "posix":
+                            descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+                            try:
+                                os.fsync(descriptor)
+                            finally:
+                                os.close(descriptor)
         with locked(self.root, task_id):
-            manifest_path = target / "task.json"
-            if manifest_path.exists():
-                manifest = self.manifest(task_id)
-                require(manifest["workspace"] == str(source) and manifest["domain"] == domain,
-                        "RUN_CONTEXT_MISMATCH", "Task belongs to another workspace/Domain")
-                require(manifest["start_request_id"] == request["request_id"] or arguments.get("predecessor_run_id"),
-                        "TASK_START_CONFLICT", "Use a new task for unrelated work; existing tasks only admit explicit linked continuations")
-            else:
-                require(not target.exists(), "TASK_STORE_CORRUPT", "Task directory has no connection metadata; preserve it for recovery")
-                require(expected == task_id, "TASK_START_CONFLICT", "Task identity does not match this start request")
-                manifest = {"schema_version": "task-store-v1", "task_id": task_id, "workspace": str(source),
-                            "domain": domain, "start_request_id": request["request_id"], "created_at": time.time(),
-                            "database_created": True}
-                # Publish connection metadata and an initialized DB together.
-                # A lost start response never looks like permission to rebuild
-                # a missing database, including a crash during initial setup.
-                from .service import Harness
-                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                with tempfile.TemporaryDirectory(prefix=".task-init-", dir=target.parent) as temporary:
-                    staged = Path(temporary)
-                    provision = Harness(staged, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root)
-                    with provision.store.transaction():
-                        pass
-                    write_json(staged / "task.json", {**manifest, "manifest_hash": canonical_hash(manifest)})
-                    os.rename(staged, target)
             selected = self.selected(task_id)
             result = invoke_core(selected, inner)
             return {**result, "task_id": task_id}
@@ -123,11 +157,16 @@ class TaskStores:
         require(domain is None or isinstance(domain, str), "TASK_FILTER", "Domain filter must be a string")
         folder = self.root / "tasks"
         no_links(folder)
-        items = []
+        items, corrupt = [], []
         for path in sorted(folder.iterdir()) if folder.exists() else ():
             if not path.name.startswith("task_"):
                 continue
-            body = self.manifest(path.name)
+            try:
+                body = self.manifest(path.name)
+            except (HarnessError, OSError, ValueError) as error:
+                if allowed_workspace is None:
+                    corrupt.append({"task_id": path.name, "error": getattr(error, "code", "TASK_STORE_CORRUPT")})
+                continue
             if allowed_workspace and not allowed_workspace(Path(body["workspace"])):
                 continue
             if workspace is not None and body["workspace"] != str(Path(workspace).absolute()):
@@ -137,4 +176,6 @@ class TaskStores:
             items.append({key: copy.deepcopy(body[key]) for key in ("task_id", "workspace", "domain", "created_at")})
         page = items[offset:offset + limit]
         return {"items": page, "total": len(items), "next_offset": offset + len(page) if offset + len(page) < len(items) else None,
+                "corrupt": corrupt[:20], "corrupt_count": len(corrupt),
+                "corrupt_scope": "hidden_by_workspace_filter" if allowed_workspace is not None else "all_visible_tasks",
                 "meaning": "connection_metadata_not_run_state"}

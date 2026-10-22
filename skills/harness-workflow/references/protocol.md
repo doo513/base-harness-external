@@ -132,9 +132,10 @@ the Run, interpretation reference and `payload_schema: caller-payload-v1` and
 stores it as an untrusted caller note in the SAME Run database. It does not add a
 Need/workflow registry. Null fields do not satisfy missing execution requirements.
 Extensions remain opaque: naming a field `passed`, `ready` or `policy` grants nothing.
-Structured payloads and their notes are preserved exactly, not silently redacted
-or truncated; submit only material intended for storage. Oversized/deep/non-JSON
-values are rejected. Legacy note-only capture behavior is unchanged.
+Structured payload values are preserved exactly, while the enclosing note keeps
+the normal redaction policy. Known credential field names and token-like values
+are rejected instead of stored. Oversized/deep/non-JSON values are also rejected.
+Submit only non-secret material intended for durable storage.
 
 ```sh
 python3 <skill>/scripts/harness_client.py call --binding /absolute/binding.json \
@@ -336,16 +337,23 @@ decodes UTF-8/JSON only after the full SHA-256 matches, and returns
 every reference automatically. A changed source returns an error, not mixed bytes.
 
 For exception-focused progress reads, use `call --operation status --binding ...
---arguments json:{"job_id":...} --format attention`. The helper uses existing
-summary data and a bounded case query with `outcomes` and `subject_role: candidate`.
-`harness-client-attention-v1` includes observed nonpassing states, linked requirement
+--arguments json:{"job_id":...} --format attention`. Direct status/resume calls
+select Core's `view: "attention"` in one request; `attention_limit` defaults to 20
+(1..100). Core reads the current state, selected verification and bounded Candidate
+exceptions in one transaction, validating references before filtering.
+`harness-attention-v1` includes observed nonpassing states, linked requirement
 IDs, error excerpts and exact detail arguments. Excerpts are not root-cause claims;
 arbitrary adapter phase data remains available by reference. `case_query.next_offset`
 and `attention_page_complete` describe pagination, not verified completion.
 Skipped/xfail/xpass outcomes are attention items, not necessarily failed policy
-checks. `not_queried` explicitly identifies omitted Run gates/assessment/limits;
-Job-only reads do not invent them. A selected historical Job is not automatically
-current evidence. This projection is for follow-up after context restoration and
+checks. Gates, assessment and remaining budgets describe the current Run.
+`selected_job.relevance` and each item's `scope` distinguish current declarations,
+current verification, historical facts and diagnostics. By default Core selects
+the Run's verification directly, even if newer diagnostic Jobs exist. Explicit
+`job_id` reads retain their historical scope. `case_query.next_offset` counts only
+cases actually displayed; use it with `records` to retrieve the remaining cases.
+Bounded phase excerpts retain exact detail references for omitted text.
+This projection is for follow-up after context restoration and
 does not silently finish, repair, change criteria or hide known gaps.
 
 For configured pytest checks, read `records` with `kind: "cases"` and the Job ID.
@@ -541,15 +549,15 @@ Use the same context with these operations/arguments:
 |---|---|---|
 | `submit` | none | required |
 | `verify` | optional `compare_baseline`, `expected_candidate_hash`; returns `job_id` | required |
-| `status` | optional `job_id`, `check_workspace: true`, `view: "summary"` | omit |
-| `resume` | optional `view: "summary" / "compact"`, `analysis_selection`; query only | omit |
+| `status` | optional `job_id`, `check_workspace: true`, `view: "summary" / "compact" / "attention" / "full"`, `attention_limit` | omit |
+| `resume` | optional `view: "summary" / "compact" / "attention"`, `analysis_selection`, `attention_limit`; query only | omit |
 | `records` | `kind`; page: optional `job_id` (measurements/cases), `offset`, `limit`, `view: "full" / "references"`; cases only: `outcomes` string list, `subject_role: "candidate" / "baseline"`; detail: `detail` object | omit |
 | `observe` | `data: {"note": "Decision and next step"}` | required |
 | `assess` | `data` below | required |
 | `finish` | `outcome: "completed" / "partial" / "abandoned"`, optional `summary`, `assessment` | required |
 | `cancel` | `job_id`; cancels that job, not the Run | required |
 | `check`, `retire-check` | Domain check proposal/retirement in `data` | required |
-| `cleanup` | preview by default; `apply: true` is an explicit authorized action | omit |
+| `cleanup` | preview by default; `apply: true` quarantines abandoned captures | required; replay the same ID after response loss |
 
 Assessment data:
 

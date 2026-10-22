@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import stat
 import tempfile
 
 from harness.common import canonical_bytes
@@ -10,11 +11,29 @@ from .errors import require
 from .snapshots import no_links
 
 
+def fsync_directory(path):
+    if os.name != "posix":
+        return
+    descriptor = os.open(Path(path), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def read_bytes(path, maximum):
     path = Path(path)
     no_links(path)
-    with path.open("rb") as stream:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size <= maximum,
+                "ARTIFACT_TYPE", "Stored artifact must be a bounded single-link regular file")
         body = stream.read(maximum + 1)
+        after = os.fstat(stream.fileno())
+    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
+                              value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    require(identity(before) == identity(after), "ARTIFACT_CHANGED", "Stored artifact changed while reading")
     require(len(body) <= maximum, "ARTIFACT_LIMIT", "Stored artifact exceeds its byte limit")
     return body
 
@@ -36,6 +55,7 @@ def atomic_write(path, body):
             os.fsync(stream.fileno())
         no_links(path)
         os.replace(temporary, path)
+        fsync_directory(path.parent)
         temporary = None
     finally:
         if temporary is not None:

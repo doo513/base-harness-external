@@ -11,7 +11,7 @@ from .errors import HarnessError, fields, require
 METHODS = {name: name.replace("-", "_") for name in (
     "start", "observe", "revise", "assess", "submit", "verify", "compare", "cancel", "status", "resume", "records", "cleanup", "finish", "list-runs", "context", "describe")}
 METHODS.update(check="register_check", **{"retire-check": "retire_check"})
-READS = {"status", "resume", "records", "cleanup", "list-runs", "context", "doctor", "wait", "describe"}
+READS = {"status", "resume", "records", "list-runs", "context", "doctor", "wait", "describe"}
 
 
 def waiting(api, run_id, job_id, wait_seconds):
@@ -46,6 +46,11 @@ def invoke(api, request, *, allowed_workspace=None):
                 "REQUEST_INVALID", "Task discovery is a global read")
         fields(request["arguments"], {"workspace", "domain", "offset", "limit"})
         return response(**TaskStores(api).list(**request["arguments"], allowed_workspace=allowed_workspace))
+    if operation == "list-runs" and allowed_workspace is not None and "task_id" not in request:
+        from . import queries
+        fields(request, {"operation", "arguments"}, {"operation", "arguments"})
+        fields(request["arguments"], {"offset", "limit"})
+        return response(**queries.list_runs(api, allowed_workspace=allowed_workspace, **request["arguments"]))
     if operation.startswith("knowledge-"):
         return _knowledge(api, request, allowed_workspace)
     inner = {k: v for k, v in request.items() if k != "knowledge"}

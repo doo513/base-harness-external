@@ -235,7 +235,7 @@ def test_plugin_roots_and_relative_imports_remain_isolated_after_load(tmp_path):
     assert [module.lazy_label() for module in modules] == ["first", "second"]
     assert modules[0] is not modules[1]
     assert "sample_plugin" not in sys.modules
-    assert registries[0].identity("fixture-probe-v1") == registries[1].identity("fixture-probe-v1")
+    assert registries[0].identity("fixture-probe-v1") != registries[1].identity("fixture-probe-v1")
 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="single command materialization through actual Sandbox")

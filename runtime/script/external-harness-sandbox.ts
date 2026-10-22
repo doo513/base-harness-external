@@ -12,7 +12,7 @@ try {
   if (Buffer.byteLength(raw) > 640 * 1024) throw new Error("SANDBOX_REQUEST_LIMIT")
   const input = JSON.parse(raw)
   const required = ["argv", "cwd", "timeoutMs", "workspace", "inputBinding"]
-  if (!required.every(key => key in input) || Object.keys(input).some(key => ![...required, "readonlyResource", "observationArtifact", "fixtures", "observedFiles"].includes(key)) ||
+  if (!required.every(key => key in input) || Object.keys(input).some(key => ![...required, "readonlyResource", "observationArtifact", "fixtures", "observedFiles", "protectedFiles"].includes(key)) ||
       typeof input.workspace !== "string" || typeof input.cwd !== "string" ||
       !Array.isArray(input.argv) || !input.argv.length || !input.argv.every((v: unknown) => typeof v === "string" && !v.includes("\0")) ||
       !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > 120_000) throw new Error("SANDBOX_REQUEST_INVALID")
@@ -33,11 +33,12 @@ try {
     captureChanges: true,
     fixtures: input.fixtures,
     observedFiles: input.observedFiles,
+    protectedFiles: input.protectedFiles,
     readonlyResource: input.readonlyResource,
     observationArtifact: input.observationArtifact ? { ...input.observationArtifact, onLine: (line: string) => {
       process.stdout.write(JSON.stringify({ type: "adapter_event", line }) + "\n")
     } } : undefined,
-    config: { timeoutMs: input.timeoutMs, maxInputBytes: 10 * 1024 * 1024, maxOutputBytes: 256 * 1024, memoryMiB: 1024, maxProcesses: 64 },
+    config: { timeoutMs: input.timeoutMs, maxInputBytes: 10 * 1024 * 1024, maxOutputBytes: 256 * 1024, memoryMiB: 256, maxProcesses: 8 },
   })
   // Namespace/bootstrap failures must not masquerade as an executed test.
   if (!result.stdout.startsWith(marker + "\n")) {
@@ -46,13 +47,20 @@ try {
     if (!result.inputReceipt) throw new Error("EXECUTION_INPUT_RECEIPT_MISSING")
     const changedInputs = result.inputReceipt.changed_inputs
     const altered = changedInputs.length > 0
+    const fileIndex = new Map((result.fileObservations ?? []).map(item => [item.path, item]))
+    const restoredProtected = (result.protectedChanges ?? []).filter(name => {
+      const observation = fileIndex.get(name)
+      return !observation || JSON.stringify(observation.before) === JSON.stringify(observation.after)
+    })
     const ending = "\n" + endMarker + ":" + result.exitCode + "\n"
     const returned = result.stdout.endsWith(ending)
     const timedOut = !returned && result.exitCode === 124
     const error = altered ? { code: "TEST_MODIFIED_INPUT", message: "Submitted inputs changed in the test sandbox: " + changedInputs.join(", ") }
+      : restoredProtected.length ? { code: "TEST_MODIFIED_FIXTURE", message: "Protected fixtures were modified during execution: " + restoredProtected.join(", ") }
       : !returned ? { code: timedOut ? "COMMAND_TIMEOUT" : "COMMAND_INTERRUPTED", message: "Command did not return through its Sandbox wrapper" } : undefined
     process.stdout.write(JSON.stringify({ status: error ? "error" : "completed", provenance: result.provenance,
-      input_receipt: result.inputReceipt, ...(result.fileObservations ? { file_observations: result.fileObservations } : {}), capture: {
+      input_receipt: result.inputReceipt, ...(result.fileObservations ? { file_observations: result.fileObservations } : {}),
+      ...(result.protectedChanges ? { protected_changes: result.protectedChanges } : {}), capture: {
       argv: input.argv, cwd: input.cwd, startedAt, finishedAt: new Date().toISOString(),
       stdout: result.stdout.slice(marker.length + 1, returned ? -ending.length : undefined), stderr: result.stderr,
       ...(error ? { execution: "error", error } : { execution: "completed", exitCode: result.exitCode }),

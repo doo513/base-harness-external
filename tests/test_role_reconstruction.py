@@ -246,7 +246,7 @@ class RoleReconstruction(unittest.TestCase):
         (stage / ".capture.lock").write_bytes(b"")
         old = time.time() - 3600
         os.utime(stage, (old, old))
-        result = self.api.cleanup(run, apply=True, min_age_seconds=60)
+        result = self.api.cleanup(run, "cleanup", apply=True, min_age_seconds=60)
         row = next(item for item in result["items"] if item["path"] == str(stage))
         self.assertEqual(row["state"], "quarantined")
         self.assertTrue(Path(row["recovery_path"]).is_dir())
@@ -311,7 +311,8 @@ class RoleReconstruction(unittest.TestCase):
         self.assertEqual(helper.compact_call_result("start", value)["workspace_constraints"], value["workspace_constraints"])
         resumed = {"api_version": "external-harness-v2", "ok": True, "assurance": "local-advisory", "ready": False,
                    **self.api.resume(value["run_id"])}
-        result = helper.attention_report(resumed, None, {"items": [], "total": 0, "next_offset": None})
+        from harness_external.attention import attention_report
+        result = attention_report(resumed, None, {"items": [], "total": 0, "next_offset": None})
         self.assertEqual(result["workspace_constraints"], resumed["workspace_constraints"])
         self.assertEqual(result["diagnostic"], resumed["diagnostic"])
 

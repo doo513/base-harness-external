@@ -239,10 +239,10 @@ def test_cleanup_quarantines_only_unlocked_abandoned_staging(case):
     os.utime(abandoned, (past, past))
     with maintenance.capture_lease(active):
         os.utime(active, (past, past))
-        preview = api.cleanup(run, min_age_seconds=60)
+        preview = api.cleanup(run, "cleanup-preview", min_age_seconds=60)
         assert {i["state"] for i in preview["items"]} == {"active", "abandoned"}
         assert abandoned.exists()
-        result = api.cleanup(run, apply=True, min_age_seconds=60)
+        result = api.cleanup(run, "cleanup-apply", apply=True, min_age_seconds=60)
         recovered = next(i for i in result["items"] if i["state"] == "quarantined")
         assert (Path(recovered["recovery_path"]) / "retained.txt").read_text() == "recover me"
         assert active.exists() and not abandoned.exists()
@@ -275,7 +275,7 @@ def test_cli_recovery_tools_roundtrip(tmp_path):
     assert cli("list-runs", "--limit", "1")["items"][0]["run_id"] == run
     assert cli("resume", "--run-id", run)["run"]["lifecycle"] == "waiting_input"
     assert cli("records", "--run-id", run, "--kind", "interpretations", "--limit", "1")["total"] == 1
-    assert cli("cleanup", "--run-id", run)["items"] == []
+    assert cli("cleanup", "--run-id", run, "--request-id", "cleanup-preview")["items"] == []
     proposal = tmp_path / "proposal.json"
     proposal.write_text(json.dumps({"expected_revision": 1, "parameters": {
         "profile": "structural", "inputs": ["result.txt"], "artifacts": ["result.txt"],

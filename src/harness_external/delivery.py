@@ -8,7 +8,7 @@ import json
 import math
 import re
 
-from harness.common import canonical_hash
+from harness.common import canonical_hash, contains_sensitive
 from .errors import fields, require
 
 
@@ -98,6 +98,7 @@ def payload(value):
     require(isinstance(result["parents"], list) and len(result["parents"]) <= 32, "DELIVERY_REFERENCE", "At most 32 parent references")
     for item in result["parents"]:
         reference(item)
+    require(not contains_sensitive(result), "PAYLOAD_SENSITIVE", "Structured delivery cannot persist credentials or secret-like values")
     return result
 
 

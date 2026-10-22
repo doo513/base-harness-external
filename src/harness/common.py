@@ -27,6 +27,7 @@ SECRET_VALUE = re.compile(
     r"|-----BEGIN(?:%20|\s)+(?:RSA(?:%20|\s+))?PRIVATE(?:%20|\s+)KEY-----",
     re.IGNORECASE,
 )
+SENSITIVE_FIELD = re.compile(r"^(?:authorization|api[-_]?key|token|secret|password|cookie|credential|cred|private[-_]?key)$", re.IGNORECASE)
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -51,6 +52,12 @@ def atomic_json(path: Path, value: Any) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+    if os.name == "posix":
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def _truncate_for_capture(value: str) -> str:
@@ -74,3 +81,16 @@ def redact(value: Any, key: str = "") -> Any:
             items.append(TRUNCATED_ITEM_MARKER)
         return items
     return value
+
+
+def contains_sensitive(value: Any, key: str = "") -> bool:
+    """Reject exact structured handoff fields that look like credentials."""
+    if SENSITIVE_FIELD.fullmatch(key):
+        return True
+    if isinstance(value, str):
+        return bool(SECRET_VALUE.search(value))
+    if isinstance(value, dict):
+        return any(contains_sensitive(item, str(item_key)) for item_key, item in value.items())
+    if isinstance(value, list):
+        return any(contains_sensitive(item) for item in value)
+    return False

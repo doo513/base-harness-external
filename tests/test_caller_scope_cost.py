@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from harness_external.service import Harness
+from harness_external.attention import attention_report
 from harness_external.worker import execute_job
 from test_skill_workflow import helper, module_at, ROOT, HELPER
 
@@ -45,7 +46,7 @@ def test_passing_checks_do_not_hide_missing_requirements_or_gates(tmp_path, monk
         assert scope["declared_requirement_count"] == 0 and scope["gate_status"] == "not_required"
         assert scope["coverage_conclusion"] == "not_established"
         job = api.status(begun["run_id"], job_id, view="summary")["job"]
-        attention = helper.attention_report(current, job, {"items": [], "next_offset": None, "total": 0})
+        attention = attention_report(current, job, {"items": [], "next_offset": None, "total": 0})
         assert any(item.get("code") == "REQUIREMENTS_NOT_DECLARED" for item in attention["attention"])
         assert job["result"]["status"] == "passed"
     closed = api.finish(begun["run_id"], "finish", outcome="completed")

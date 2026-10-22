@@ -82,6 +82,12 @@ def capture(workspace: Path, inputs: list[str], directory: Path, *, overlays: di
         atomic_json(temporary / "candidate.json", result)
         validate_candidate(result, payload)
         os.rename(temporary, directory / candidate_id)
+        if os.name == "posix":
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
         return result
     except Exception:
         # Only our newly allocated capture directory is eligible for cleanup.

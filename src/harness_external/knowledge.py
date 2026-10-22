@@ -15,6 +15,8 @@ from .snapshots import no_links
 from .store import identifier
 
 MAX_DOCUMENT = 64000
+MAX_ENTRIES = 1024
+MAX_LIBRARY_BYTES = 64 * 1024 * 1024
 
 
 def normalize(data):
@@ -52,11 +54,16 @@ class KnowledgeLibrary:
                 "KNOWLEDGE_CORRUPT", "Knowledge metadata changed or is invalid")
         return value
 
-    def _entries(self, allowed_workspace=None):
+    def _entries(self, allowed_workspace=None, corrupt=None):
         folder = self.root / "entries"
         no_links(folder)
         for path in sorted(folder.glob("knowledge_*.json")) if folder.exists() else ():
-            entry = self._metadata(path.stem)
+            try:
+                entry = self._metadata(path.stem)
+            except (OSError, ValueError) as error:
+                if corrupt is not None and allowed_workspace is None:
+                    corrupt.append({"entry_id": path.stem, "error": getattr(error, "code", "KNOWLEDGE_CORRUPT")})
+                continue
             if allowed_workspace and not allowed_workspace(Path(entry["workspace"])):
                 continue
             yield entry
@@ -135,6 +142,12 @@ class KnowledgeLibrary:
                     require(self._metadata(entry_id) == metadata and read_bytes(path, MAX_DOCUMENT) == body,
                             "KNOWLEDGE_CORRUPT", "Existing publication differs; it was not overwritten")
                 else:
+                    folder = self.root / "entries"
+                    existing = list(folder.glob("knowledge_*.json")) if folder.exists() else []
+                    used = sum(item.stat().st_size + item.with_suffix(".md").stat().st_size
+                               for item in existing if item.with_suffix(".md").is_file())
+                    require(len(existing) < MAX_ENTRIES and used + len(body) + len(canonical_bytes(metadata)) <= MAX_LIBRARY_BYTES,
+                            "KNOWLEDGE_LIMIT", "Knowledge library size limit reached; archive entries before publishing another")
                     # JSON is the commit marker. A crash after only MD leaves an
                     # unindexed artifact; identical retry safely finishes it.
                     if path.exists():
@@ -172,8 +185,8 @@ class KnowledgeLibrary:
                 "KNOWLEDGE_QUERY", "Use bounded literal keywords and an optional Domain")
         offset, limit = integer(offset, 0, 2**31 - 1, "offset"), integer(limit, 1, 100, "limit")
         terms = list(dict.fromkeys(query.casefold().split()))
-        scored = []
-        for entry in self._entries(allowed_workspace):
+        scored, corrupt = [], []
+        for entry in self._entries(allowed_workspace, corrupt):
             if domain is not None and entry["domain"] != domain:
                 continue
             searchable = " ".join([entry["title"], entry["when"], entry["description"], *entry["keywords"]]).casefold()
@@ -186,6 +199,8 @@ class KnowledgeLibrary:
         return {"items": [{key: entry[key] for key in ("entry_id", "title", "description", "domain", "keywords", "outcome")}
                           for _, _, entry in chosen], "total": len(scored),
                 "next_offset": offset + len(chosen) if offset + len(chosen) < len(scored) else None,
+                "corrupt": corrupt[:20], "corrupt_count": len(corrupt),
+                "corrupt_scope": "hidden_by_workspace_filter" if allowed_workspace is not None else "all_visible_entries",
                 "meaning": "advisory_document_discovery_not_current_evidence", "gate_eligible": False}
 
     def read(self, entry_id, *, allowed_workspace=None):

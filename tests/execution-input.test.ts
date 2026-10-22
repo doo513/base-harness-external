@@ -89,14 +89,14 @@ test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("after comparison ne
   } finally { calls.mockRestore() }
 })
 
-test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("generic capture keeps changed bytes and submitted executable changes observable", async () => {
+test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("generic capture denies submitted-file edits and keeps generated output observable", async () => {
   const { request } = await fixture()
   const result = await new SandboxManager().run({ ...request, command: "printf wrong > data; chmod +x data; printf new > output" })
   expect(result.exitCode).toBe(0)
-  expect(result.changes?.map(change => change.path)).toEqual(["data", "output"])
-  expect(new TextDecoder().decode(result.changes![0].after)).toBe("wrong")
-  expect(result.inputReceipt?.unchanged).toBe(false)
-  expect(result.inputReceipt?.changed_inputs).toEqual(["data"])
+  expect(result.changes?.map(change => change.path)).toEqual(["output"])
+  expect(new TextDecoder().decode(result.changes![0].after)).toBe("new")
+  expect(result.inputReceipt?.unchanged).toBe(true)
+  expect(result.inputReceipt?.changed_inputs).toEqual([])
 })
 
 test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("input binding uses two fresh copy reads, not another original read or a cached post-check", async () => {
@@ -123,4 +123,25 @@ test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("input binding uses 
     expect(reads.every(item => item.path !== join(request.workspace, "data"))).toBe(true)
     console.log("COPY_READ_COST: 2 fresh hash passes, 10 bytes total, 0 original hash reads; no cross-phase hash reuse")
   } finally { calls.mockRestore() }
+})
+
+test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("submitted inputs cannot be changed temporarily and restored", async () => {
+  const { request } = await fixture()
+  const result = await new SandboxManager().run({ ...request,
+    command: "chmod u+w data 2>/dev/null && printf wrong > data && cat data > observed && printf ready > data" })
+  expect(result.exitCode).not.toBe(0)
+  expect(result.inputReceipt?.unchanged).toBe(true)
+  expect(result.fileObservations).toBeUndefined()
+})
+
+test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")("protected fixtures record a transient mutation even after exact restoration", async () => {
+  const { request } = await fixture()
+  const result = await new SandboxManager().run({ ...request, fixtures: [{ path: "fixture.txt", text: "trusted" }],
+    command: "python3 -c 'import os; p=\"fixture.txt\"; s=os.stat(p); open(p,\"w\").write(\"changed\"); open(p,\"w\").write(\"trusted\"); os.utime(p, ns=(s.st_atime_ns,s.st_mtime_ns))'",
+    observedFiles: ["fixture.txt"], protectedFiles: ["fixture.txt"] })
+  expect(result.exitCode).toBe(0)
+  expect(result.inputReceipt?.unchanged).toBe(true)
+  expect(result.fileObservations?.[0].after.sha256).toBe(digest("trusted"))
+  expect(result.fileObservations?.[0].before).toEqual(result.fileObservations?.[0].after)
+  expect(result.protectedChanges).toEqual(["fixture.txt"])
 })

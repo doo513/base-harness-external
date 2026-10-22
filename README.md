@@ -242,6 +242,14 @@ Use `resolution.display_status`, `measurement_status`, `assessment_status`, and
 `gate_status` together. A requested completed disposition without measurement is
 reported as `closed_unverified`; it is not a passing verification or certification.
 
+`resume/status --view attention` joins current constraints, remaining budgets and
+bounded failure evidence in one Core read. The Skill's `--format attention` uses
+this view directly, avoiding separate state, Job and case requests. Evidence is
+read by the pinned verification Job ID, not by the latest history entry; explicit
+historical or diagnostic reads are labelled. Raw records remain accessible through
+digest-bound references. Core reports missing conditions; the Host decides whether
+to investigate, repair or close with documented uncertainty.
+
 Expectations and command execution checks may include an explicit `id` (for example
 `{"kind":"command","id":"behavior","argv":["python3","-m","unittest"]}`), producing check ID
 `domain.behavior`. Without it, Develop defines identity by file path/operator or
@@ -448,7 +456,7 @@ attempt. Queued cancellation is immediately cleaned up, while a running worker
 acknowledges cleanup later. Old cancellation/startup failures cannot clear a newer
 Job owner or rewrite a closed Run.
 
-`cleanup --run-id ID` previews capture recovery. `--apply` moves abandoned
+`cleanup --run-id ID --request-id ID` previews capture recovery. `--apply` moves abandoned
 `.submit_*` directories into recoverable `.quarantine_*` directories within that
 Run. Minimum age defaults to 3600 seconds (`--min-age-seconds`, minimum 60).
 An OS lock excludes live captures; unknown legacy ownership is reported and left
@@ -469,18 +477,33 @@ files. Command observations retain v5's environment/input-closure limitations.
 For each new command invocation, Worker now sends a pinned file inventory
 (path, SHA-256, size and executable bit) and an invocation scope digest to the
 common Sandbox transport. The namespace backend freshly checks its **actual
-copied execution directory before starting the command**, then compares the
-post-execution copy against that frozen pre-execution inventory. Worker admits
+copied execution directory before starting the command**, then bind-mounts each
+submitted input files read-only before dropping mount capabilities. Disposable
+output fixtures remain writable; fixtures declared for preservation are watched
+outside the Candidate process so a modify-and-restore attempt invalidates the
+observation instead of breaking legitimate output scenarios.
+It compares the post-execution copy against that frozen pre-execution inventory. Worker admits
 the resulting input receipt only for the same Run/Job/owner/Check/subject and
 materialized command; it is retained in measurement Sandbox provenance.
-Generated output files are allowed; changing or deleting a submitted file,
-including its executable bit, yields an execution error. Missing receipts cannot
+Generated output files are allowed; changing, deleting, temporarily replacing or
+remounting a submitted file is denied. Missing receipts cannot
 promote a zero process exit to a successful measurement. Ordinary and registered
 adapter commands follow the same input admission path.
 
-This does not make filesystem reads and database publication atomic, prevent
-every transient modification between scans, or protect against same-user
-rewriting of the verifier/state. Existing Worker pre/post/final checks and
+The namespace runner also isolates IPC, drops mount capabilities before executing
+the Candidate, exposes a minimal `/etc` and `/dev`, and monitors the whole process
+tree and disposable workspace. The external bridge permits 8 processes, 256 MiB
+aggregate RSS, 4,096 filesystem entries and a bounded output tree. At most two
+detached Workers run concurrently per state root. An operator-managed cgroup or
+filesystem quota remains the stronger resource boundary on shared machines.
+
+Persistent growth is bounded to 512 task stores, 128 Runs per task, 32 retained
+Candidates per Run and 1,024 reusable knowledge entries. Submission also fails
+closed when the state volume has less than 128 MiB free. Harness never deletes
+published Candidates automatically, so archival remains an operator action.
+
+This does not make filesystem reads and database publication atomic or protect
+against same-user rewriting of the verifier/state. Existing Worker pre/post/final checks and
 `finish` snapshot validation remain. The final Worker scan occurs after resource
 cleanup, without holding SQLite's writer lock; its lease remains active through
 publication. Historical records remain readable, but pinned implementation
@@ -491,8 +514,10 @@ a Harness process running inside WSL). Native-Windows-to-WSL Sandbox dispatch
 does not yet implement execution-side input admission and therefore fails closed
 as `not_run`, rather than silently returning an unbound success. Run `doctor
 --sandbox` in the environment that will actually execute Harness.
-For tamper-resistant certification, use a separately protected verifier/state/key
-and an independent consumer (for example CI); that protected mode is not included.
+For stronger isolation, run the socket service under a dedicated OS account with
+the state directory accessible only to that account and explicitly allow the
+agent UID. Tamper-resistant certification still needs a protected signing key and
+an independent consumer such as CI.
 
 Tests: `python3 -m pytest -q tests/test_external_harness.py`. On a machine allowing
 namespace sandboxing, run the actual execution check with

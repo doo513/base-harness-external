@@ -137,6 +137,12 @@ bash scripts/harness-tool records --run-id RUN_ID --kind checks --limit 5
 기본 요약이며 상세 상태는 `status --view full`로 요청합니다. 측정 본문은 records의
 measurements에 있고 Job 결과는 observation_refs만 담습니다. 큰 이력은 나누어 읽으세요.
 
+실패 원인 검토에는 `resume --run-id RUN_ID --view attention`을 사용합니다.
+Core가 현재 조건·남은 예산·실패 사례·원문 참조를 같은 시점에서 한 번에 반환합니다.
+`--attention-limit 20`으로 표시 수를 제한하고, 생략된 사례는 `case_query`의
+위치부터 records로 이어 읽습니다. 과거 Job을 지정하면 현재 결과와 구분해 표시합니다.
+Core는 부족한 조건을 알려주며, 재작업·추가 조사·부분 완료 결정은 모델이 합니다.
+
 입력 범위나 profile을 개정할 때 기존 보조 검사가 맞지 않으면
 `CHECK_SCOPE_CONFLICT`를 반환하고 기존 Run을 그대로 유지합니다. 보조 검사의
 비활성화 요청 JSON 예시는 다음과 같습니다.
@@ -168,8 +174,8 @@ Run 자체를 닫으려면 finish의 partial 또는 abandoned를 사용합니다
 비정상 종료로 남은 오래된 제출 임시 폴더는 먼저 조회할 수 있습니다.
 
 ```sh
-bash scripts/harness-tool cleanup --run-id RUN_ID
-bash scripts/harness-tool cleanup --run-id RUN_ID --apply
+bash scripts/harness-tool cleanup --run-id RUN_ID --request-id cleanup-preview-001
+bash scripts/harness-tool cleanup --run-id RUN_ID --request-id cleanup-apply-001 --apply
 ```
 
 기본 최소 나이는 1시간입니다. POSIX 파일 잠금으로 사용 중인 폴더를 건너뛰며,

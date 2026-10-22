@@ -12,6 +12,7 @@ import time
 import uuid
 
 from harness.common import canonical_bytes, canonical_hash
+from harness.json_codec import render_message
 from .errors import HarnessError, fields, integer, relative_path, require
 from .adapter_ports import AdapterUnavailable
 from .adapter_registry import builtin_adapter_registry, validate_binding
@@ -42,7 +43,7 @@ def command(check, registry=None):
 
 def validate_command(check, execution):
     """Validate/copy one materialization without invoking an adapter again."""
-    fields(execution, {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode", "fixtures", "observed_files"},
+    fields(execution, {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode", "fixtures", "observed_files", "protected_fixtures"},
            {"kind", "argv", "cwd", "timeout_seconds", "expectedExitCode"})
     require(execution["kind"] == "command" and type(execution["expectedExitCode"]) is int and 0 <= execution["expectedExitCode"] <= 255,
             "ADAPTER_COMMAND", "Adapter must describe a command with the supported exit condition")
@@ -54,6 +55,23 @@ def validate_command(check, execution):
     relative_path(execution["cwd"], directory=True)
     integer(execution["timeout_seconds"], 1, 120, "timeout_seconds")
     require(execution["timeout_seconds"] <= check.get("timeout_seconds", 30), "ADAPTER_COMMAND", "Adapter cannot increase the approved timeout")
+    fixture_items = execution.get("fixtures", [])
+    require(isinstance(fixture_items, list) and len(fixture_items) <= 32, "ADAPTER_COMMAND", "Invalid materialized fixtures")
+    fixtures = set()
+    for item in fixture_items:
+        fields(item, {"path", "text"}, {"path", "text"})
+        name = relative_path(item["path"])
+        require(isinstance(item["text"], str) and len(item["text"].encode("utf-8")) <= 64000
+                and name not in fixtures, "ADAPTER_COMMAND", "Invalid materialized fixture")
+        fixtures.add(name)
+    observed_items = execution.get("observed_files", [])
+    require(isinstance(observed_items, list) and len(observed_items) <= 32, "ADAPTER_COMMAND", "Invalid materialized observations")
+    observed = {relative_path(item) for item in observed_items}
+    require(len(observed) == len(observed_items), "ADAPTER_COMMAND", "Duplicate materialized observations")
+    protected = execution.get("protected_fixtures", [])
+    require(isinstance(protected, list) and len(protected) <= 32 and len(set(protected)) == len(protected)
+            and all(isinstance(item, str) and relative_path(item) in fixtures and item in observed for item in protected),
+            "ADAPTER_COMMAND", "Protected fixture paths must be unique observed fixtures")
     return copy.deepcopy(execution)
 
 
@@ -185,7 +203,7 @@ def execute(check, payload, state_root, abort, remaining, binding, on_case, regi
         environment["XDG_STATE_HOME"] = str(Path(state_root) / "sandbox-state")
         child = subprocess.Popen([bun, "run", str(bridge)], cwd=bridge.parent, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, env=environment, start_new_session=True)
-        child.stdin.write(canonical_bytes(request))
+        child.stdin.write(render_message(request))
         child.stdin.close()
         messages = queue.Queue(maxsize=MAX_PENDING_EVENTS)
         shutdown = threading.Event()

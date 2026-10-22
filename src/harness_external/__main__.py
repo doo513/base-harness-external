@@ -6,10 +6,10 @@ from pathlib import Path
 import sys
 import sqlite3
 
-from harness.json_codec import MeasurementProtocolError, decode
-from harness.common import canonical_bytes
+from harness.json_codec import MeasurementProtocolError, parse_message, render_message
 from . import API_VERSION, ASSURANCE
 from .errors import HarnessError
+from .artifact_io import read_bytes
 
 
 JSON_HELP = "JSON file path, '-' for stdin, or 'json:{...}' for inline JSON"
@@ -26,14 +26,15 @@ def load_json(path: str):
         if path.lstrip().startswith(("{", "[")):
             raise HarnessError("JSON_INPUT_SOURCE", "Inline JSON requires a json: prefix; alternatively use '-' for stdin or a file path")
         try:
-            with Path(path).open("rb") as stream:
-                data = stream.read(256 * 1024 + 1)
-        except OSError as error:
+            data = read_bytes(Path(path), 256 * 1024)
+        except (OSError, HarnessError) as error:
+            if isinstance(error, HarnessError) and error.code == "ARTIFACT_LIMIT":
+                raise HarnessError("INPUT_TOO_LARGE", "JSON input exceeds 256 KiB") from error
             raise HarnessError("JSON_FILE_ERROR", "Cannot read JSON file; use a file path, '-' for stdin, or json: followed by JSON") from error
     if len(data) > 256 * 1024:
         raise HarnessError("INPUT_TOO_LARGE", "JSON input exceeds 256 KiB")
     try:
-        return decode(data.decode("utf-8"))
+        return parse_message(data)
     except (ValueError, UnicodeError) as error:
         raise HarnessError("JSON_INVALID", "Input must be UTF-8 JSON with unique keys and finite numbers") from error
 
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     server = commands.add_parser("serve", help="serve existing Harness requests outside a restricted Host; no MCP or model runtime")
     server.add_argument("--socket", required=True, help="Unix socket in a private runtime directory, outside workspaces")
     server.add_argument("--workspace-root", action="append", required=True, help="explicit allowed workspace root; repeat for multiple roots")
+    server.add_argument("--client-uid", action="append", type=int, help="allowed local client UID; repeat when the server uses a protected service account")
     invoked = commands.add_parser("invoke", help="one guarded caller envelope; no separate resume preflight")
     invoked.add_argument("--request", required=True, help=JSON_HELP)
     start = commands.add_parser("start")
@@ -101,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         if name == "status":
             cmd.add_argument("--job-id")
             cmd.add_argument("--check-workspace", action="store_true")
-            cmd.add_argument("--view", choices=("summary", "compact", "full"), default="summary", help="compact for polling; summary is compatible; full includes history")
+            cmd.add_argument("--view", choices=("summary", "compact", "full", "attention"), default="summary", help="attention joins current issues and evidence; compact for polling; full includes history")
+            cmd.add_argument("--attention-limit", type=int, default=20)
         elif name == "verify":
             cmd.add_argument("--compare-baseline", action="store_true", help="measure the pinned original and current Candidate with identical checks")
             cmd.add_argument("--expected-candidate-hash", help="reject a concurrent or superseding submission")
@@ -121,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--outcomes", help=JSON_HELP + "; cases only: observed outcome strings to include")
             cmd.add_argument("--subject-role", choices=("candidate", "baseline"), help="cases only: filter the measured subject")
         elif name == "resume":
-            cmd.add_argument("--view", choices=("summary", "compact"), default="summary")
+            cmd.add_argument("--view", choices=("summary", "compact", "attention"), default="summary")
+            cmd.add_argument("--attention-limit", type=int, default=20)
             cmd.add_argument("--analysis-selection", help=JSON_HELP + "; select stored Domain advice without revising the Run")
         elif name == "cleanup":
             cmd.add_argument("--apply", action="store_true", help="quarantine abandoned captures; default is preview")
@@ -134,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument("--after", help="opaque cursor from the last complete context transfer")
             cmd.add_argument("--page", help="opaque continuation for the same immutable snapshot")
             cmd.add_argument("--limit", type=int, default=20)
-        if name not in {"status", "resume", "records", "cleanup", "context"}:
+        if name not in {"status", "resume", "records", "context"}:
             cmd.add_argument("--request-id", required=True, help="stable idempotency key; do not reuse for a different action")
     start.add_argument("--request-id", required=True)
     args = parser.parse_args(argv)
@@ -166,11 +170,11 @@ def main(argv: list[str] | None = None) -> int:
                     current = selected.store.run(connection, args.run_id)
                     envelope["context"] = {"workspace": current["workspace"], "domain": current["contract"]["domain_id"]}
             result = invoke(api, envelope)
-            print(canonical_bytes({"ok": True, **result}).decode("utf-8"))
+            print(render_message({"ok": True, **result}).decode("utf-8"))
             return 0
         if args.command == "serve":
             from .local_transport import serve
-            serve(api, args.socket, args.workspace_root)
+            serve(api, args.socket, args.workspace_root, peer_uids=set(args.client_uid) if args.client_uid else None)
             return 0
         if args.command == "describe":
             result = api.describe(args.domain_id, args.adapter_id, operation=args.operation)
@@ -191,13 +195,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "list-runs":
             result = api.list_runs(offset=args.offset, limit=args.limit)
         elif args.command == "resume":
-            result = api.resume(args.run_id, view=args.view, analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None)
+            result = api.resume(args.run_id, view=args.view, analysis_selection=load_json(args.analysis_selection) if args.analysis_selection else None,
+                                attention_limit=args.attention_limit)
         elif args.command == "records":
             result = api.records(args.run_id, args.kind, offset=args.offset, limit=args.limit, job_id=args.job_id,
                                  view=args.view, detail=load_json(args.detail) if args.detail else None,
                                  outcomes=load_json(args.outcomes) if args.outcomes else None, subject_role=args.subject_role)
         elif args.command == "cleanup":
-            result = api.cleanup(args.run_id, apply=args.apply, min_age_seconds=args.min_age_seconds)
+            result = api.cleanup(args.run_id, args.request_id, apply=args.apply, min_age_seconds=args.min_age_seconds)
         elif args.command == "cancel":
             result = api.cancel(args.run_id, args.job_id, args.request_id)
         elif args.command == "retire-check":
@@ -230,14 +235,14 @@ def main(argv: list[str] | None = None) -> int:
             result = api.compare(args.run_id, args.request_id, reference=args.reference,
                                  expected_candidate_hash=args.expected_candidate_hash, parameters=load_json(args.parameters))
         elif args.command == "status":
-            result = api.status(args.run_id, args.job_id, check_workspace=args.check_workspace, view=args.view)
+            result = api.status(args.run_id, args.job_id, check_workspace=args.check_workspace, view=args.view, attention_limit=args.attention_limit)
         else:
             result = api.finish(args.run_id, args.request_id, outcome=args.outcome, summary=args.summary,
                                 assessment=load_json(args.assessment) if args.assessment else None)
-        print(canonical_bytes({"ok": True, **result}).decode())
+        print(render_message({"ok": True, **result}).decode("utf-8"))
         return 2 if args.command == "doctor" and not result["healthy"] else 0
-    except (HarnessError, MeasurementProtocolError, OSError, ValueError, sqlite3.Error) as error:
-        print(canonical_bytes({"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
+    except (HarnessError, MeasurementProtocolError, OSError, ValueError, RecursionError, sqlite3.Error) as error:
+        print(render_message({"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
                                "error": error.as_dict() if isinstance(error, HarnessError) else
                                         {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]}}).decode())
         return 2

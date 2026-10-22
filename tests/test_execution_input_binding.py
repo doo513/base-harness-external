@@ -215,11 +215,27 @@ def test_live_copy_changes_measured_against_frozen_preexecution_inventory(tmp_pa
     if mutation == "outputs_only":
         assert result["status"] == "completed" and observed["unchanged"]
     else:
-        assert result["status"] == "error" and observed["unchanged"] is False
-        assert observed["changed_inputs"] == ["한글😀.txt"]
-        assert result["capture"]["error"]["code"] == "TEST_MODIFIED_INPUT"
+        assert result["status"] == "completed" and observed["unchanged"] is True
+        assert observed["changed_inputs"] == []
+        assert result["capture"]["exitCode"] != 0
     assert (root / "한글😀.txt").read_text(encoding="utf-8") == "ready"
     assert not (root / "generated").exists()
+
+
+@pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="real protected fixture observation")
+def test_live_external_bridge_rejects_fixture_mutation_restored_before_final_scan(tmp_path):
+    root = tmp_path / "payload"
+    root.mkdir()
+    (root / "app.py").write_text("pass\n", encoding="utf-8")
+    pinned = inputs(root)
+    command = {"argv": ["python3", "-c", "import os; p='fixture.txt'; s=os.stat(p); open(p,'w').write('changed'); open(p,'w').write('trusted'); os.utime(p, ns=(s.st_atime_ns,s.st_mtime_ns))"],
+               "cwd": ".", "timeout_seconds": 10, "fixtures": [{"path": "fixture.txt", "text": "trusted"}],
+               "observed_files": ["fixture.txt"], "protected_fixtures": ["fixture.txt"]}
+    result = worker.execute_sandbox(command, root, tmp_path / "state", threading.Event(), 20, pinned)
+    assert result["status"] == "error"
+    assert result["capture"]["error"]["code"] == "TEST_MODIFIED_FIXTURE"
+    assert result["protected_changes"] == ["fixture.txt"]
+    assert result["file_observations"][0]["before"] == result["file_observations"][0]["after"]
 
 
 @pytest.mark.skipif(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") != "1", reason="persisted actual execution input provenance")

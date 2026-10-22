@@ -7,14 +7,14 @@ import sys
 import tempfile
 import threading
 
-from .worker import execute_sandbox
+from .worker import execute_sandbox, trusted_bun
 from .execution_inputs import make_binding
 
 
 def doctor(store, *, sandbox=False):
     from .identity import deployment_identity
     bridge = Path(__file__).resolve().parents[2] / "runtime/script/external-harness-sandbox.ts"
-    bun = shutil.which(os.environ.get("BUN", "bun"))
+    bun = trusted_bun()
     with store.transaction() as connection:
         json_available = connection.execute("SELECT json_extract('{\"ok\":1}', '$.ok')").fetchone()[0] == 1
     result = {"capabilities": {"invoke": True, "context": "harness-context-v1", "storage": "run-store-v2"},

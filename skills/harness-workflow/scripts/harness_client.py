@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import socket
+import stat
 import sys
 import tempfile
 import time
@@ -21,7 +22,7 @@ import time
 MAX_INPUT = 256 * 1024
 MAX_OUTPUT = 8 * 1024 * 1024
 API_VERSION = "external-harness-v2"
-MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "finish", "checkpoint", "knowledge-publish"}
+MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "cleanup", "finish", "checkpoint", "knowledge-publish"}
 # Generated Core syntax, not another set of Domain/policy rules.
 CATALOG = json.loads(Path(__file__).with_name("operation_catalog.json").read_text(encoding="utf-8"))
 OPTIONS = CATALOG["options"]
@@ -126,9 +127,6 @@ def expand_context(packet):
     return restore_item(item, translated)
 
 
-ATTENTION_OUTCOMES = ["failed", "error", "skipped", "xfail", "xpass", "not_selected", "not_run", "incomplete"]
-
-
 def compact_call_result(operation, result):
     """Drop repeated implementation manifests, never criteria or uncertainty."""
     if not result.get("ok"):
@@ -158,96 +156,6 @@ def compact_call_result(operation, result):
     return common
 
 
-def attention_report(current, job, cases, *, limit=20):
-    """Project observed exceptions, never infer root causes or goal satisfaction."""
-    result = (job or {}).get("result") or {}
-    linked = {}
-    requirements = (result.get("requirement_observations") or {}).get("requirements", [])
-    for requirement in requirements:
-        for case in requirement["scenarios"]:
-            linked.setdefault((case["check_id"], case["case_id"]), []).append(requirement["requirement_id"])
-    declared_scope = current.get("verification_scope") or {}
-    items = [{"kind": "verification_gap", **copy.deepcopy(gap)} for gap in declared_scope.get("gaps", [])]
-    for record in cases.get("items", []):
-        # Baseline records remain accessible but cannot become Candidate issues.
-        if record.get("subject_role") != "candidate":
-            continue
-        case = record["case"]
-        errors = []
-        for index, phase in enumerate(case["phases"]):
-            if isinstance(phase, dict) and isinstance(phase.get("message"), str) and phase["message"]:
-                message = phase["message"]
-                errors.append({"phase": phase.get("phase"), "outcome": phase.get("outcome"), "excerpt": message[:600],
-                    "truncated": len(message) > 600, "detail": {"kind": "cases", "detail": {
-                        "record_id": record["observation_id"], "record_digest": digest(record),
-                        "path": ["case", "phases", index, "message"], "sha256": digest(message)}}})
-            elif phase:
-                errors.append({"phase": phase.get("phase") if isinstance(phase, dict) else index,
-                    "detail": {"kind": "cases", "detail": {"record_id": record["observation_id"], "record_digest": digest(record),
-                        "path": ["case", "phases", index], "sha256": digest(phase)}}})
-        items.append({"kind": "case", "status": case["outcome"], "check_id": record["check_id"],
-                      "observation_boundary": record.get("observation_boundary", "unknown"), "trust": record.get("trust", "unknown"),
-                      "case_id": case["case_id"], "requirement_ids": linked.get((record["check_id"], case["case_id"]), []),
-                      "observation_id": record["observation_id"], "executed": case["executed"],
-                      "finished": case["finished"], "errors": errors})
-    seen = {(item.get("check_id"), item.get("case_id")) for item in items}
-    for requirement in requirements:
-        for case in requirement["scenarios"]:
-            identity = (case["check_id"], case["case_id"])
-            if case["status"] != "passed" and identity not in seen:
-                seen.add(identity)
-                items.append({"kind": "declared_scenario", "status": case["status"], "check_id": case["check_id"],
-                              "case_id": case["case_id"], "requirement_ids": linked[identity],
-                              "executed": case["executed"], "observation_id": case["observation_id"]})
-    scope = result.get("measurement_scope") or {}
-    for check in scope.get("observations", []):
-        if check.get("comparison_status") != "passed":
-            items.append({"kind": "check", **{key: check.get(key) for key in
-                ("check_id", "comparison_status", "execution_status", "observation_id", "case_summary")}})
-    if job and job.get("error"):
-        items.append({"kind": "job_error", "error": job["error"]})
-    returned = items[:limit]
-    complete = (bool(job and job["status"] not in {"queued", "running"}) and cases.get("next_offset") is None
-                and len(returned) == len(items) and declared_scope.get("omitted_gap_count", 0) == 0)
-    payload = {"api_version": current["api_version"], "ok": True, "schema_version": "harness-client-attention-v1",
-        "assurance": current["assurance"], "ready": current["ready"],
-        "run_id": current.get("run_id") or current.get("run", {}).get("run_id"),
-        **{key: current[key] for key in ("run", "intent_ref", "policy_ref", "candidate", "gates", "assessment", "limits", "usage", "details", "operation_constraints") if key in current},
-        "measurement": current.get("measurement"),
-        "workspace_constraints": current.get("workspace_constraints", {"status": "not_queried"}),
-        "diagnostic": current.get("diagnostic", {"status": "not_queried"}),
-        "verification_scope": {key: value for key, value in declared_scope.items() if key != "gaps"},
-        "attention": returned, "attention_page_complete": complete, "listed_attention_count": len(returned),
-        "total_known_attention_count": len(items), "omitted_attention_count": len(items) - len(returned),
-        "case_query": {"job_id": (job or {}).get("job_id"), "outcomes": ATTENTION_OUTCOMES,
-                       "total": cases.get("total", 0), "next_offset": cases.get("next_offset")},
-        "selected_job": {key: job.get(key) for key in ("job_id", "status", "candidate_hash", "check_set_hash", "completed_checks", "total_checks")} if job else None,
-        "requirement_count": len(requirements),
-        "framework_reported_requirement_ids": [item["requirement_id"] for item in requirements if item.get("status") == "framework_reported_only"],
-        "known_gaps": [{"requirement_id": item["requirement_id"], "known_gap_ids": item["known_gap_ids"]} for item in requirements if item["known_gap_ids"]]}
-    if job:
-        payload["selected_job"]["purpose"] = job.get("purpose", "verification")
-        if result.get("diagnostic_comparison") is not None:
-            payload["selected_job"]["diagnostic_comparison"] = result["diagnostic_comparison"]
-        payload["selected_job"]["result_status"] = result.get("status")
-        measured = current.get("measurement")
-        payload["selected_job"]["is_current_verification"] = measured.get("job_id") == job["job_id"] if measured is not None else None
-        whole = digest(job)
-        payload["job_detail"] = {"kind": "jobs", "detail": {"record_id": job["job_id"], "record_digest": whole, "path": [], "sha256": whole}}
-        payload["selected_job"]["measurement_scope"] = {key: value for key, value in scope.items() if key != "observations"}
-    if "wait_status" in current:
-        payload["wait_status"] = current["wait_status"]
-    if "current_workspace_matches_submitted_files" in current:
-        payload["current_workspace_matches_submitted_files"] = current["current_workspace_matches_submitted_files"]
-    payload["not_queried"] = [key for key in ("gates", "assessment", "limits", "usage") if key not in current]
-    if "run" in payload:
-        payload["run"] = {key: value for key, value in payload["run"].items() if key != "goal"}
-    if payload["measurement"] is not None:
-        measurement = payload["measurement"]
-        payload["measurement"] = {key: value for key, value in measurement.items() if key not in {"measurement_scope", "baseline_comparison"}}
-        payload["measurement"]["measurement_scope"] = {key: value for key, value in measurement.get("measurement_scope", {}).items() if key != "observations"}
-    payload["context_operation"] = {"operation": "context", "arguments": {}}
-    return payload
 
 
 def read_json(source):
@@ -257,8 +165,7 @@ def read_json(source):
         raw = source[5:].encode("utf-8")
     else:
         require(not source.lstrip().startswith(("{", "[")), "JSON_SOURCE", "Use a file path, '-', or the json: prefix.")
-        with Path(source).open("rb") as stream:
-            raw = stream.read(MAX_INPUT + 1)
+        raw = read_regular_file(Path(source), MAX_INPUT)
     require(len(raw) <= MAX_INPUT, "INPUT_TOO_LARGE", "JSON input exceeds 256 KiB.")
     return decode(raw.decode("utf-8"))
 
@@ -313,13 +220,12 @@ def configure(path, repo, state, ephemeral=False, policy_root=None, server_socke
                               "state_lifetime": "ephemeral" if ephemeral else "persistent",
                               **({"policy_root": policy_root} if policy_root is not None else {}),
                               **({"server_socket": server_socket} if server_socket is not None else {})})
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        require(path.parent.stat().st_uid == os.getuid(), "CONFIG_PERMISSIONS", "Config directory must be owned by the current user")
+        path.parent.chmod(0o700)
     # Installation never replaces an existing caller's configuration.
-    with path.open("x", encoding="utf-8") as stream:
-        json.dump(config, stream, ensure_ascii=False, indent=2)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
+    write_new_json(path, config, indent=2)
     return {"ok": True, "config_path": str(path.absolute()), "config": config}
 
 
@@ -559,7 +465,7 @@ class Client:
         request_id = request.get("request_id")
         require((isinstance(request_id, str) and 0 < len(request_id) <= 128 and "\x00" not in request_id)
                 if operation in MUTATIONS else request_id is None, "REQUEST_ID_REQUIRED",
-                "Mutations need an explicit stable request_id; reads/cleanup do not accept one. Replay identical requests with the same ID.")
+                "Mutations need an explicit stable request_id; reads do not accept one. Replay identical requests with the same ID.")
         if operation == "start":
             arguments = {**arguments, "workspace": str(absolute_path(arguments["workspace"]))}
         if "run_id" in OPTIONS[operation]:
@@ -810,25 +716,22 @@ class Client:
             return response
         run_id = response.get("run_id") or response.get("run", {}).get("run_id")
         require(run_id == binding["run_id"], "RUN_CONTEXT_MISMATCH", "Response belongs to another Run")
+        if response.get("view") == "attention":
+            require(response.get("schema_version") == "harness-attention-v1", "API_MISMATCH", "Unknown Core attention view")
+            require(response.get("attention_limit") == limit, "ATTENTION_ARGUMENTS",
+                    "This response used a different attention_limit; use the matching limit or request a new Core view")
+            return response
         require(response.get("view") in {"summary", "compact"}, "ATTENTION_ARGUMENTS", "Attention uses a summary or compact read response")
-        job = response.get("job")
-        if job is None:
-            wanted = response.get("run", {}).get("active_job") or response.get("measurement", {}).get("job_id")
-            job = next((item for item in response.get("recent_jobs", []) if item["job_id"] == wanted), None)
-        if job and "requirement_count" in (job.get("result") or {}):
-            full = self.call(self.make_request("status", {"job_id": job["job_id"], "view": "summary"}, binding=binding)["request"])
-            require(full.get("ok"), full.get("error", {}).get("code", "ATTENTION_FAILED"), full.get("error", {}).get("message", "Job lookup failed"))
-            job = full["job"]
-        cases = {"items": [], "total": 0, "next_offset": None}
-        result = (job or {}).get("result") or {}
-        scopes = (result.get("measurement_scope") or {}).get("observations", [])
-        case_checks = [item["case_summary"] for item in scopes if item.get("case_summary") is not None]
-        nonpassing = any(count for summary in case_checks for state, count in summary.get("outcomes", {}).items() if state != "passed")
-        if job and case_checks and (nonpassing or result.get("status") != "passed"):
-            cases = self.call(self.make_request("records", {"kind": "cases", "job_id": job["job_id"],
-                "outcomes": ATTENTION_OUTCOMES, "subject_role": "candidate", "limit": limit}, binding=binding)["request"])
-            require(cases.get("ok"), cases.get("error", {}).get("code", "ATTENTION_FAILED"), cases.get("error", {}).get("message", "Case lookup failed"))
-        return attention_report(response, job, cases, limit=limit)
+        arguments = {"view": "attention", "attention_limit": limit}
+        if response.get("job"):
+            arguments["job_id"] = response["job"]["job_id"]
+        if "current_workspace_matches_submitted_files" in response:
+            arguments["check_workspace"] = True
+        result = self.call(self.make_request("status", arguments, binding=binding)["request"])
+        require(result.get("ok"), result.get("error", {}).get("code", "ATTENTION_FAILED"), result.get("error", {}).get("message", "Core attention lookup failed"))
+        if "wait_status" in response:
+            result["wait_status"] = response["wait_status"]
+        return result
 
     def find(self, workspace, domain, goal=None, max_pages=10, *, task_id=None):
         workspace = str(absolute_path(workspace))
@@ -869,12 +772,44 @@ def action_key(binding, value, *, start_scope=None):
     return "caller-" + hashlib.sha256((scope + "\x00" + value).encode()).hexdigest()
 
 
-def write_new_json(path, value):
-    with Path(path).open("x", encoding="utf-8") as stream:
-        json.dump(value, stream, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+def fsync_parent(path):
+    if os.name != "posix":
+        return
+    descriptor = os.open(Path(path).parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def read_regular_file(path, maximum):
+    path = Path(path)
+    require(not any(item.is_symlink() for item in (path, *path.parents)), "FILE_PATH", "Input path contains a symbolic link")
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size <= maximum,
+                "FILE_TYPE", "Input must be a bounded single-link regular file")
+        body = stream.read(maximum + 1)
+        after = os.fstat(stream.fileno())
+    require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns),
+            "FILE_CHANGED", "Input file changed while reading")
+    require(len(body) <= maximum, "INPUT_TOO_LARGE", "Input file exceeds its byte limit")
+    return body
+
+
+def write_new_json(path, value, *, indent=None):
+    path = Path(path)
+    require(not any(item.is_symlink() for item in (path, *path.parents)), "OUTPUT_PATH", "Output path contains a symbolic link")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(value, stream, ensure_ascii=False, allow_nan=False,
+                  **({"indent": indent} if indent is not None else {"separators": (",", ":")}))
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
+    fsync_parent(path)
 
 
 def append_cost(path, event):
@@ -927,9 +862,7 @@ def source_arguments(operation, arguments, *, goal_file=None, source_files=()):
     result = copy.deepcopy(arguments)
     def original(filename, maximum):
         path = absolute_path(str(filename))
-        with path.open("rb") as stream:
-            data = stream.read(maximum + 1)
-        require(len(data) <= maximum, "SOURCE_LIMIT", "Original source exceeds its size limit")
+        data = read_regular_file(path, maximum)
         return data.decode("utf-8")
     if goal_file:
         require("goal" not in result, "SOURCE_CONFLICT", "Use goal or --goal-file, not both")
@@ -1010,9 +943,7 @@ def field_arguments(client, operation, arguments, *, binding=None, texts=(), tex
         for entry in entries:
             keys, value = pair(entry)
             if mode == "file":
-                with Path(value).open("rb") as stream:
-                    raw = stream.read(MAX_INPUT + 1)
-                require(len(raw) <= MAX_INPUT, "INPUT_TOO_LARGE", "Text field exceeds request limit")
+                raw = read_regular_file(Path(value), MAX_INPUT)
                 value = raw.decode("utf-8")  # preserve CRLF and all other text bytes
             elif mode == "json":
                 value = decode(value)
@@ -1188,6 +1119,11 @@ def main(argv=None):
                 if args.format == "compact" and operation in {"status", "resume"}:
                     require(arguments.get("view", "compact") == "compact", "CLI_ARGUMENTS", "--format compact conflicts with the explicit view")
                     arguments["view"] = "compact"
+                if args.format == "attention" and operation in {"status", "resume"} and saved is None:
+                    require(arguments.get("view", "attention") == "attention", "CLI_ARGUMENTS", "--format attention conflicts with the explicit view")
+                    require("attention_limit" not in arguments or arguments["attention_limit"] == args.attention_limit,
+                            "CLI_ARGUMENTS", "Conflicting attention limits")
+                    arguments.update(view="attention", attention_limit=args.attention_limit)
                 require(args.binding_output is None or operation == "start", "BINDING_OPERATION", "Only start can save a new binding")
                 if args.resolve_detail:
                     detail_arguments = {key: value for key, value in arguments.items() if key != "run_id"}

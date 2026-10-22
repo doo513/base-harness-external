@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 
 from harness.json_codec import decode
 from harness.common import canonical_bytes, canonical_hash
@@ -17,6 +18,11 @@ from .snapshots import no_links
 from . import journal
 
 _validated_results = ContextVar("harness_validated_results", default=None)
+STORE_SCHEMA_VERSION = 3
+LEGACY_TABLES = {"runs", "jobs", "job_heartbeats", "requests", "measurements", "run_heads", "run_records", "run_events", "case_observations"}
+REQUIRED_TABLES = LEGACY_TABLES | {"store_schema", "task_identity"}
+REQUIRED_INDEXES = {"jobs_run", "measurements_run", "measurements_job", "measurements_check_subject",
+                    "case_observations_run_job", "case_observations_outcome", "run_records_kind", "run_records_sequence"}
 
 
 class StopRun(HarnessError):
@@ -107,17 +113,39 @@ class Store:
         no_links(self.root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         require(self.root.is_dir(), "STATE_DIRECTORY", "State root must be a directory")
+        if os.name == "posix":
+            root_info = self.root.stat()
+            require(root_info.st_uid == os.getuid(), "STATE_PERMISSIONS", "State root must be owned by the Harness user")
+            if stat.S_IMODE(root_info.st_mode) != 0o700:
+                self.root.chmod(0o700)
         db = self.database
         no_links(db)
+        require(not db.exists() or db.is_file(), "STATE_PERMISSIONS", "State database path must be a regular file")
         if db.is_file():
-            with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as existing:
-                names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master")}
-                if {"runs", "jobs", "job_heartbeats", "requests", "measurements", "measurements_job", "measurements_check_subject", "run_heads", "run_records", "run_events", "case_observations", "case_observations_outcome"} <= names and existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
+            if os.name == "posix":
+                db_info = db.stat()
+                require(db_info.st_uid == os.getuid() and stat.S_ISREG(db_info.st_mode),
+                        "STATE_PERMISSIONS", "State database must be a regular file owned by the Harness user")
+                if stat.S_IMODE(db_info.st_mode) != 0o600:
+                    db.chmod(0o600)
+            with sqlite3.connect(db) as existing:
+                names = {row[0] for row in existing.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                indexes = {row[0] for row in existing.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+                require(existing.execute("PRAGMA journal_mode").fetchone()[0] == "wal", "STATE_SCHEMA_CORRUPT", "State database must use WAL")
+                if "store_schema" in names:
+                    row = existing.execute("SELECT version FROM store_schema WHERE singleton=1").fetchone()
+                    require(REQUIRED_TABLES <= names and REQUIRED_INDEXES <= indexes and row == (STORE_SCHEMA_VERSION,),
+                            "STATE_SCHEMA_CORRUPT", "State database schema is incomplete or unsupported")
                     self._initialized = True
                     return
+                require(LEGACY_TABLES <= names and REQUIRED_INDEXES <= indexes,
+                        "STATE_SCHEMA_CORRUPT", "Legacy state database is incomplete; do not repair it implicitly")
         with sqlite3.connect(db) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript("""
+                CREATE TABLE IF NOT EXISTS store_schema(singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1), task_id TEXT NOT NULL,
+                    workspace TEXT NOT NULL, domain TEXT NOT NULL, start_request_id TEXT NOT NULL, manifest_hash TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS jobs(job_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS jobs_run ON jobs(run_id);
@@ -137,6 +165,8 @@ class Store:
                     run_id,job_id,json_extract(data,'$.subject_role'),json_extract(data,'$.case.outcome'));
             """)
             connection.executescript(journal.DDL)
+            connection.execute("INSERT INTO store_schema VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET version=excluded.version",
+                               (STORE_SCHEMA_VERSION,))
         db.chmod(0o600)
         self._initialized = True
 

@@ -8,6 +8,7 @@ import time
 import uuid
 import copy
 import tempfile
+import shutil
 from contextlib import contextmanager
 
 from harness.common import canonical_bytes, canonical_hash, redact
@@ -285,6 +286,8 @@ class Harness:
             prior = self.store.replay(connection, "start", request_id, fingerprint)
             if prior:
                 return prior
+            run_count = connection.execute("SELECT (SELECT count(*) FROM runs)+(SELECT count(*) FROM run_heads)").fetchone()[0]
+            require(run_count < 128, "RUN_LIMIT", "Task Run limit reached; archive the task before creating another Run")
             selected = self.policies.select(domain_id, policy_id)
             mode = requested_mode or ("acceptance" if selected else "strict")
             require(mode != "strict" or not (required_checks or deferred_checks), "INVALID_PARAMETERS", "Strict mode already gates all checks")
@@ -330,6 +333,8 @@ class Harness:
             preparation_view = self._analysis_view(domain_id, canonical_preparation, analysis_selection)
             bound = limits(budget)
         require(not capture_baseline or bool(contract["inputs"]), "NEEDS_INPUT", "Declare baseline input files before capturing the original")
+        require(shutil.disk_usage(self.store.root).free >= 128 * 1024 * 1024,
+                "STATE_SPACE_LOW", "Harness state volume has less than 128 MiB free")
         # File I/O must not block checkpoints in unrelated Runs. Only publish the
         # captured files while committing the idempotent start request.
         with tempfile.TemporaryDirectory(prefix=".start_", dir=self.store.root) as temporary, maintenance.capture_lease(temporary):
@@ -396,6 +401,9 @@ class Harness:
                         target = directory / snapshot["candidate_id"]
                         os.rename(staging / snapshot["candidate_id"], target)
                         published.append(target)
+                    if published:
+                        from .artifact_io import fsync_directory
+                        fsync_directory(directory)
                     self.store.save_run(connection, run)
                     self.store.remember(connection, "start", request_id, fingerprint, result)
             except BaseException:
@@ -438,7 +446,7 @@ class Harness:
             if structured is not None:
                 # No coercion, guessed defaults or silent capture truncation.
                 # The fixed container defaults are representation only.
-                item.update(note=observation["note"], payload_schema="caller-payload-v1", payload=structured,
+                item.update(payload_schema="caller-payload-v1", payload=structured,
                             run_id=run_id, interpretation_ref=run["interpretations"][-1]["ref"])
             run["observations"].append(item)
             if observation.get("kind"):
@@ -712,6 +720,10 @@ class Harness:
             require(not run["active_job"], "VERIFICATION_ACTIVE", "Wait for verification or finish as abandoned")
             expected_revision = run["revision"]
             directory = self.store.directory(run_id)
+            candidate_count = sum(1 for path in directory.glob("candidate_*") if path.is_dir())
+            require(candidate_count < 32, "CANDIDATE_LIMIT", "Run Candidate retention limit reached; start an explicit continuation after archiving")
+            require(shutil.disk_usage(self.store.root).free >= 128 * 1024 * 1024,
+                    "STATE_SPACE_LOW", "Harness state volume has less than 128 MiB free")
         # Slow file reads/copies must not hold the store's global writer lock.
         # Staging is owned by this call and cannot be observed by a verifier.
         with tempfile.TemporaryDirectory(prefix=".submit_", dir=directory) as staging, maintenance.capture_lease(staging):
@@ -736,6 +748,8 @@ class Harness:
                     target = directory / identifier(candidate["candidate_id"], "candidate")
                     os.rename(Path(staging) / candidate["candidate_id"], target)
                     published = target
+                    from .artifact_io import fsync_directory
+                    fsync_directory(directory)
                     current.update(candidate=candidate, generation=current["generation"] + 1,
                                    phase="submitted", verification={"status": "not_run"})
                     if current.get("workspace_constraints"):
@@ -877,7 +891,7 @@ class Harness:
         from .worker import spawn_worker
         try:
             spawn_worker(self.store.root, job_id)
-        except OSError:
+        except (OSError, HarnessError, ValueError):
             with self.store.transaction() as connection:
                 job = self.store.job(connection, job_id)
                 run = self.store.run(connection, run_id)
@@ -916,8 +930,8 @@ class Harness:
     def list_runs(self, *, offset=0, limit=20):
         return response(**queries.list_runs(self, offset=offset, limit=limit))
 
-    def resume(self, run_id, *, view="summary", analysis_selection=None):
-        return response(**queries.resume(self, run_id, view=view, analysis_selection=analysis_selection))
+    def resume(self, run_id, *, view="summary", analysis_selection=None, attention_limit=20):
+        return response(**queries.resume(self, run_id, view=view, analysis_selection=analysis_selection, attention_limit=attention_limit))
 
     def context(self, run_id, *, after=None, page=None, limit=20):
         from .context import read
@@ -927,16 +941,20 @@ class Harness:
         return response(**queries.records(self, run_id, kind, offset=offset, limit=limit, job_id=job_id, view=view, detail=detail,
                                         outcomes=outcomes, subject_role=subject_role))
 
-    def cleanup(self, run_id, *, apply=False, min_age_seconds=3600):
-        return response(**maintenance.cleanup(self.store, run_id, apply=apply, min_age_seconds=min_age_seconds))
+    def cleanup(self, run_id, request_id, *, apply=False, min_age_seconds=3600):
+        return response(**maintenance.cleanup(self.store, run_id, request_id, apply=apply, min_age_seconds=min_age_seconds))
 
-    def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False, view="full"):
-        require(view in {"summary", "compact", "full"}, "INVALID_VIEW", "Status view is summary, compact or full")
-        if view in {"summary", "compact"}:
-            result = self.resume(run_id, view=view) if not job_id else response(**queries.job_summary(self, run_id, job_id, compact=view == "compact"))
+    def status(self, run_id: str, job_id: str | None = None, *, check_workspace: bool = False, view="full", attention_limit=20):
+        require(view in {"summary", "compact", "full", "attention"}, "INVALID_VIEW", "Status view is summary, compact, attention or full")
+        require(view == "attention" or attention_limit == 20, "INVALID_PARAMETERS", "attention_limit requires view=attention")
+        if view in {"summary", "compact", "attention"}:
+            result = response(**queries.attention(self, run_id, job_id=job_id, limit=attention_limit)) if view == "attention" else (
+                self.resume(run_id, view=view) if not job_id else response(**queries.job_summary(self, run_id, job_id, compact=view == "compact")))
             if check_workspace:
-                expected = (result.get("candidate") or result.get("job") or {}).get("candidate_hash")
+                subject = result.get("selected_job") if view == "attention" and job_id else (result.get("candidate") or result.get("job"))
+                expected = (subject or {}).get("candidate_hash")
                 result["current_workspace_matches_submitted_files"] = self._workspace_matches(run_id, expected)
+                result["workspace_comparison_candidate_hash"] = expected
                 with self.store.transaction(write=False) as connection:
                     run = self.store.run(connection, run_id)
                     result["workspace_comparison_excludes_pinned_bundle"] = (run.get("acceptance") or {}).get("definition", {}).get("bundle", {}).get("files", [])

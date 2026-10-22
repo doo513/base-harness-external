@@ -67,6 +67,9 @@ def publish(pair, directory):
         target = Path(directory) / identifier(name, "candidate")
         os.rename(pair["staging"] / name, target)
         pair["published"].append(target)
+    if pair["published"]:
+        from .artifact_io import fsync_directory
+        fsync_directory(directory)
 
 
 def validate(job):

@@ -24,11 +24,11 @@ OPTIONS = {
     "doctor": {"sandbox": "bool"}, "list-runs": {"offset": "int", "limit": "int"},
     **{name: {"run_id": "str", "data": "json"} for name in ("observe", "revise", "check", "retire-check", "assess")},
     "submit": {"run_id": "str"},
-    "resume": {"run_id": "str", "view": "str", "analysis_selection": "json"},
+    "resume": {"run_id": "str", "view": "str", "analysis_selection": "json", "attention_limit": "int"},
     "verify": {"run_id": "str", "compare_baseline": "bool", "expected_candidate_hash": "str"},
     "compare": {"run_id": "str", "reference": "str", "expected_candidate_hash": "str", "parameters": "json"},
     "cancel": {"run_id": "str", "job_id": "str"},
-    "status": {"run_id": "str", "job_id": "str", "check_workspace": "bool", "view": "str"},
+    "status": {"run_id": "str", "job_id": "str", "check_workspace": "bool", "view": "str", "attention_limit": "int"},
     "records": {"run_id": "str", "kind": "str", "job_id": "str", "offset": "int", "limit": "int", "view": "str",
                 "detail": "json", "outcomes": "json", "subject_role": "str"},
     "cleanup": {"run_id": "str", "apply": "bool", "min_age_seconds": "int"},
@@ -41,7 +41,7 @@ REQUIRED = {
     "start": {"domain", "goal", "workspace", "mode", "provenance"},
     **{name: {"run_id", "data"} for name in ("observe", "revise", "check", "retire-check", "assess")},
     "compare": {"run_id", "expected_candidate_hash", "parameters"},
-    "cancel": {"run_id", "job_id"}, "records": {"run_id", "kind"}, "finish": {"run_id", "outcome"},
+    "cancel": {"run_id", "job_id"}, "records": {"run_id", "kind"}, "cleanup": {"run_id"}, "finish": {"run_id", "outcome"},
 }
 OPTIONS.update(application_schema.OPTIONS)
 REQUIRED.update(application_schema.REQUIRED)
@@ -160,6 +160,10 @@ def input_schema(operation, *, caller=False):
     if operation == "compare":
         properties["reference"]["enum"] = ["baseline"]
         properties["parameters"] = {"type": "object", "description": "Domain comparison preparation schema"}
+    if operation in {"resume", "status"}:
+        properties["view"]["enum"] = ["summary", "compact", "attention"] + (["full"] if operation == "status" else [])
+        properties["attention_limit"] = {"type": "integer", "minimum": 1, "maximum": 100,
+            "description": "Maximum displayed items for view=attention; default 20"}
     return obj(properties, required)
 
 

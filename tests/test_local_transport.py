@@ -80,6 +80,32 @@ def test_transport_has_no_arbitrary_shell_or_model_operation(server):
     assert result["error"]["code"] == "OPERATION_UNSUPPORTED"
 
 
+def test_transport_filters_run_totals_before_pagination(server, tmp_path):
+    service, api, workspace = server
+    visible = start(service, workspace)
+    assert visible["ok"]
+    foreign = tmp_path / "outside"
+    foreign.mkdir()
+    (foreign / "result.txt").write_text("ready", encoding="utf-8")
+    api.start(domain_id="develop", goal="foreign", workspace=str(foreign), mode="exploratory", request_id="foreign",
+              parameters={"profile": "structural", "inputs": ["result.txt"], "artifacts": ["result.txt"],
+                          "expectations": [{"path": "result.txt", "operator": "equals", "expected": "ready"}]})
+    listed = call(service, "list-runs", {"offset": 0, "limit": 20})
+    assert listed["ok"] and listed["total"] == 1
+    assert [item["run_id"] for item in listed["items"]] == [visible["run_id"]]
+
+
+def test_transport_bounds_long_poll_time_and_capacity(server):
+    service, _, workspace = server
+    run = start(service, workspace)["run_id"]
+    arguments = {"run_id": run, "job_id": "job_" + "a" * 32, "wait_seconds": 31}
+    too_long = call(service, "wait", arguments)
+    assert too_long["error"]["code"] == "WAIT_INVALID"
+    service._long_slots = threading.BoundedSemaphore(0)
+    busy = call(service, "wait", {**arguments, "wait_seconds": 1})
+    assert busy["error"]["code"] == "SERVER_BUSY"
+
+
 def test_server_requires_restart_after_runtime_code_changes(server, monkeypatch):
     from harness_external import local_transport
     from harness_external.identity import deployment_identity

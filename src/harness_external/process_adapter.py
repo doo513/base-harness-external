@@ -123,6 +123,12 @@ class ProcessObservationAdapter:
         paths = sorted({case["path"] for case in selector["cases"] if case.get("kind") == "file"})
         if paths:
             command["observed_files"] = paths
+        fixture_paths = {fixture["path"] for fixture in selector.get("fixtures", [])}
+        protected = sorted({case["path"] for case in selector["cases"]
+                            if case.get("kind") == "file" and case["operator"] == "unchanged"
+                            and case["path"] in fixture_paths})
+        if protected:
+            command["protected_fixtures"] = protected
         return command
 
     def describe_observations(self, selector):

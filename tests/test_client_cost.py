@@ -10,6 +10,7 @@ import pytest
 
 from harness_external import context, worker
 from harness_external.errors import HarnessError
+from harness_external.attention import attention_report
 from test_skill_workflow import helper, caller, bound_run, start_request, ROOT, HELPER
 from test_pytest_domain import advisory_fixture, start_advisory
 
@@ -287,7 +288,7 @@ def test_attention_preserves_nonpassing_states_and_resolves_actual_error(observe
     attention = client.attention(summary, binding)
     states = {item.get("status") for item in attention["attention"]}
     assert {"failed", "skipped"} <= states and attention["selected_job"]["result_status"] == "failed"
-    assert attention["not_queried"] == ["gates", "assessment", "limits", "usage"]
+    assert attention["not_queried"] == []  # Core joins current state and selected facts in one read.
     assert attention["case_query"]["total"] == 2 and attention["attention_page_complete"]
     bad = next(item for item in attention["attention"] if item.get("case_id") == "test_cases.py::test_bad")
     assert bad["requirement_ids"] == ["value"]
@@ -298,7 +299,13 @@ def test_attention_preserves_nonpassing_states_and_resolves_actual_error(observe
     after = api.status(binding["run_id"])["run"]
     for key in ("contract", "policy", "candidate", "verification", "actions", "assessments"):
         assert after[key] == before[key]
-    assert len(helper.canonical(attention)) < len(helper.canonical(summary))
+    # The Core view now also carries current Run constraints and actual case
+    # excerpts. Compare the complete prior input set, not the Job-only reply.
+    prior_state = api.resume(binding["run_id"], view="compact")
+    prior_cases = api.records(binding["run_id"], "cases", job_id=job,
+                              outcomes=["failed", "skipped"], subject_role="candidate")
+    assert len(helper.canonical(attention)) < sum(len(helper.canonical(item))
+                                                for item in (summary, prior_state, prior_cases))
 
 
 @LIVE
@@ -343,7 +350,7 @@ def test_attention_keeps_unobserved_scenarios_known_gaps_and_pending_distinct():
                  for i, state in enumerate(("missing", "unconfirmed", "not_selected", "not_run"))]
     job = {"job_id": "j", "status": "running", "result": {"status": "incomplete", "requirement_observations": {
         "requirements": [{"requirement_id": "r", "known_gap_ids": ["gap"], "scenarios": scenarios}]}}}
-    result = helper.attention_report(current, job, {"items": [], "total": 0, "next_offset": None}, limit=2)
+    result = attention_report(current, job, {"items": [], "total": 0, "next_offset": None}, limit=2)
     assert [item["status"] for item in result["attention"]] == ["missing", "unconfirmed"]
     assert result["total_known_attention_count"] == 4 and result["omitted_attention_count"] == 2
     assert result["attention_page_complete"] is False and result["wait_status"] == "pending"
@@ -365,6 +372,6 @@ def test_unknown_adapter_phase_content_stays_retrievable():
     case = {"outcome": "error", "case_id": "opaque", "executed": True, "finished": True,
             "phases": [{"message": {"adapter_detail": [1, 2]}}, "opaque phase"]}
     record = {"subject_role": "candidate", "observation_id": "obs", "check_id": "check", "case": case}
-    result = helper.attention_report(response, {"job_id": "j", "status": "completed"}, {"items": [record], "total": 1, "next_offset": None})
+    result = attention_report(response, {"job_id": "j", "status": "completed"}, {"items": [record], "total": 1, "next_offset": None})
     assert result["attention"][0]["status"] == "error"
     assert [item["detail"]["detail"]["path"] for item in result["attention"][0]["errors"]] == [["case", "phases", 0], ["case", "phases", 1]]

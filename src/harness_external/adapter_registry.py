@@ -134,6 +134,18 @@ class AdapterRegistry:
                 "ADAPTER_IDENTITY_UNAVAILABLE", "Identity files need unique logical IDs")
         for key, filename in zip(file_ids, identity_files):
             sources["dependency:" + key] = source_hash(filename)
+        if entry.import_root is not None:
+            root = Path(entry.import_root).resolve(strict=True)
+            package_files = [path for path in sorted(root.rglob("*.py"))
+                             if "__pycache__" not in path.parts and not path.is_symlink()]
+            require(len(package_files) <= 256, "ADAPTER_IDENTITY_LIMIT", "Adapter import root exceeds 256 Python source files")
+            total = 0
+            for path in package_files:
+                info = path.stat()
+                total += info.st_size
+                require(path.is_file() and info.st_nlink == 1 and total <= 4 * 1024 * 1024,
+                        "ADAPTER_IDENTITY_LIMIT", "Adapter import root exceeds the identity byte/link bound")
+                sources["import:" + path.relative_to(root).as_posix()] = source_hash(path)
         config = getattr(adapter, "identity_config", None)
         if config is None:
             effective = {}
