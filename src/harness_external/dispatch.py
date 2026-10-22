@@ -32,12 +32,15 @@ def invoke(api, request, *, allowed_workspace=None):
     from .task_storage import TaskStores
     from .service import response
     from .application_schema import OPTIONS as APP_OPTIONS
-    fields(request, {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}, {"operation", "arguments"})
+    fields(request, {"operation", "arguments", "request_id", "context", "task_id", "knowledge", "input_bindings"}, {"operation", "arguments"})
     operation = request["operation"]
     require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"},
             "OPERATION_UNSUPPORTED", "Unknown operation")
     require(isinstance(request["arguments"], dict), "INVALID_PARAMETERS", "Arguments must be an object")
     require("knowledge" not in request or operation == "finish", "REQUEST_INVALID", "Automatic publication belongs only to finish")
+    if "input_bindings" in request:
+        from .delivery import binding_shape
+        binding_shape(operation, request["input_bindings"])
     if request["operation"] == "list-tasks":
         require(set(request) <= {"operation", "arguments"} and isinstance(request["arguments"], dict),
                 "REQUEST_INVALID", "Task discovery is a global read")
@@ -51,7 +54,7 @@ def invoke(api, request, *, allowed_workspace=None):
     else:
         result = _invoke_core(api, inner)
     if operation == "finish" and "knowledge" in request:
-        publication = {**inner, "operation": "knowledge-publish",
+        publication = {**{k: v for k, v in inner.items() if k != "input_bindings"}, "operation": "knowledge-publish",
                        "arguments": {"run_id": request["arguments"]["run_id"], "data": request["knowledge"]},
                        "request_id": "finish-note-" + canonical_hash({"request_id": request["request_id"]})[:48]}
         try:
@@ -94,7 +97,7 @@ def _knowledge(api, request, allowed_workspace):
 
 
 def _invoke_core(api, request):
-    fields(request, {"operation", "arguments", "request_id", "context"}, {"operation", "arguments"})
+    fields(request, {"operation", "arguments", "request_id", "context", "input_bindings"}, {"operation", "arguments"})
     operation, arguments = request["operation"], request["arguments"]
     require(isinstance(operation, str) and operation in {*METHODS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
     require(isinstance(arguments, dict), "INVALID_PARAMETERS", "Arguments must be an object")
@@ -111,7 +114,11 @@ def _invoke_core(api, request):
         expected = {**context, "workspace": os.path.abspath(context["workspace"]), "run_id": arguments.get("run_id")}
     else:
         require("context" not in request, "REQUEST_INVALID", "Global operations do not accept a Run context")
-    with api.store.expecting(expected):
+    bindings = None
+    if "input_bindings" in request:
+        from .delivery import binding_shape
+        bindings = binding_shape(operation, request["input_bindings"])
+    with api.store.expecting(expected), api.store.delivering(api, arguments, bindings):
         if operation == "doctor":
             from .diagnostics import doctor
             from .service import response

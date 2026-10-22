@@ -77,7 +77,11 @@ OBSERVE = obj({**{key: {"type": "string"} for key in ("note", "kind", "record_id
                **{key: strings() for key in ("references", "depends_on")},
                "observation_ids": strings(OBSERVATION_REFERENCE_LIMIT),
                "interpretation_revision": {"type": "integer"}, "task_revision": {"type": "integer"},
-               "need": {"type": "object", "description": "Optional Domain-owned legacy data"}}, ("note",))
+               "need": {"type": "object", "description": "Optional Domain-owned legacy data"},
+               "payload": obj({"fields": {"type": "object", "default": {}, "description": "Caller-authored JSON fields; null is unresolved, not passed"},
+                               "extensions": {"type": "object", "default": {}, "description": "Opaque caller additions, never authority or measurements"},
+                               "parents": {"type": "array", "default": [], "maxItems": 32,
+                                           "description": "Exact same-Run record references, not filesystem paths"}})}, ("note",))
 RETIRE = obj({"check_id": {"type": "string"}, "expected_revision": {"type": "integer"},
               "interpretation_revision": {"type": "integer"}, "reason": {"type": "string"}},
              ("check_id", "expected_revision", "interpretation_revision", "reason"))
@@ -160,12 +164,16 @@ def input_schema(operation, *, caller=False):
 
 
 def catalog():
-    body = {"schema_version": "operation-catalog-v1", "revision": "2", "options": OPTIONS,
+    from .delivery import TARGETS
+    body = {"schema_version": "operation-catalog-v1", "revision": "3", "options": OPTIONS,
             "required": {key: sorted(value) for key, value in REQUIRED.items()},
             "operations": {name: input_schema(name, caller=True) for name in OPTIONS},
             "core_operations": {name: input_schema(name) for name in OPTIONS},
             "application_capabilities": {"task_stores": "task-store-v1", "knowledge": "knowledge-entry-v1"},
-            "finish_knowledge_schema": application_schema.knowledge_schema()}
+            "finish_knowledge_schema": application_schema.knowledge_schema(),
+            "delivery": {"schema_version": "record-inputs-v1", "targets": {name: [list(path) for path in paths] for name, paths in TARGETS.items()},
+                         "reference_fields": ["run_id", "kind", "record_id", "record_digest", "path", "sha256"],
+                         "meaning": "exact_content_copy_not_authority_or_new_evidence"}}
     return {**body, "sha256": canonical_hash(body)}
 
 
@@ -176,4 +184,6 @@ def describe(operation):
             "domain_fields_are_opaque": True,
             "application_capabilities": {"task_stores": "task-store-v1", "knowledge": "knowledge-entry-v1"},
             "envelope_extensions": {"task_id": "optional opaque store selector; omission retains the legacy store",
-                                    "knowledge": "optional caller-selected note on finish; not a Core criterion"}}
+                                    "knowledge": "optional caller-selected note on finish; not a Core criterion",
+                                    "input_bindings": "same-Run source reference + exact argument target, checked inside each transaction"},
+            "delivery": catalog()["delivery"]}

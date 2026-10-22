@@ -25,6 +25,16 @@ Read [the protocol](references/protocol.md) for installation/recovery,
 a missing schema detail, advanced records, or runtime transitions; ordinary calls
 do not require loading the entire reference.
 
+For literal fields, `call --text /data/note="..."` avoids authoring nested JSON.
+Use `--text-file /field=FILE` for exact UTF-8 text, `--json /field=VALUE` for
+typed values, and `--null /field` for an explicitly unknown value. Fields cannot
+overwrite each other. To hand off analysis, `observe` accepts optional
+`payload.fields` and `payload.extensions`; these remain caller claims, not facts.
+`--response-output FILE` saves the receipt. `--from-record /field=FILE#/field_refs/NAME`
+reuses one checked same-Run value in an explicit next operation. No automatic
+next stage, interpretation, assessment or closeout occurs. See
+[field delivery](references/protocol.md#field-input-and-record-delivery) for bounds and recovery.
+
 For Domain parameters, use `describe --domain develop --adapter ADAPTER_ID`.
 It queries the configured registry once and returns the Domain and selector
 schemas. Reuse those fields instead of reading helper implementation code.

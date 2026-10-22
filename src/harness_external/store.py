@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import copy
 import os
 from pathlib import Path
 import re
@@ -44,6 +45,27 @@ class Store:
         self._initialized = False
         self._expected = ContextVar("harness_expected_context", default=None)
         self._current_cache = ContextVar("harness_transaction_cache", default=None)
+        self._delivery = ContextVar("harness_input_bindings", default=None)
+
+    @contextmanager
+    def delivering(self, api, arguments, bindings):
+        token = self._delivery.set((api, copy.deepcopy(arguments), copy.deepcopy(bindings)) if bindings else None)
+        try:
+            yield
+        finally:
+            self._delivery.reset(token)
+
+    def _request_fingerprint(self, scope, fingerprint):
+        delivery = self._delivery.get()
+        if delivery is None or delivery[1].get("run_id") != scope:
+            return fingerprint
+        return canonical_hash({"operation_fingerprint": fingerprint, "input_bindings": delivery[2]})
+
+    def delivery_metadata(self, run_id):
+        delivery = self._delivery.get()
+        if delivery is None or delivery[1].get("run_id") != run_id:
+            return {}
+        return {"input_bindings": copy.deepcopy(delivery[2])}
 
     @contextmanager
     def expecting(self, context):
@@ -73,6 +95,11 @@ class Store:
         for name in ("intent", "policy"):
             if name + "_ref" in expected:
                 require(run[name]["ref"] == expected[name + "_ref"], "BINDING_IDENTITY_CHANGED", "Pinned intent or policy changed")
+        delivery = self._delivery.get()
+        if delivery is not None:
+            from .delivery import validate_bindings
+            api, arguments, bindings = delivery
+            validate_bindings(api, connection, run, arguments, bindings)
 
     def _initialize(self):
         if self._initialized:
@@ -214,8 +241,8 @@ class Store:
                            (job_id, now))
         return True
 
-    @staticmethod
-    def replay(connection, scope: str, request_id: str, fingerprint: str):
+    def replay(self, connection, scope: str, request_id: str, fingerprint: str):
+        fingerprint = self._request_fingerprint(scope, fingerprint)
         require(isinstance(request_id, str) and 1 <= len(request_id) <= 128, "REQUEST_ID_REQUIRED", "Use a stable request ID for safe retries")
         row = connection.execute("SELECT fingerprint,response FROM requests WHERE scope=? AND request_id=?", (scope, request_id)).fetchone()
         if row is None:
@@ -228,13 +255,13 @@ class Store:
             raise exception(error["code"], error["message"])
         return value
 
-    @staticmethod
-    def remember(connection, scope: str, request_id: str, fingerprint: str, response: dict):
+    def remember(self, connection, scope: str, request_id: str, fingerprint: str, response: dict):
+        fingerprint = self._request_fingerprint(scope, fingerprint)
+        response.update(self.delivery_metadata(scope))
         connection.execute("INSERT INTO requests VALUES(?,?,?,?)", (scope, request_id, fingerprint, canonical_bytes(response).decode()))
 
-    @staticmethod
-    def remember_error(connection, scope: str, request_id: str, fingerprint: str, code: str, message: str, *, terminal=False):
-        Store.remember(connection, scope, request_id, fingerprint,
+    def remember_error(self, connection, scope: str, request_id: str, fingerprint: str, code: str, message: str, *, terminal=False):
+        self.remember(connection, scope, request_id, fingerprint,
                        {"__harness_error__": {"code": code, "message": message, "terminal": terminal}})
 
     @staticmethod

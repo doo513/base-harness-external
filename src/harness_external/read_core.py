@@ -100,6 +100,40 @@ def records(api, run_id, kind, *, offset=0, limit=20, job_id=None, view="full", 
     return result
 
 
+def record_value(api, connection, run, kind, record_id):
+    """One existing record, validated on the caller's transaction/snapshot."""
+    run_id = run["run_id"]
+    require(kind in {*COLLECTIONS, "measurements", "cases", "jobs"}, "DETAIL_REFERENCE", "Unknown record kind")
+    if kind in {"measurements", "cases"}:
+        require(isinstance(record_id, str), "DETAIL_REFERENCE", "Observation ID is required")
+        table = "measurements" if kind == "measurements" else "case_observations"
+        rows = connection.execute("SELECT data FROM " + table + " WHERE run_id=? AND observation_id=?", (run_id, record_id))
+        values = api.store._measurement_rows(rows, run_id) if kind == "measurements" else api.store._case_rows(rows, run_id)
+        require(len(values) == 1, "DETAIL_REFERENCE", "Observation does not belong to this Run")
+        value = values[0]
+        job = checked_job(api, connection, run_id, value["job_id"])
+        if kind == "cases":
+            api.store.validate_case_binding(value, job)
+    elif kind == "jobs":
+        from .views import job_view
+        value = job_view(checked_job(api, connection, run_id, record_id))
+    else:
+        position_id = integer(record_id, 0, 2**31 - 1, "record position")
+        key = COLLECTIONS[kind]
+        snapshot = getattr(run, "head", None)
+        if snapshot:
+            refs = journal.collection_refs(connection, snapshot, key, offset=position_id, limit=1)
+            require(len(refs) == 1, "DETAIL_REFERENCE", "Unknown record position")
+            value = journal.get(connection, run_id, refs[0])
+        else:
+            data = run.get(key, [])
+            require(position_id < len(data), "DETAIL_REFERENCE", "Unknown record position")
+            value = data[position_id]
+        if key in {"interpretations", "check_records", "assessments", "activity", "needs"}:
+            semantics.validate(value)
+    return value
+
+
 def read_detail(api, run_id, kind, request):
     """Read a bounded JSON byte range from a digest-bound existing record."""
     fields(request, {"record_id", "record_digest", "path", "sha256", "offset", "limit"},
@@ -110,31 +144,7 @@ def read_detail(api, run_id, kind, request):
             "DETAIL_PATH", "Use a bounded JSON field/index path")
     record_id = request["record_id"]
     with api._read_run(run_id) as (connection, run):
-        if kind in {"measurements", "cases"}:
-            require(isinstance(record_id, str), "DETAIL_REFERENCE", "Observation ID is required")
-            table = "measurements" if kind == "measurements" else "case_observations"
-            rows = connection.execute("SELECT data FROM " + table + " WHERE run_id=? AND observation_id=?", (run_id, record_id))
-            values = api.store._measurement_rows(rows, run_id) if kind == "measurements" else api.store._case_rows(rows, run_id)
-            require(len(values) == 1, "DETAIL_REFERENCE", "Observation does not belong to this Run")
-            value = values[0]
-            job = checked_job(api, connection, run_id, value["job_id"])
-            if kind == "cases":
-                api.store.validate_case_binding(value, job)
-        elif kind == "jobs":
-            from .views import job_view
-            value = job_view(checked_job(api, connection, run_id, record_id))
-        else:
-            position_id = integer(record_id, 0, 2**31 - 1, "record position")
-            key = COLLECTIONS[kind]
-            snapshot = getattr(run, "head", None)
-            if snapshot:
-                refs = journal.collection_refs(connection, snapshot, key, offset=position_id, limit=1)
-                require(len(refs) == 1, "DETAIL_REFERENCE", "Unknown record position")
-                value = journal.get(connection, run_id, refs[0])
-            else:
-                data = run.get(key, [])
-                require(position_id < len(data), "DETAIL_REFERENCE", "Unknown record position")
-                value = data[position_id]
+        value = record_value(api, connection, run, kind, record_id)
         require(canonical_hash(value) == request["record_digest"], "DETAIL_CHANGED", "Record changed since projection; read a new projection")
         try:
             for key in path:

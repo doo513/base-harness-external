@@ -140,7 +140,7 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
     def authorize(self, envelope):
         from .application_schema import OPTIONS as APP_OPTIONS
         from .task_storage import TaskStores
-        fields(envelope, {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}, {"operation", "arguments"})
+        fields(envelope, {"operation", "arguments", "request_id", "context", "task_id", "knowledge", "input_bindings"}, {"operation", "arguments"})
         operation, arguments = envelope["operation"], envelope["arguments"]
         require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
         require(isinstance(arguments, dict), "INVALID_PARAMETERS", "Arguments must be an object")

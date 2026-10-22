@@ -115,6 +115,67 @@ python3 <skill>/scripts/harness_client.py --config /absolute/client.json call \
   --action-id note-1 --output /absolute/note-1.json
 ```
 
+### Field input and record delivery
+
+`call` can build arguments from explicit fields instead of a whole JSON object:
+`--text /field=literal`, `--text-file /field=UTF8_FILE`, `--json /field=JSON_VALUE`,
+and `--null /field`. Paths use JSON Pointer escaping (`~1` for `/`, `~0` for `~`);
+write complete arrays with `--json`. Empty text, `null`, an empty array and an
+omitted field are distinct. Duplicate/overlapping assignments fail, never last-wins.
+These flags also work on start; required policy/provenance and Domain fields
+remain unchanged. No text is interpreted as a command, requirement or pass result.
+
+For an optional handoff, the existing `observe` operation accepts `payload`:
+`fields` and `extensions` default to `{}`, and `parents` defaults to `[]`.
+The enclosing note may be empty only with this structured payload. Harness stamps
+the Run, interpretation reference and `payload_schema: caller-payload-v1` and
+stores it as an untrusted caller note in the SAME Run database. It does not add a
+Need/workflow registry. Null fields do not satisfy missing execution requirements.
+Extensions remain opaque: naming a field `passed`, `ready` or `policy` grants nothing.
+Structured payloads and their notes are preserved exactly, not silently redacted
+or truncated; submit only material intended for storage. Oversized/deep/non-JSON
+values are rejected. Legacy note-only capture behavior is unchanged.
+
+```sh
+python3 <skill>/scripts/harness_client.py call --binding /absolute/binding.json \
+  --operation observe --action-id analysis-1 \
+  --text /data/payload/fields/summary="Preserve existing inputs while adding output" \
+  --null /data/payload/fields/unresolved \
+  --text /data/payload/extensions/design_note="A caller suggestion, not a gate" \
+  --response-output /absolute/analysis-receipt.json
+
+python3 <skill>/scripts/harness_client.py call --binding /absolute/binding.json \
+  --operation revise --action-id interpretation-2 --json /data/expected_revision=1 \
+  --from-record /data/goal_summary=/absolute/analysis-receipt.json#/field_refs/summary
+```
+
+The example revision must match the actual selected interpretation, not always 1.
+The helper copies exactly one referenced field and saves its value AND
+`input_bindings: [{target, source}]` in the immutable request. Core checks the
+source's Run/record/content hashes and exact value on each transaction, including
+publication after preparation; changing the source reference changes replay identity.
+Only content destinations listed by `describe` support this mechanism. Routing,
+policy, revisions, citations and outcomes remain explicit inputs. Normalization,
+gate checking and actual execution remain in their existing owners.
+
+`record_ref` addresses the whole note; `field_refs` addresses each declared field.
+`payload.parents` can retain those same references without copying their bodies.
+`records --view references` sources also work (the whole record is selected).
+Relative receipt paths are relative to the helper's working directory; references
+inside receipts use stable IDs/hashes, not links to arbitrary workspace files.
+New sessions use the same binding and read only the needed prior records. Reference
+integrity is not proof that a caller claim is correct or that old evidence is current.
+
+Receipt files are optional projections, not another state store. If saving a receipt
+fails after commit, `response_output.status` reports that failure separately; the
+operation result and `caller_request` remain available. Replay the SAME saved
+request to recover, without reconstructing fields or rereading changed source files.
+No new ID, fallback execution or automatic next operation is generated. A new intended
+edit needs a new explicit action ID. Same-user file/DB access is not a protected
+anti-tamper boundary; hashes detect mismatches, not a writer replacing every anchor.
+
+### Saved requests
+
 Mutations save the normalized exact request before dispatch. `--output` is
 optional when `--binding` or `--binding-output` supplies a location: requests go
 in `.harness-requests` beside it, keyed by configuration, operation and action ID,

@@ -27,6 +27,7 @@ EXECUTION_FILES = (
     "harness_external/paired_inputs.py",
     "harness_external/task_storage.py", "harness_external/artifact_io.py",
     "harness_external/application_schema.py",
+    "harness_external/delivery.py",
 )
 
 

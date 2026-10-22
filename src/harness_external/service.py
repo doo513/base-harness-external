@@ -412,7 +412,12 @@ class Harness:
                 "NEED_FIELDS", "Task fields cannot change a Need; put its state inside need")
         require(not (set(observation) & {"related_activity_id", "relation", "task_revision"}) or bool(observation.get("kind")),
                 "ACTIVITY_REQUIRED", "Structured relationships require an activity kind")
-        require(isinstance(observation["note"], str) and 0 < len(observation["note"]) <= 16000, "INVALID_OBSERVATION", "A bounded note is required")
+        require(isinstance(observation["note"], str) and len(observation["note"]) <= 16000 and
+                (bool(observation["note"]) or "payload" in observation), "INVALID_OBSERVATION", "A bounded note or structured payload is required")
+        structured = None
+        if "payload" in observation:
+            from . import delivery
+            structured = delivery.payload(observation["payload"])
         refs = observation.get("references", [])
         require(isinstance(refs, list) and len(refs) <= 32 and all(isinstance(ref, str) and len(ref) <= 512 for ref in refs),
                 "INVALID_OBSERVATION", "References must be bounded strings; they are not automatically opened")
@@ -423,9 +428,18 @@ class Harness:
                 return prior
             run = self.store.run(connection, run_id)
             self._admit(connection, run, request=(run_id, request_id, fingerprint))
+            if structured is not None:
+                for parent in structured["parents"]:
+                    delivery.resolve(self, connection, run, parent)
             require(len(run["observations"]) < 100, "OBSERVATION_LIMIT", "At most 100 caller observations per Run")
             item = {"observation_id": "note_" + uuid.uuid4().hex, "origin": "caller", "trust": "untrusted",
-                    **redact({key: value for key, value in observation.items() if key != "need"})}
+                    **redact({key: value for key, value in observation.items() if key not in {"need", "payload"}}),
+                    **self.store.delivery_metadata(run_id)}
+            if structured is not None:
+                # No coercion, guessed defaults or silent capture truncation.
+                # The fixed container defaults are representation only.
+                item.update(note=observation["note"], payload_schema="caller-payload-v1", payload=structured,
+                            run_id=run_id, interpretation_ref=run["interpretations"][-1]["ref"])
             run["observations"].append(item)
             if observation.get("kind"):
                 require(isinstance(observation["kind"], str) and observation["kind"] in {"note", "hypothesis", "decision", "task", "need"}, "ACTIVITY_KIND", "Unknown activity kind")
@@ -472,6 +486,11 @@ class Harness:
             run["observations"][-1] = item
             self.store.save_run(connection, run)
             result = response(run_id=run_id, observation=item)
+            if structured is not None:
+                position = len(run["observations"]) - 1
+                result["record_ref"] = delivery.ref(run_id, "notes", position, item)
+                result["field_refs"] = {name: delivery.ref(run_id, "notes", position, item, ["payload", "fields", name])
+                                        for name in structured["fields"]}
             if observation.get("kind"):
                 result["activity"] = run["activity"][-1]
             if observation.get("kind") == "need":
@@ -555,7 +574,7 @@ class Harness:
             interpretation = semantics.record(previous["ref"]["id"], previous["ref"]["revision"] + 1,
                             {"goal_summary": summary, "parameters": parameters, "assumptions": assumptions,
                              "open_questions": questions, "observation_ids": cited, "activity_ids": activity_ids,
-                             "origin": "caller", "trust": "untrusted"})
+                             "origin": "caller", "trust": "untrusted", **self.store.delivery_metadata(run_id)})
             semantics.sync_checks(run, prepared["contract"]["checks"], interpretation["ref"])
             self._validate_checks(run, prepared["contract"])
             run["adapter_implementations"] = self.adapters.pin_implementations(
@@ -599,6 +618,10 @@ class Harness:
                                              role="mandatory" if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"] else "exploratory",
                                              author=source_provenance["declared_author"], approval_claim=source_provenance["approval"],
                                              generator={"kind": "domain_normalization", "module": run["domain_module"]})
+            delivery_metadata = self.store.delivery_metadata(run_id)
+            if delivery_metadata:
+                created = semantics.record(created["ref"]["id"], created["ref"]["revision"],
+                                           {**{key: value for key, value in created.items() if key != "ref"}, **delivery_metadata})
             run["adapter_implementations"] = self.adapters.pin_implementations([parameters], run.get("adapter_implementations"))
             run["check_records"].append(created)
             if run["policy"]["rule"] == "all_registered_checks" or key in run["policy"]["required_check_ids"]:
@@ -658,7 +681,8 @@ class Harness:
                    "contextual": sum(item["relevance"] == "contextual" for item in bindings)}
         created = semantics.record("assessment:" + run["run_id"] + ":" + uuid.uuid4().hex, 1,
                   {**redact(assessment), "interpretation_ref": latest, "subject": subject,
-                   "citation_bindings": bindings, "citation_summary": summary, "origin": "caller", "trust": "untrusted"})
+                   "citation_bindings": bindings, "citation_summary": summary, "origin": "caller", "trust": "untrusted",
+                   **self.store.delivery_metadata(run["run_id"])})
         run["assessments"].append(created)
         return created
 
@@ -1063,6 +1087,7 @@ class Harness:
                       "candidate_hash": run["candidate"]["candidate_hash"] if run["candidate"] else None,
                       "contract_hash": run["contract"]["contract_hash"], "verifier": run["contract"]["verifier"],
                       "verification": run["verification"], "model_summary": redact(summary), "finished_at": time.time(),
+                      **self.store.delivery_metadata(run_id),
                       "limitations": run["contract"]["limitations"] + ["This record concerns the submitted snapshot, not later workspace edits."]}
             reason = run.get("termination_reason") or ("abandoned" if outcome == "abandoned" else "requested")
             record.update(semantic_schema_version=semantics.SEMANTIC_VERSION, lifecycle="closed", termination_reason=reason,

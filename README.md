@@ -11,6 +11,13 @@ configure durable state and install the Skill into an existing Host. The Skill
 guides the caller; Domain/Core remain the source of contract and lifecycle rules.
 There is no second agent loop or Run database in the helper.
 
+The caller can provide literal fields (`--text`, `--text-file`, `--json`, `--null`)
+instead of reauthoring a full request JSON. Optional structured caller notes keep
+fields/extensions and hash-bound parent references in the existing Run store.
+`--from-record` reuses one exact prior value in an explicit operation; Core checks
+its source and destination inside the transaction. This is data delivery, not a
+new reasoning policy or evidence source. See [field delivery and recovery](skills/harness-workflow/references/protocol.md#field-input-and-record-delivery).
+
 New Skill-helper starts automatically create one database per independent task,
 under `state_dir/tasks/<task_id>/`. Reuse its binding across sessions; a different
 task uses a different start action even in the same project. Existing envelopes

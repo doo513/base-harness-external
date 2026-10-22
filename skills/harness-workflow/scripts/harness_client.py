@@ -343,6 +343,8 @@ def describe(operation=None):
             "core_input_schema": copy.deepcopy(CATALOG["core_operations"][operation]),
             "source": "bundled_core_catalog", "catalog_hash": CATALOG["sha256"],
             "application_capabilities": CATALOG.get("application_capabilities", {}),
+            "delivery": copy.deepcopy(CATALOG.get("delivery")),
+            "field_input": "--text /field=value; --text-file /field=FILE; --json /field=JSON; --null /field; --from-record /field=RECEIPT[#/reference]",
             **({"optional_finish_knowledge": CATALOG["finish_knowledge_schema"]} if operation == "finish" else {}),
             "runtime_check": "describe --operation " + operation + " --runtime",
             "binding_supplies": ["run_id", "context"] if "run_id" in options else [],
@@ -544,10 +546,12 @@ class Client:
         return self._call(request)
 
     def normalize_request(self, request):
-        require(isinstance(request, dict) and set(request) <= {"operation", "arguments", "request_id", "context", "task_id", "knowledge"}
+        require(isinstance(request, dict) and set(request) <= {"operation", "arguments", "request_id", "context", "task_id", "knowledge", "input_bindings"}
                 and {"operation", "arguments"} <= request.keys(), "REQUEST_INVALID", "Use operation, arguments, optional request_id and context.")
         operation, arguments = request["operation"], request["arguments"]
         cli_arguments(operation, arguments)
+        if "input_bindings" in request:
+            validate_input_bindings(operation, request["input_bindings"])
         if "task_id" in request:
             self.database_path(request)
         require("knowledge" not in request or operation == "finish" and isinstance(request["knowledge"], dict),
@@ -580,10 +584,10 @@ class Client:
         return result
 
     def call_operation(self, operation, arguments, *, binding=None, action_id=None, output=None, binding_output=None, binding_path=None,
-                       task_id=None, knowledge=None):
+                       task_id=None, knowledge=None, input_bindings=None):
         """Save one explicit intent, then send it. No automatic ID change/retry."""
         request = self.normalize_request(self.make_request(operation, arguments, binding=binding, action_id=action_id,
-                                                          task_id=task_id, knowledge=knowledge)["request"])
+                                                          task_id=task_id, knowledge=knowledge, input_bindings=input_bindings)["request"])
         if operation in MUTATIONS and output is None:
             anchor = binding_path or binding_output
             require(anchor is not None, "REQUEST_FILE_REQUIRED", "Supply --output or a binding file location to save the exact request.")
@@ -671,7 +675,7 @@ class Client:
                     "BINDING_IDENTITY_CHANGED", "Run intent or policy differs from the selected binding.")
         return result
 
-    def make_request(self, operation, arguments, *, action_id=None, binding=None, task_id=None, knowledge=None):
+    def make_request(self, operation, arguments, *, action_id=None, binding=None, task_id=None, knowledge=None, input_bindings=None):
         require(isinstance(arguments, dict), "ARGUMENTS_INVALID", "Arguments must be an object.")
         value = {"operation": operation, "arguments": dict(arguments)}
         if binding is not None:
@@ -706,6 +710,10 @@ class Client:
         if knowledge is not None:
             require(operation == "finish" and isinstance(knowledge, dict), "KNOWLEDGE_ARGUMENT", "Selected knowledge is an object on finish.")
             value["knowledge"] = copy.deepcopy(knowledge)
+        if input_bindings is not None:
+            require(binding is not None, "BINDING_REQUIRED", "Record reuse requires an explicit Run binding")
+            validate_input_bindings(operation, input_bindings)
+            value["input_bindings"] = copy.deepcopy(input_bindings)
         return {"ok": True, "request": value}
 
     def checkpoint(self, binding, action_id, *, compare_baseline=False, wait_seconds=0):
@@ -937,6 +945,119 @@ def source_arguments(operation, arguments, *, goal_file=None, source_files=()):
     return result
 
 
+def pointer(raw):
+    """JSON Pointer field syntax, not a natural-language parser or filesystem path."""
+    require(isinstance(raw, str) and raw.startswith("/") and len(raw) <= 4096, "FIELD_PATH", "Use /field or /object/field")
+    parts = raw[1:].split("/")
+    require(len(parts) <= 64 and all(not re.search(r"~(?![01])", part) for part in parts), "FIELD_PATH", "Invalid JSON Pointer")
+    return [part.replace("~1", "/").replace("~0", "~") for part in parts]
+
+
+def select_field(value, parts):
+    for part in parts:
+        if isinstance(value, list):
+            require(isinstance(part, str) and re.fullmatch(r"0|[1-9][0-9]*", part) and int(part) < len(value), "FIELD_PATH", "Unknown array index")
+            value = value[int(part)]
+        else:
+            require(isinstance(value, dict) and part in value, "FIELD_PATH", "Unknown object field")
+            value = value[part]
+    return value
+
+
+def insert_field(arguments, parts, value):
+    """Only add an absent field; no last-wins, implicit array indexes or merging."""
+    current, actual = arguments, []
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1
+        require(isinstance(current, dict), "FIELD_PATH", "Use --json for complete arrays; field paths address objects")
+        actual.append(part)
+        if last:
+            require(part not in current, "FIELD_CONFLICT", "Field already supplied: /" + "/".join(parts))
+            current[part] = copy.deepcopy(value)
+        else:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+    return actual
+
+
+def validate_input_bindings(operation, bindings):
+    prefixes = CATALOG.get("delivery", {}).get("targets", {}).get(operation, [])
+    require(prefixes and isinstance(bindings, list) and 1 <= len(bindings) <= 32, "DELIVERY_TARGET", "Record reuse is for content fields of supported operations")
+    seen = []
+    for item in bindings:
+        require(isinstance(item, dict) and set(item) == {"target", "source"}, "DELIVERY_REFERENCE", "Use target and source")
+        target = item["target"]
+        require(isinstance(target, list) and 1 <= len(target) <= 64 and all(type(key) in (str, int) for key in target)
+                and any(target[:len(p)] == p for p in prefixes), "DELIVERY_TARGET", "Record reuse cannot supply routing, authority, citations or outcomes")
+        require(not any(target[:len(old)] == old or old[:len(target)] == target for old in seen), "FIELD_CONFLICT", "Record binding targets overlap")
+        seen.append(target)
+        reference = item["source"]
+        require(isinstance(reference, dict) and set(reference) == set(CATALOG["delivery"]["reference_fields"]), "DELIVERY_REFERENCE", "Use an exact Harness record reference")
+        require(isinstance(reference["path"], list) and len(reference["path"]) <= 64 and
+                all(type(key) in (str, int) for key in reference["path"]), "DELIVERY_REFERENCE", "Invalid reference field path")
+
+
+def field_arguments(client, operation, arguments, *, binding=None, texts=(), text_files=(), json_fields=(), nulls=(), from_records=()):
+    """Serialize explicit values; selected prior fields are fetched and pinned."""
+    require(isinstance(arguments, dict), "ARGUMENTS_INVALID", "Arguments must be an object")
+    result, bindings = copy.deepcopy(arguments), []
+    def pair(raw):
+        name, separator, value = raw.partition("=")
+        require(bool(separator), "FIELD_ARGUMENT", "Use /field=value (an empty value is allowed)")
+        return pointer(name), value
+    for mode, entries in (("text", texts), ("file", text_files), ("json", json_fields)):
+        for entry in entries:
+            keys, value = pair(entry)
+            if mode == "file":
+                with Path(value).open("rb") as stream:
+                    raw = stream.read(MAX_INPUT + 1)
+                require(len(raw) <= MAX_INPUT, "INPUT_TOO_LARGE", "Text field exceeds request limit")
+                value = raw.decode("utf-8")  # preserve CRLF and all other text bytes
+            elif mode == "json":
+                value = decode(value)
+            insert_field(result, keys, value)
+    for name in nulls:
+        insert_field(result, pointer(name), None)
+    for entry in from_records:
+        require(binding is not None, "BINDING_REQUIRED", "Record reuse requires --binding")
+        keys, location = pair(entry)
+        filename, fragment, selector = location.partition("#")
+        reference = read_json(filename)
+        if fragment:
+            reference = select_field(reference, pointer(selector))
+        require(isinstance(reference, dict), "DELIVERY_REFERENCE", "Selected field must be a record reference")
+        reference = copy.deepcopy(reference)
+        # A records projection's source addresses the whole record.
+        if set(reference) == {"run_id", "kind", "record_id", "record_digest"}:
+            reference.update(path=[], sha256=reference["record_digest"])
+        item = {"target": keys, "source": reference}
+        validate_input_bindings(operation, [*bindings, item])
+        require(reference["run_id"] == binding["run_id"], "DELIVERY_RUN_MISMATCH", "Reference belongs to another Run")
+        details = {key: value for key, value in reference.items() if key not in {"run_id", "kind"}}
+        response = client.resolve_detail(binding, {"kind": reference["kind"], "detail": details})
+        insert_field(result, keys, response["value"])
+        bindings.append(item)
+    if operation == "observe" and isinstance(result.get("data"), dict) and "payload" in result["data"]:
+        result["data"].setdefault("note", "")
+    require(len(canonical(result)) <= MAX_INPUT, "INPUT_TOO_LARGE", "Combined fields exceed the request size limit")
+    return result, bindings or None
+
+
+def save_response(path, result):
+    """A receipt projection, never a ledger; failure cannot undo the operation."""
+    try:
+        try:
+            write_new_json(path, result)
+        except FileExistsError:
+            require(not path.is_symlink() and read_json(str(path)) == result, "RECEIPT_CONFLICT", "Existing response file differs; it was not overwritten")
+        return {**result, "response_output": {"status": "saved", "path": str(path.absolute())}}
+    except (ClientError, OSError, ValueError) as error:
+        return {**result, "response_output": {"status": "failed", "path": str(path.absolute()),
+                "error": {"code": getattr(error, "code", "RECEIPT_IO"), "message": str(error)[:1000]},
+                "meaning": "operation_result_unchanged_replay_saved_request_to_recover_receipt"}}
+
+
 def main(argv=None):
     started, client, args = time.monotonic(), None, None
     try:
@@ -965,6 +1086,12 @@ def main(argv=None):
         call.add_argument("--task-id", help="explicit discovered task selector; new start derives one automatically")
         call.add_argument("--knowledge", help="finish only: selected reusable note as JSON file, stdin or json:{...}")
         call.add_argument("--arguments", default="json:{}", help="JSON arguments; binding supplies run_id")
+        call.add_argument("--text", action="append", default=[], help="/field=literal text; repeat instead of writing a JSON object")
+        call.add_argument("--text-file", action="append", default=[], help="/field=UTF-8 file; preserves text exactly")
+        call.add_argument("--json", action="append", default=[], help="/field=JSON value for explicit arrays, objects, numbers or booleans")
+        call.add_argument("--null", action="append", default=[], help="/field explicitly unresolved; does not satisfy execution requirements")
+        call.add_argument("--from-record", action="append", default=[], help="/field=receipt.json[#/reference]; copy one hash-checked same-Run value")
+        call.add_argument("--response-output", type=Path, help="save the returned JSON for later reference; never overwrite a different receipt")
         call.add_argument("--goal-file", type=Path, help="start only: read the original goal as UTF-8, without summarizing it")
         call.add_argument("--source", action="append", default=[], help="start only: ID=/absolute/specification; repeat for original documents")
         call.add_argument("--action-id", help="stable explicit intent; mutations only")
@@ -1036,7 +1163,7 @@ def main(argv=None):
                 binding = read_json(str(args.binding)) if args.binding else None
                 if args.request is not None:
                     require(args.action_id is None and args.output is None and args.arguments == "json:{}" and not args.goal_file and not args.source
-                            and args.task_id is None and args.knowledge is None,
+                            and args.task_id is None and args.knowledge is None and not (args.text or args.text_file or args.json or args.null or args.from_record),
                             "CLI_ARGUMENTS", "Saved request replay cannot also construct an intent")
                     saved = client.normalize_request(read_json(args.request))
                     operation, arguments = saved["operation"], saved["arguments"]
@@ -1047,7 +1174,9 @@ def main(argv=None):
                     result = None
                 else:
                     operation = args.operation
-                    arguments = source_arguments(operation, read_json(args.arguments), goal_file=args.goal_file, source_files=args.source)
+                    arguments, input_bindings = field_arguments(client, operation, read_json(args.arguments), binding=binding,
+                        texts=args.text, text_files=args.text_file, json_fields=args.json, nulls=args.null, from_records=args.from_record)
+                    arguments = source_arguments(operation, arguments, goal_file=args.goal_file, source_files=args.source)
                     saved = None
                     result = None
                 require(not args.resolve_detail or args.format == "raw" and operation == "records" and binding is not None
@@ -1070,7 +1199,10 @@ def main(argv=None):
                 else:
                     result = client.call_operation(operation, arguments, binding=binding, action_id=args.action_id, output=args.output,
                                                    binding_output=args.binding_output, binding_path=args.binding, task_id=args.task_id,
-                                                   knowledge=read_json(args.knowledge) if args.knowledge is not None else None)
+                                                   knowledge=read_json(args.knowledge) if args.knowledge is not None else None,
+                                                   input_bindings=input_bindings)
+                if args.response_output is not None:
+                    result = save_response(args.response_output, result)
                 if args.format == "compact" and operation in {"start", "finish"}:
                     result = compact_call_result(operation, result)
                 if args.format == "attention":
