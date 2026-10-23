@@ -40,28 +40,42 @@ def normalize(values):
     return result
 
 
-def resolve_references(references, check_index, *, path="/check_ids", eligible_ids=None):
-    allowed = set(check_index) if eligible_ids is None else set(eligible_ids)
-    aliases = {}
-    for key, check in check_index.items():
-        definition = check.get("check_key", check.get("definition_key")) or ""
-        if definition.startswith("named:"):
-            aliases.setdefault(definition[6:], set()).add(key)
-    resolved, diagnostics = [], []
-    for index, ref in enumerate(references):
-        # Canonical IDs retain their original meaning. Aliases are a fallback,
-        # never another candidate when the caller already supplied an exact ID.
-        options = {ref} if ref in check_index else aliases.get(ref, set())
-        if len(options) != 1 or not options <= allowed:
-            diagnostics.append({"path": path + "/" + str(index), "code": "REQUIREMENT_REFERENCE",
-                                "message": "Use one admitted logical Check ID: " + ", ".join(sorted(allowed)[:16])})
-        else:
-            resolved.append(next(iter(options)))
-    if diagnostics:
-        raise HarnessError("REQUIREMENT_REFERENCE", "Unknown, ambiguous or inadmissible Check reference", diagnostics=diagnostics[:64], diagnostic_count=len(diagnostics))
-    require(len(set(resolved)) == len(resolved), "REQUIREMENT_REFERENCE", "References resolve to the same Check more than once")
-    return resolved
+class _ReferenceIndex:
+    """One request-local lookup, shared across that request's requirements.
 
+    Never cache across calls: check declarations and admissibility may change.
+    Canonical IDs still win over aliases, including ineligible canonical IDs.
+    """
+
+    def __init__(self, check_index, eligible_ids=None):
+        self.keys = frozenset(check_index)
+        self.allowed = self.keys if eligible_ids is None else frozenset(eligible_ids)
+        self.aliases = {}
+        for key, check in check_index.items():
+            definition = check.get("check_key", check.get("definition_key")) or ""
+            if definition.startswith("named:"):
+                self.aliases.setdefault(definition[6:], set()).add(key)
+        self._error_message = None
+
+    def resolve(self, references, *, path="/check_ids"):
+        resolved, diagnostics = [], []
+        for index, ref in enumerate(references):
+            options = {ref} if ref in self.keys else self.aliases.get(ref, set())
+            if len(options) != 1 or not options <= self.allowed:
+                if self._error_message is None:
+                    self._error_message = "Use one admitted logical Check ID: " + ", ".join(sorted(self.allowed)[:16])
+                diagnostics.append({"path": path + "/" + str(index), "code": "REQUIREMENT_REFERENCE",
+                                    "message": self._error_message})
+            else:
+                resolved.append(next(iter(options)))
+        if diagnostics:
+            raise HarnessError("REQUIREMENT_REFERENCE", "Unknown, ambiguous or inadmissible Check reference", diagnostics=diagnostics[:64], diagnostic_count=len(diagnostics))
+        require(len(set(resolved)) == len(resolved), "REQUIREMENT_REFERENCE", "References resolve to the same Check more than once")
+        return resolved
+
+
+def resolve_references(references, check_index, *, path="/check_ids", eligible_ids=None):
+    return _ReferenceIndex(check_index, eligible_ids).resolve(references, path=path)
 
 def reference_map(checks):
     return [{"input_id": item["check_key"][6:], "check_id": item["check_id"]}
@@ -69,14 +83,15 @@ def reference_map(checks):
 
 
 def validate_bindings(requirements, check_index, *, eligible_ids=None, allow_unmapped=True):
-    allowed = set(check_index) if eligible_ids is None else set(eligible_ids)
+    lookup = _ReferenceIndex(check_index, eligible_ids)
+    allowed = lookup.allowed
     mapped = set()
     for index, item in enumerate(requirements):
-        references = resolve_references(item["check_ids"], check_index, path="/requirements/" + str(index) + "/check_ids", eligible_ids=allowed)
+        references = lookup.resolve(item["check_ids"], path="/requirements/" + str(index) + "/check_ids")
         item["check_ids"] = references
         require(allow_unmapped or bool(references), "REQUIREMENT_UNMAPPED",
                 "Acceptance requirement " + item["id"] + " must reference at least one admitted Check")
-        require(set(references) <= allowed and set(references) <= set(check_index),
+        require(set(references) <= allowed and set(references) <= lookup.keys,
                 "REQUIREMENT_REFERENCE", "Requirements must reference admitted checks with explicit logical IDs")
         minimum = item["minimum_evidence"]
         if references or not allow_unmapped:
