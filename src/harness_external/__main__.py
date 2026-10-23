@@ -244,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     except (HarnessError, MeasurementProtocolError, OSError, ValueError, RecursionError, sqlite3.Error) as error:
         print(render_message({"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
                                "error": error.as_dict() if isinstance(error, HarnessError) else
-                                        {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]}}).decode())
+                                        {"code": getattr(error, "code", "HARNESS_ERROR"), "message": str(error)[:2000]},
+                               **({"checkpoint_progress": error.checkpoint_progress} if hasattr(error, "checkpoint_progress") else {})}).decode())
         return 2
 
 

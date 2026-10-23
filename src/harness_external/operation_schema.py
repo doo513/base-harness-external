@@ -19,8 +19,8 @@ OPTIONS = {
               "continuation_reason": "str", "capture_baseline": "bool"},
     "invoke": {"request": "json"},
     "context": {"run_id": "str", "after": "str", "page": "str", "limit": "int"},
-    "checkpoint": {"run_id": "str", "compare_baseline": "bool", "wait_seconds": "number"},
-    "wait": {"run_id": "str", "job_id": "str", "wait_seconds": "number"},
+    "checkpoint": {"run_id": "str", "compare_baseline": "bool", "wait_seconds": "number", "view": "str", "attention_limit": "int", "payload": "json", "note": "str"},
+    "wait": {"run_id": "str", "job_id": "str", "wait_seconds": "number", "view": "str", "attention_limit": "int"},
     "doctor": {"sandbox": "bool"}, "list-runs": {"offset": "int", "limit": "int"},
     **{name: {"run_id": "str", "data": "json"} for name in ("observe", "revise", "check", "retire-check", "assess")},
     "submit": {"run_id": "str"},
@@ -164,6 +164,12 @@ def input_schema(operation, *, caller=False):
         properties["view"]["enum"] = ["summary", "compact", "attention"] + (["full"] if operation == "status" else [])
         properties["attention_limit"] = {"type": "integer", "minimum": 1, "maximum": 100,
             "description": "Maximum displayed items for view=attention; default 20"}
+    if operation in {"checkpoint", "wait"}:
+        properties["view"]["enum"] = ["summary", "attention", "brief"]
+        properties["attention_limit"] = {"type": "integer", "minimum": 1, "maximum": 100}
+    if operation == "checkpoint":
+        properties["payload"] = copy.deepcopy(OBSERVE["properties"]["payload"])
+        properties["note"]["maxLength"] = 16000
     return obj(properties, required)
 
 

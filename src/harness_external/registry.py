@@ -95,6 +95,8 @@ class DomainRegistry:
             functions.append(module.normalize_need)
         if callable(getattr(module, "identity_config", None)):
             functions.append(module.identity_config)
+        if callable(getattr(module, "identity_runtime", None)):
+            functions.append(module.identity_runtime)
         sources, code, source_hashes = {}, {}, {}
         def source_hash(filename):
             path = Path(filename).resolve(strict=True)
@@ -122,9 +124,14 @@ class DomainRegistry:
             configuration_hash = canonical_hash(config)
         except (TypeError, ValueError) as error:
             raise ValueError("Domain configuration must be JSON data or expose identity_config") from error
-        body = {"schema_version": "domain-identity-v2", "id": module.domain_id, "revision": module.revision,
-                "implementation_hash": canonical_hash({"files": sources, "methods": code}),
-                "configuration_hash": configuration_hash}
+        from .runtime_identity import python_identity
+        runtime = getattr(module, "identity_runtime", None)
+        extra_runtime = runtime() if callable(runtime) else None
+        body = {"schema_version": "domain-identity-v3", "id": module.domain_id, "revision": module.revision,
+                "implementation_hash": canonical_hash({"files": sources, "methods": sorted(code)}),
+                "configuration_hash": configuration_hash,
+                "runtime": {"schema_version": "domain-runtime-v1", "python": python_identity(),
+                            "loaded_code_hash": canonical_hash({"methods": code, "extensions": extra_runtime})}}
         return {**body, "identity_hash": canonical_hash(body)}
 
 

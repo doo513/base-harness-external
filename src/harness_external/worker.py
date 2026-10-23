@@ -262,6 +262,8 @@ def execute_job(state_dir: str | Path, job_id: str) -> None:
             return compact
         try:
             require(time.time() < job["deadline_at"], "DEADLINE_EXCEEDED", "Job expired before execution")
+            from .runtime_identity import validate_domain_runtime
+            validate_domain_runtime(run["domain_module"])
             require(run["contract"]["verifier"] == verifier_identity(), "VERIFIER_CHANGED", "Pinned verifier implementation changed")
             require(job.get("check_set_hash") == semantics.check_set_hash(job["checks"]), "CHECK_SET_CHANGED", "Pinned check set changed")
             if job.get("purpose") == "diagnostic":

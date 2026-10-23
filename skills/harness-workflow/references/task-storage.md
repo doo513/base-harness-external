@@ -11,6 +11,15 @@ The application creates `tasks/<task_id>/runs.sqlite3` and its snapshots under
 the configured durable `state_dir`, outside the workspace. This is the task's
 only Run database; task.json stores connection metadata, not lifecycle state.
 
+The DB retains delivered original goal/spec text separately from interpretations,
+caller notes (including opaque fields/extensions), checks and measured facts.
+JSON value preservation is not preservation of envelope whitespace or automatic
+capture of every Host message. Submitted file bytes live in snapshots linked by
+identity; compact responses are read projections, not replacements for records.
+Optional checkpoint payloads use these same note records and request replay keys.
+No routine note is required and no payload means no note. Exploration cache files
+are disposable derived syntax data, outside the task DB and verification authority.
+
 Same action + identical request replays the same task and Run. Changed content
 for that action conflicts. An unrelated new request needs a new start action,
 even in the same workspace. Do not manufacture a new task to evade an existing

@@ -338,6 +338,22 @@ class DevelopModule:
         return {"effective": effective_config(self, exclude={"_check_preparation"}), "identity_file_ids": list(self.identity_file_ids),
                 "check_preparation": self._checks.identity()}
 
+    def identity_runtime(self):
+        # Keep loaded-code guards separate from portable preparation configuration.
+        from .registry import code_identity
+        methods = {}
+        for name in ("identity", "parameters", "selection", "reference"):
+            method = getattr(self._checks, name)
+            target = getattr(method, "__func__", method)
+            if hasattr(target, "__code__"):
+                methods[name] = canonical_hash(code_identity(target.__code__))
+            else:
+                # Preserve the pre-existing explicit identity contract for
+                # application ports implemented by opaque/native callables.
+                methods[name] = {"declared": canonical_hash(self._checks.identity()),
+                                 "type": type(target).__module__ + "." + type(target).__qualname__}
+        return methods
+
     def prepare_acceptance(self, goal, parameters, verifier, *, policy, intent=None, analysis_selection=None):
         token = _COMPILATION.set({})
         try:

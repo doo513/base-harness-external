@@ -1,0 +1,4 @@
+{
+  "layers": {"core": ["pkg.core"], "service": ["pkg.service"], "app": ["pkg.app"], "tests": ["tests"]},
+  "allow": {"core": [], "service": [], "app": ["service"], "tests": ["app"]}
+}

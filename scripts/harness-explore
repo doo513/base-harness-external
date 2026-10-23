@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+harness_python="${BASE_HARNESS_PYTHON:-$harness_root/.venv/bin/python}"
+if [[ "$harness_python" != /* || ! -x "$harness_python" ]]; then
+  printf '%s\n' '{"error":"EXPLORATION_RUNTIME","message":"Select an absolute BASE_HARNESS_PYTHON or restore checkout .venv."}' >&2
+  exit 2
+fi
+exec "$harness_python" -I -c 'import sys; sys.path.insert(0,sys.argv.pop(1)); from change_lens.__main__ import main; raise SystemExit(main())' "$harness_root/src" "$@"

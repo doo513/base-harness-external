@@ -89,7 +89,8 @@ class _Handler(socketserver.StreamRequestHandler):
             response = {"ok": True, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False, **result}
         except (HarnessError, ValueError, OSError, TypeError, RecursionError) as error:
             response = {"ok": False, "api_version": API_VERSION, "assurance": ASSURANCE, "ready": False,
-                        "error": error.as_dict() if isinstance(error, HarnessError) else {"code": "TRANSPORT_ERROR", "message": str(error)[:2000]}}
+                        "error": error.as_dict() if isinstance(error, HarnessError) else {"code": "TRANSPORT_ERROR", "message": str(error)[:2000]},
+                        **({"checkpoint_progress": error.checkpoint_progress} if hasattr(error, "checkpoint_progress") else {})}
         response["transport"] = {"protocol": PROTOCOL, "server_id": self.server.server_id, "configuration": self.server.configuration}
         encoded = render_message(response) + b"\n"
         if len(encoded) > MAX_RESPONSE:

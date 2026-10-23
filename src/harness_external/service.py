@@ -499,6 +499,8 @@ class Harness:
                 result["record_ref"] = delivery.ref(run_id, "notes", position, item)
                 result["field_refs"] = {name: delivery.ref(run_id, "notes", position, item, ["payload", "fields", name])
                                         for name in structured["fields"]}
+                result["extension_refs"] = {name: delivery.ref(run_id, "notes", position, item, ["payload", "extensions", name])
+                                            for name in structured["extensions"]}
             if observation.get("kind"):
                 result["activity"] = run["activity"][-1]
             if observation.get("kind") == "need":
@@ -523,6 +525,8 @@ class Harness:
         return [known[item] for item in ids]
 
     def _module(self, run):
+        from .runtime_identity import validate_domain_runtime
+        validate_domain_runtime(run["domain_module"])
         module = self.domains.resolve(run["domain_module"]["id"])
         require(module.revision == run["domain_module"]["revision"], "DOMAIN_MODULE_CHANGED", "Pinned Domain module revision changed")
         require("identity_hash" in run["domain_module"], "DOMAIN_IDENTITY_REQUIRED", "Historical Run has no Domain implementation identity; start a new Run to mutate or verify")

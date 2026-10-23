@@ -7,6 +7,15 @@ a Windows Host using WSL, invoke the helper through `wsl.exe --exec python3 ...`
 with WSL paths; do not pass Windows drive paths to the Linux helper.
 
 The helper config pins `harness_repo`, `state_dir`, `state_lifetime` and schema version.
+New local configs also retain `python_runtime`: the selected absolute executable,
+its binary digest, Python version/implementation and venv identity. Configure with
+`--python-executable /absolute/python` when selection matters. Selection occurs
+once at setup (checkout venv, otherwise the setup interpreter), never as fallback
+after loss. The selected Python checks its identity before importing Core.
+Missing/changed bindings report `PYTHON_RUNTIME_UNAVAILABLE`/`PYTHON_RUNTIME_CHANGED`.
+Legacy configs without this field require the checkout venv; they no longer pick
+an unrelated PATH Python. Socket servers own their runtime; Host Python does not
+replace it. Existing config/binding files are not silently migrated or overwritten.
 Production uses a durable state directory outside every workspace. `--ephemeral`
 is an explicit disposable-test setting, not a recovery strategy. Setup is documented
 in the repository's `INSTALL.md`; the helper's `configure --help` is self-contained.
@@ -96,11 +105,60 @@ python3 <skill>/scripts/harness_client.py --config /absolute/client.json checkpo
   --binding /absolute/task-binding.json --action-id implementation-1 --wait-seconds 30
 ```
 
-`checkpoint` performs exactly one submit and one verify and returns a compact job
-summary. It does not assess, repair, finish, choose another method, or retry on an
+`checkpoint` performs exactly one submit and one verify. The helper CLI now defaults
+to `--view brief`, which returns bound facts/gaps and detail references directly
+from Core. `--view attention` and `--view summary` retain larger views. Direct Core
+envelopes and Python helper methods retain their legacy summary default unless a
+view is supplied. It does not assess, repair, finish, choose another method, or retry on an
 unknown response. Repeating the same action ID replays the original submission
 and Job. Use a new action ID for a new intentional checkpoint. Concurrent helper
 mutations return `CALLER_BUSY`; Core still enforces concurrency for all clients.
+
+The CLI saves its exact checkpoint request beside the binding before dispatch.
+Optional `--payload FILE` sends `{fields,extensions,parents}` as one caller note
+before submit; optional `--note` supplies text. Omission creates no note. A supplied
+payload is bounded/lossless JSON, never an inferred policy, requirement or pass.
+Core binds this optional context to the checkpoint intent in the existing requests
+table; separate note/submit/verify replay IDs recover partial progress without
+duplicating a note or recapturing a newer workspace. Changing context for the same
+intent is a conflict, including adding context to a previously context-free call.
+Replay a saved request with `call --request`, not a changed payload file. Changing
+only a wait window/view is a read concern at Core, but the saved request file itself
+is immutable; use `wait` to request another observation window/view.
+
+`harness-checkpoint-v1` (`view: brief`) includes selected Job/Candidate/check-set
+identity, current/historical relevance, existing gate/measurement/assessment
+states, failures, gap counts and `details`. `omitted` and `issue_page_complete`
+prevent truncated results being mistaken for full coverage. `details.job` is an
+exact existing records-detail request; `details.attention` recovers the broader
+view. The base brief projection budgets 6 KiB before routing/replay/telemetry
+metadata; it does not delete stored measurements. Workspace freshness and complete
+context are explicitly not queried by this projection. A pass concerns the
+submitted Candidate, not later workspace edits.
+
+When a known checkpoint stage fails, `checkpoint_progress` separates acknowledged
+caller-note/submission/Job references from the error. A null value means no receipt
+was obtained, not proof that a side effect did not occur. Recovery remains an
+explicit read or exact replay, never automatic repair or a new intent.
+
+## Optional Host exploration
+
+`harness_client.py explore context /project --changed src/a.py --limit 8 --format json`
+invokes the local `change_lens` package without a Core call or Run mutation. The
+installed console command `harness-explore` and source wrapper `scripts/harness-explore`
+provide the same tool. A remote-only checkout is not guessed; install the explorer
+locally if the configured source is not visible to the Host.
+
+`--cache-dir /outside/project/cache` stores disposable syntax facts, not a second
+task DB. Workspace, parser/Python version and normalized scan options isolate the
+cache. Unchanged file metadata can reuse parsed facts; new/deleted/renamed/changed
+files are reprocessed. `--refresh` rereads content. Metadata freshness is advisory,
+not a content attestation or permission to reuse verification results. Cache paths
+must be outside the analyzed workspace; link entries are refused. Corrupt cache
+data is reported/rebuilt and size limits can decline caching without hiding the
+analysis result. Context output reports omitted files/tests/diagnostics/symbols
+and an entrypoint for the full view. Static impacts are test candidates, never a
+replacement for mandatory acceptance checks. Exploration returns `gate_eligible:false`.
 
 `wait_status: pending` does not cancel the job. Use `wait --binding ... --job-id ...`
 to observe that same job. `terminal` means the job ended; inspect its result, scope
@@ -159,7 +217,9 @@ Only content destinations listed by `describe` support this mechanism. Routing,
 policy, revisions, citations and outcomes remain explicit inputs. Normalization,
 gate checking and actual execution remain in their existing owners.
 
-`record_ref` addresses the whole note; `field_refs` addresses each declared field.
+`record_ref` addresses the whole note; `field_refs` addresses each declared field
+and `extension_refs` addresses each additional field. A brief checkpoint returns
+only the caller record reference; read that exact note when a field detail is needed.
 `payload.parents` can retain those same references without copying their bodies.
 `records --view references` sources also work (the whole record is selected).
 Relative receipt paths are relative to the helper's working directory; references
@@ -547,6 +607,8 @@ Use the same context with these operations/arguments:
 
 | Operation | Arguments in addition to `run_id` | Request ID |
 |---|---|---|
+| `checkpoint` | optional `payload`, `note`, `compare_baseline`, `wait_seconds`, `view: summary|attention|brief`, `attention_limit` | required |
+| `wait` | `job_id`, optional `wait_seconds`, `view`, `attention_limit` | omit |
 | `submit` | none | required |
 | `verify` | optional `compare_baseline`, `expected_candidate_hash`; returns `job_id` | required |
 | `status` | optional `job_id`, `check_workspace: true`, `view: "summary" / "compact" / "attention" / "full"`, `attention_limit` | omit |

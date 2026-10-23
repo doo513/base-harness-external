@@ -279,12 +279,33 @@ same-user tampering. Modules are responsible for declaring all relevant configur
 and dependencies. Historical Runs without this binding can be read and closed as
 partial/abandoned; use a new Run for continued mutation/verification.
 
-Domain identity v2 includes effective inherited JSON configuration in Python MRO
-order, with instance overrides. Computed properties are not evaluated implicitly;
-declare dynamic values in `identity_config`. The verifier execution manifest is
+Domain identity v3 separates source/configuration digests from a runtime section
+containing Python/venv identity and loaded-code fingerprints. Source/configuration
+digests are stable across Python releases for the built-in Domain; different
+interpreters do not silently reuse prior measurements. In-memory Python method
+changes remain detectable. Effective inherited JSON configuration follows Python
+MRO order, with instance overrides. Computed properties are not evaluated implicitly;
+declare dynamic values in `identity_config`. Historical v2 records remain readable,
+not rewritten; continued execution needs the pinned runtime or an explicit linked
+continuation after implementation changes. The verifier execution manifest is
 separate from the diagnostic deployment source hash: presentation edits alone do
 not rebind measurements, while execution/invariant changes still require a new
 Run. `doctor` reports transport/storage capabilities and deployment identity.
+
+The caller's `checkpoint` CLI now defaults to a bounded `brief` projection: current
+gate/measurement scope, exceptions and exact detail references. Python helper/Core
+envelopes retain their prior summary default unless a view is requested. Optional
+`--payload FILE` retains caller `fields`/`extensions` in the same task DB before
+submission, with independent durable replay keys; omission creates no note.
+No automatic assessment, repair or finish is added. New local caller configs pin
+Python at setup and check it before invoking Core; missing runtimes never fall
+back to another PATH interpreter.
+
+Optional Host discovery is available as `harness-explore` or
+`harness_client.py explore context /project --changed src/a.py --limit 8 --format json`.
+It performs static analysis without Core calls. `--cache-dir` must be outside the
+project; metadata-based reuse is explicitly advisory and `--refresh` rereads bytes.
+It does not replace mandatory tests or any verifier snapshot-integrity check.
 
 New Runs use `run_heads`, immutable `run_records` and ordered `run_events` in the
 same SQLite database. Current reads do not hydrate historical collections, and

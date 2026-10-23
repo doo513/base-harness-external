@@ -17,6 +17,7 @@ KINDS = {"checks", "interpretations", "activity", "assessments", "tasks", "notes
 # Only content can be copied. Routing, revisions, approval, citations and outcome
 # decisions are explicit operation inputs, never inferred from another field.
 TARGETS = {
+    "checkpoint": (("note",), ("payload", "fields"), ("payload", "extensions")),
     "observe": (("data", "note"), ("data", "payload", "fields"), ("data", "payload", "extensions")),
     "revise": (("data", "goal_summary"), ("data", "parameters"), ("data", "assumptions"), ("data", "open_questions")),
     "check": (("data", "parameters"),),

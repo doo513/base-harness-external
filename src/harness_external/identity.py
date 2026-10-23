@@ -18,7 +18,7 @@ EXECUTION_FILES = (
     "harness_external/journal.py", "harness_external/read_core.py",
     "harness_external/errors.py", "harness_external/semantics.py",
     "harness_external/need_records.py",
-    "harness_external/registry.py", "harness_external/identity.py",
+    "harness_external/registry.py", "harness_external/identity.py", "harness_external/runtime_identity.py",
     "harness_external/acceptance.py", "harness_external/evidence.py",
     "harness_external/maintenance.py", "harness_external/dispatch.py",
     "harness_external/observation_rules.py", "harness_external/observation_links.py", "harness_external/adapter_execution.py",

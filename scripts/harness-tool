@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 harness_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-harness_python="$harness_root/.venv/bin/python"
+harness_python="${BASE_HARNESS_PYTHON:-$harness_root/.venv/bin/python}"
 if [[ ! -x "$harness_python" ]]; then
-  harness_python="$(command -v python3)"
+  printf '%s\n' '{"api_version":"external-harness-v2","ok":false,"error":{"code":"PYTHON_RUNTIME_UNAVAILABLE","message":"Configure BASE_HARNESS_PYTHON as an absolute executable or restore checkout .venv; no PATH fallback was attempted."}}'
+  exit 2
+fi
+if [[ "$harness_python" != /* ]]; then
+  printf '%s\n' '{"api_version":"external-harness-v2","ok":false,"error":{"code":"PYTHON_RUNTIME_UNTRUSTED","message":"BASE_HARNESS_PYTHON must be an absolute executable path."}}'
+  exit 2
 fi
 # wsl.exe --exec does not load interactive shell startup files. Preserve an
 # explicit BUN selection; otherwise discover Bun's standard per-user install.

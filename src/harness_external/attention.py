@@ -56,6 +56,7 @@ def attention_report(current, job, cases, *, limit=20):
         if check.get("comparison_status") != "passed":
             items.append({"kind": "check", **{key: check.get(key) for key in
                 ("check_id", "comparison_status", "execution_status", "observation_id")},
+                "requirement_ids": [r["requirement_id"] for r in requirements if check["check_id"] in r.get("failed_check_ids", [])],
                 "case_summary": {key: value for key, value in (check.get("case_summary") or {}).items()
                                  if key in {"framework", "outcomes", "executed_count", "selected_count", "session_complete", "observation_boundary"}}})
     if job and job.get("error"):

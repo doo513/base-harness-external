@@ -1,0 +1,355 @@
+{
+  "schema_version": "lean-workflow-validation-v1",
+  "date": "2026-10-23",
+  "scope": "Approved lean caller/checkpoint workflow, optional caller context, runtime pinning and Host-only Change Lens",
+  "external_model_calls": false,
+  "model_task_execution": false,
+  "user_evaluation_choice": "외부 호출 없이 로컬 검증만 진행",
+  "status": "local_checks_passed",
+  "base_commit": "e35df0f",
+  "preserved_preexisting_changes": [
+    "src/harness_external/develop_requirements.py",
+    "tests/test_domain_reference_index.py"
+  ],
+  "harness": {
+    "run_id": "run_b59aa637dd7b4e68bde92937a05b0607",
+    "task_id": "task_a31c5d7357b85cad5d736f197a06b97c",
+    "runtime": "Frozen pre-change checkout /tmp/harness-lean-kQKFdE/control using the configured persistent state store",
+    "job_id": "job_435f0103c0014dbf8d445e7a47168f05",
+    "candidate_hash": "5d286055847e2e313f907f1e9a68b51c663b0edc93bf1dd2181f1bbc4b7695a6",
+    "check_set_hash": "725f793e4bd5196ae4b59dbc657d2bf8c81059e6423b02eca6e088b27b37f88b",
+    "interpretation_revision": 3,
+    "candidate_input_count": 104,
+    "measured_status": "passed",
+    "gates": {
+      "required_check_count": 1,
+      "status": "passed",
+      "unsatisfied_check_ids": []
+    },
+    "current_workspace_matches_submitted_files": true,
+    "command": [
+      "python3",
+      "-B",
+      "tests/lean_workflow_smoke.py"
+    ],
+    "assertions": {
+      "ran": 8,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "observer_scope": "External process observer measured report fields failures/errors and command exit, not the independence/completeness of the eight assertions.",
+    "assurance": "local-advisory",
+    "ready": false,
+    "report_in_candidate": false,
+    "lifecycle": "closed",
+    "display_status": "closed_checks_passed",
+    "record_hash": "2417fc8bedfacca5d2fb778907b8d297a5d650d5d1520a8e8084e17487a37f9c"
+  },
+  "full_regression": {
+    "environment": {
+      "BASE_HARNESS_EXTERNAL_LIVE": "1",
+      "python": "3.12.3",
+      "platform": "Linux/WSL"
+    },
+    "passed": 882,
+    "failed": 0,
+    "skipped": 0,
+    "subtests_passed": 38,
+    "files": 63,
+    "elapsed_seconds": 178.41221868799767,
+    "execution": "All 63 root test modules, split over four independent pytest processes; nested test_app.py is only a non-collected source fixture.",
+    "source_copy_check": "rsync -rcni compared source/test bytes with the tested mirror: no differences (excluded generated build/cache/egg-info files).",
+    "groups": [
+      {
+        "group": 0,
+        "command": "BASE_HARNESS_EXTERNAL_LIVE=1 /mnt/c/users/doo33/downloads/base-harness-external/.venv/bin/python -B -m pytest -q tests/test_adapter_concurrency.py tests/test_algorithm_optimizations.py tests/test_caller_scope_cost.py tests/test_core_attention.py tests/test_delivery_client.py tests/test_delivery_flow.py tests/test_knowledge_library.py tests/test_lean_checkpoint.py tests/test_lean_study.py tests/test_local_transport.py tests/test_protocol_v2.py tests/test_skill_workflow.py tests/test_study_report.py tests/test_validation_diagnostics.py tests/test_worker_optimizations.py",
+        "exit_code": 0,
+        "summary": "182 passed, 9 subtests passed in 176.81s (0:02:56)"
+      },
+      {
+        "group": 1,
+        "command": "BASE_HARNESS_EXTERNAL_LIVE=1 /mnt/c/users/doo33/downloads/base-harness-external/.venv/bin/python -B -m pytest -q tests/test_agent_study.py tests/test_client_cost.py tests/test_context_journal.py tests/test_develop_discovery.py tests/test_dogfood_regressions.py tests/test_domain_execution_boundaries.py tests/test_execution_input_binding.py tests/test_hard_queue_study.py tests/test_lean_client.py tests/test_luna_study.py tests/test_need_analysis.py tests/test_role_reconstruction.py tests/test_source_documents.py tests/test_state_optimizations.py tests/test_task_caller.py tests/test_task_storage.py",
+        "exit_code": 0,
+        "summary": "225 passed, 3 subtests passed in 146.12s (0:02:26)"
+      },
+      {
+        "group": 2,
+        "command": "BASE_HARNESS_EXTERNAL_LIVE=1 /mnt/c/users/doo33/downloads/base-harness-external/.venv/bin/python -B -m pytest -q tests/test_acceptance_policy.py tests/test_agent_workflow.py tests/test_check_preparation.py tests/test_cli_scenarios.py tests/test_core_regressions.py tests/test_domain_quality_fixes.py tests/test_domain_reference_index.py tests/test_exploration_client.py tests/test_external_harness.py tests/test_external_observer.py tests/test_guidance_handoff.py tests/test_intent_planning.py tests/test_luna_harness_queue_study.py tests/test_measurement_v5.py tests/test_operation_constraints.py tests/test_security_hardening.py",
+        "exit_code": 0,
+        "summary": "238 passed in 110.58s (0:01:50)"
+      },
+      {
+        "group": 3,
+        "command": "BASE_HARNESS_EXTERNAL_LIVE=1 /mnt/c/users/doo33/downloads/base-harness-external/.venv/bin/python -B -m pytest -q tests/test_adapter_registry.py tests/test_analysis_selection.py tests/test_change_lens.py tests/test_closeout_semantics.py tests/test_common.py tests/test_core_identity_v2.py tests/test_detail_projections.py tests/test_develop_requirements.py tests/test_evaluate.py tests/test_exploration_cache.py tests/test_input_compatibility.py tests/test_message_representation.py tests/test_need_analysis_live.py tests/test_pytest_domain.py tests/test_runtime_pinning.py tests/test_snapshot_streaming.py",
+        "exit_code": 0,
+        "summary": "237 passed, 26 subtests passed in 141.99s (0:02:21)"
+      }
+    ],
+    "raw_log": "/tmp/harness-lean-kQKFdE/regression.json"
+  },
+  "requirement_audit": [
+    {
+      "id": "R01",
+      "tests": [
+        "tests/test_runtime_pinning.py",
+        "tests/test_lean_client.py"
+      ],
+      "result": "Python pin, missing/mismatched executable and no silent PATH fallback verified."
+    },
+    {
+      "id": "R02",
+      "tests": [
+        "tests/test_runtime_pinning.py",
+        "tests/test_core_identity_v2.py"
+      ],
+      "result": "Source/config portable across installed Python 3.12.3 and 3.14.8; loaded-code guard retained. Existing closed Run run_a0afceac62f340729e6d4bf702992ff3 remained readable through the new code."
+    },
+    {
+      "id": "R03",
+      "tests": [
+        "tests/test_lean_checkpoint.py",
+        "tests/test_core_attention.py"
+      ],
+      "result": "Bounded brief, pending/stale Job scope, requirement links and exact detail recovery verified."
+    },
+    {
+      "id": "R04",
+      "tests": [
+        "tests/test_lean_checkpoint.py",
+        "tests/test_lean_client.py",
+        "tests/lean_workflow_smoke.py"
+      ],
+      "result": "Null/empty/bool/zero/extra fields survive; optional notes and committed partial-stage recovery remain idempotent and non-authoritative."
+    },
+    {
+      "id": "R05",
+      "tests": [
+        "tests/test_external_harness.py",
+        "tests/test_local_transport.py",
+        "tests/test_domain_execution_boundaries.py"
+      ],
+      "result": "Full LIVE suite covers existing state/budget/replay/snapshot/sandbox/late-result constraints; no automatic assess/repair/finish."
+    },
+    {
+      "id": "R06",
+      "tests": [
+        "tests/test_task_storage.py",
+        "tests/test_knowledge_library.py",
+        "tests/lean_workflow_smoke.py"
+      ],
+      "result": "Task DB originals, caller JSON and measured records remain separate; only selected knowledge publishes to shared MD. Cross-Run citations rejected."
+    },
+    {
+      "id": "R07",
+      "tests": [
+        "tests/test_change_lens.py",
+        "tests/test_exploration_client.py"
+      ],
+      "result": "Host-local CLI/helper and installed wheel entrypoint work without Run writes; Core/Domain/Worker can verify with the explorer import blocked."
+    },
+    {
+      "id": "R08",
+      "tests": [
+        "tests/test_exploration_cache.py"
+      ],
+      "result": "Warm AST reuse, edit/add/remove/rename, restored mtime, refresh, root/limit separation, bad cache and symlink rejection verified."
+    },
+    {
+      "id": "R09",
+      "tests": [
+        "tests/test_skill_workflow.py",
+        "tests/test_lean_client.py"
+      ],
+      "result": "Bundled Skill shortened and validated; advanced recovery/storage instructions linked. Temporary installed Skill tested; global Skill/configuration not overwritten."
+    },
+    {
+      "id": "R10",
+      "tests": [
+        "tests/test_lean_study.py",
+        "scripts/benchmark-lean-workflow.py"
+      ],
+      "result": "Actual CLI/socket/Sandbox paths and fixed-reference local A/B/C compared; no external model evaluation per user choice."
+    }
+  ],
+  "python_identity_comparison": {
+    "versions": [
+      [
+        3,
+        12,
+        3
+      ],
+      [
+        3,
+        14,
+        8
+      ]
+    ],
+    "same_implementation": true,
+    "same_configuration": true,
+    "different_runtime": true,
+    "implementation_hash": "2dc4a6752235483429a27e858a47db8af6b07641e97090c4564503a8d5c06563",
+    "configuration_hash": "fda6df2f184ee5d9e6bb7e8e3d05828ccca875d2c103b56b35344165edecf5e6"
+  },
+  "mechanics": {
+    "command": ".venv/bin/python -B scripts/benchmark-lean-workflow.py mechanics --output /tmp/harness-lean-kQKFdE/mechanics.json",
+    "check_count": 24,
+    "same_job_detail_recovered": true,
+    "summary_bytes": 11058,
+    "brief_bytes": 3008,
+    "summary_query_median_ms": 23.30385499226395,
+    "brief_query_median_ms": 69.19011900026817,
+    "exploration_files": 183,
+    "cold_exploration_ms": 3544.6038840018446,
+    "warm_exploration_median_ms": 1271.0219839937054,
+    "cache": {
+      "reused_files": 183,
+      "metadata_reused_files": 183,
+      "content_reused_files": 0,
+      "parsed_files": 0,
+      "read_status": "loaded",
+      "write_status": "unchanged",
+      "verification_eligible": false,
+      "freshness": "filesystem_metadata_only",
+      "source_bytes": 1652532,
+      "bytes_read": 0,
+      "meaning": "advisory_syntax_cache_not_a_verified_snapshot"
+    },
+    "raw_log": "/tmp/harness-lean-kQKFdE/mechanics.json"
+  },
+  "local_comparison": {
+    "commands": [
+      ".venv/bin/python -B scripts/benchmark-lean-workflow.py prepare --output /tmp/harness-lean-kQKFdE/study-local --before-runtime /tmp/harness-lean-kQKFdE/control",
+      ".venv/bin/python -B scripts/benchmark-lean-workflow.py controls --root /tmp/harness-lean-kQKFdE/study-local",
+      ".venv/bin/python -B scripts/benchmark-lean-workflow.py scripted --root /tmp/harness-lean-kQKFdE/study-local"
+    ],
+    "labels": {
+      "A": "Previous minimal caller",
+      "B": "Brief checkpoint caller",
+      "C": "B plus two local exploration calls"
+    },
+    "controls": {
+      "baseline": 1,
+      "positive": 20,
+      "total": 20,
+      "valid": true
+    },
+    "same_final_candidate_hash": true,
+    "policy_hash": "1a8821dcabbf263985b60d6d869e59701f0530618dff0143da720b246241b9e8",
+    "arms": {
+      "A": {
+        "run_id": "run_86f5ff8ce1b94c12bae97bc3dc668586",
+        "task_id": "task_a8a06a8d09c448d7c97ed5783fe4eb88",
+        "job_id": "job_c0aeaba2ae7f43b5b59cab4aba560888",
+        "candidate_hash": "3900e76340dbebea7454f44fd84709e6873fffac7dc76a3a27c8c610fc46151c",
+        "model_task_execution": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "billed_tokens": null,
+        "workflow_calls": 4,
+        "transport_calls": 4,
+        "workflow_stdout_bytes": 40181,
+        "transport_response_bytes": 58793,
+        "workflow_elapsed_ms": 3886.640084005194,
+        "checkpoint_stdout_bytes": 5507,
+        "exploration_calls": 0,
+        "exploration_stdout_bytes": 0,
+        "exploration_elapsed_ms": 0,
+        "grade": {
+          "passed": 20,
+          "total": 20,
+          "all_passed": true
+        }
+      },
+      "B": {
+        "run_id": "run_f84cbe9a62164a8db30f4b6bc7885689",
+        "task_id": "task_ed2030f8e668f8345029741c055bae29",
+        "job_id": "job_b646184f1f6d40dda6f254629a07d5e3",
+        "candidate_hash": "3900e76340dbebea7454f44fd84709e6873fffac7dc76a3a27c8c610fc46151c",
+        "model_task_execution": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "billed_tokens": null,
+        "workflow_calls": 4,
+        "transport_calls": 4,
+        "workflow_stdout_bytes": 39120,
+        "transport_response_bytes": 58168,
+        "workflow_elapsed_ms": 3985.937098012073,
+        "checkpoint_stdout_bytes": 4448,
+        "exploration_calls": 0,
+        "exploration_stdout_bytes": 0,
+        "exploration_elapsed_ms": 0,
+        "grade": {
+          "passed": 20,
+          "total": 20,
+          "all_passed": true
+        }
+      },
+      "C": {
+        "run_id": "run_3f77eee20f5e496cbfe4af56ec9af588",
+        "task_id": "task_96b408501b8d54474e217dd50dc50130",
+        "job_id": "job_5d5aaa67ead94fbd954b31ef7ee797dd",
+        "candidate_hash": "3900e76340dbebea7454f44fd84709e6873fffac7dc76a3a27c8c610fc46151c",
+        "model_task_execution": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "billed_tokens": null,
+        "workflow_calls": 4,
+        "transport_calls": 4,
+        "workflow_stdout_bytes": 39123,
+        "transport_response_bytes": 58171,
+        "workflow_elapsed_ms": 4035.6227989977924,
+        "checkpoint_stdout_bytes": 4448,
+        "exploration_calls": 2,
+        "exploration_stdout_bytes": 4351,
+        "exploration_elapsed_ms": 951.3535549922381,
+        "grade": {
+          "passed": 20,
+          "total": 20,
+          "all_passed": true
+        }
+      }
+    },
+    "initial_invalid_controls": {
+      "baseline": 1,
+      "positive": 17,
+      "total": 20,
+      "valid": false,
+      "cause": "Six simultaneous subject subprocesses exceeded the existing 8-PID Sandbox allowance; partial spawn failures leaked children in the old evaluator.",
+      "adjustment": "Only this local study driver runs six independent writers in three barrier-synchronized pairs and always reaps started children. Existing shared evaluator and Sandbox limits unchanged.",
+      "simultaneously_competing_writers": 2
+    },
+    "limits": [
+      "A fixed local caller installs the same reference; no model develops an artifact.",
+      "One trial per condition; timings include noise and do not establish model quality/token benefit.",
+      "The same Python launches separate local servers; this comparison does not measure configuration-time pinning.",
+      "Public gates are partial examples; held-out evaluator outcomes are separate local observations."
+    ]
+  },
+  "installation": {
+    "skill_validator": "/usr/bin/python3 /home/doo33/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/harness-workflow",
+    "skill_result": "Skill is valid!",
+    "wheel_build": "python3 -B -m build --no-isolation --skip-dependency-check --wheel --outdir /tmp/harness-lean-kQKFdE/wheels",
+    "wheel_install": "python3 -m pip install --no-index --no-deps --target /tmp/harness-lean-kQKFdE/installed-wheel /tmp/harness-lean-kQKFdE/wheels/base_harness_external-0.8.0-py3-none-any.whl",
+    "entrypoints": [
+      "base-harness-external --help: passed",
+      "harness-explore impact demo --changed pkg/app.py --format json: found source and dependent test"
+    ],
+    "limitation": "Offline smoke used available setuptools 84.0.0, not the pinned release backend 80.9.0; exact-backend release build not run."
+  },
+  "conclusions": [
+    "Same-job 24-check projection: 11058 to 3008 bytes, while median local query time increased from 23.30 to 69.19 ms.",
+    "Small-task A/B full workflow stdout: 40181 to 39120 bytes; four calls remained four and timings did not show a speedup.",
+    "Optional C exploration adds 4351 bytes and about 951 ms across two calls; not automatically cheaper.",
+    "Warm mounted-repo scan reused 183 parsed files and read zero source bytes; 3544.60 to 1271.02 ms in this run, metadata-only advisory.",
+    "Tests confirm behavior and preserved boundaries, not increased model development quality or billed-token savings."
+  ],
+  "not_run": [
+    "AGY/Gemini model development trials (user chose local-only)",
+    "Other model/provider comparison and billing/token measurement",
+    "Windows native full regression",
+    "Exact setuptools 80.9.0 release build",
+    "Commit/push"
+  ],
+  "raw_artifact_root": "/tmp/harness-lean-kQKFdE"
+}

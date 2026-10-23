@@ -19,7 +19,15 @@ python3 skills/harness-workflow/scripts/harness_client.py configure \
 python3 skills/harness-workflow/scripts/harness_client.py preflight
 ```
 
-Python 패키지 설치 없이 기존 `scripts/harness-tool`을 호출합니다. Bun 또는 namespace
+새 로컬 설정은 선택한 Python 경로·버전·바이너리 해시·가상환경을 고정하고, 해당 Python으로
+Core CLI를 직접 호출합니다. 필요하면 configure에 `--python-executable /absolute/python`을
+추가하세요. 설정 시에는 저장소 가상환경, 없으면 설정을 실행한 Python을 선택하지만,
+이후 실행기가 사라졌을 때 다른 Python으로 자동 교체하지 않습니다. 기존 설정 파일은
+덮어쓰지 않으므로 갱신은 새 설정 경로에서 명시적으로 수행하세요.
+
+`python_runtime`이 없는 이전 로컬 설정은 저장소 `.venv`가 있어야 합니다. 스크립트를 직접
+호출할 때는 `.venv` 또는 절대 경로의 `BASE_HARNESS_PYTHON`을 사용하며 PATH fallback은
+없습니다. Python 패키지를 설치하지 않아도 소스 체크아웃으로 실행할 수 있습니다. Bun 또는 namespace
 권한이 없다면 doctor 결과를 먼저 해결하세요. 격리 없는 실행으로 자동 대체하지 않습니다.
 
 호스트의 터미널 제한 때문에 namespace를 만들 수 없다면, 호스트 밖의 일반 WSL/Linux
@@ -113,7 +121,9 @@ wsl.exe -d YOUR_DISTRO --exec python3 /absolute/host/skills/harness-workflow/scr
 | Skill / Host 에이전트 | 요청 해석, Domain 선택, 문제 해결·수정·종결 판단, 관측 검토 |
 | 도우미 | 고정 설정, 명시적 Run 바인딩, 요청 재전송·직렬화, 제출·검증·대기의 기계적 연결 |
 | Domain | 계약·검사의 의미와 정규화, 작업별 검증 범위 |
-| Core / Verifier | 상태·스냅샷·검사 참조·예산·수명주기, 격리 실행과 사실 기록 |
+| Core | 상태·스냅샷·검사 참조·예산·조건의 기계적 확인 |
+| Worker / Verifier | 격리 실행·취소·검증 수명주기와 관측 사실 기록 |
+| 선택적 탐색 도구 | 소스 구조·영향 후보를 조회. 검증 근거나 게이트를 생성하지 않음 |
 
 도우미는 성공 기준·정책을 생성하거나 사용자 승인을 추정하지 않습니다. `start`에는 mode와
 provenance를 명시합니다. 모델이 구성한 정책이면 `declared_author: model`로 남기고, 실제
@@ -132,6 +142,16 @@ timeout을 검증 실패 또는 worker 종료로 해석하지 마세요.
 사용하면 됩니다. 같은 action ID는 같은 제출·검증을 재조회하고, 새 수정본에는 새 ID를
 사용합니다. `pending`이면 `wait`로 같은 Job을 확인합니다. 도우미는 성공 판정이나 종결을
 자동으로 하지 않으며, 응답 유실 때문에 새 시도를 자동 생성하지 않습니다.
+
+기본 checkpoint CLI 응답은 짧은 `brief` 형식입니다. 상세는 응답의 참조 또는
+`--view attention`/`--view summary`로 확인합니다. 중요한 예외·결정을 남길 때만 선택적으로
+`--payload`를 전달하세요. 생략하면 노트도 생성되지 않습니다. `observe`·`revise`·`assess`를
+매 단계 반복할 필요는 없지만 실제 해석·검사 범위가 바뀌면 명시적 개정이 필요합니다.
+
+선택적 탐색은 `harness_client.py explore context /project --changed src/a.py --limit 8 --format json`
+또는 설치된 `harness-explore`를 사용합니다. `--cache-dir`는 작업장 밖을 지정하고,
+메타데이터 기반 재사용이 아닌 내용 재확인이 필요하면 `--refresh`를 사용하세요.
+캐시는 검증 입력으로 인정되지 않으며, 영향 후보에 없다는 이유로 필수 검사를 생략하면 안 됩니다.
 
 ## 4. 설치·운영 검증
 

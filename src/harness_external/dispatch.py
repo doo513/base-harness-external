@@ -14,17 +14,69 @@ METHODS.update(check="register_check", **{"retire-check": "retire_check"})
 READS = {"status", "resume", "records", "list-runs", "context", "doctor", "wait", "describe"}
 
 
-def waiting(api, run_id, job_id, wait_seconds):
+def waiting(api, run_id, job_id, wait_seconds, *, view="summary", attention_limit=20):
     require(type(wait_seconds) in (int, float) and 0 <= wait_seconds <= 3600, "WAIT_INVALID", "wait_seconds must be 0..3600")
+    require(view in {"summary", "attention", "brief"}, "INVALID_VIEW", "Wait view is summary, attention or brief")
     deadline = time.monotonic() + wait_seconds
     while True:
-        result = api.status(run_id, job_id, view="summary")
-        if result["job"]["status"] not in {"queued", "running"}:
-            return {**result, "wait_status": "terminal"}
+        result = api.status(run_id, job_id, view="summary" if view == "summary" else "compact")
+        terminal = result["job"]["status"] not in {"queued", "running"}
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return {**result, "wait_status": "pending", "note": "Observation window ended; job was not cancelled or reissued."}
+        if terminal or remaining <= 0:
+            if view != "summary":
+                result = api.status(run_id, job_id, view="attention", attention_limit=attention_limit)
+                terminal = result["selected_job"]["status"] not in {"queued", "running"}
+                if view == "brief":
+                    from .checkpoint_view import brief
+                    result = brief(result)
+            return {**result, "wait_status": "terminal" if terminal else "pending",
+                    **({"note": "Observation window ended; job was not cancelled or reissued."} if not terminal else {})}
         time.sleep(min(1, remaining))
+
+
+def _checkpoint_intent(api, run_id, request_id, observation, compare_baseline):
+    """Bind optional context to the existing durable request ledger, not a new DB."""
+    scope = "checkpoint:" + run_id
+    fingerprint = canonical_hash({"operation": "checkpoint", "observation": observation, "compare_baseline": compare_baseline,
+                                  **api.store.delivery_metadata(run_id)})
+    with api.store.transaction() as connection:
+        prior = api.store.replay(connection, scope, request_id, fingerprint)
+        if prior:
+            return
+        child = connection.execute("SELECT 1 FROM requests WHERE scope=? AND request_id IN (?,?) LIMIT 1",
+                                   (run_id, request_id + "-submit", request_id + "-verify")).fetchone()
+        require(not child or observation is None, "CHECKPOINT_REPLAY_SCOPE", "A legacy checkpoint cannot acquire new caller context on replay")
+        run = api.store.current(connection, run_id)
+        require(child is not None or run["status"] == "active", "RUN_CLOSED", "Cannot create a checkpoint intent for a terminal Run")
+        api.store.remember(connection, scope, request_id, fingerprint,
+                           {"schema_version": "checkpoint-intent-v1", "run_id": run_id, "has_caller_context": observation is not None})
+
+
+def _checkpoint_steps(api, run_id, request_id, observation, compare_baseline, wait_seconds, view, attention_limit):
+    caller_record, submitted, verified, stage = None, None, None, "observe" if observation is not None else "submit"
+    try:
+        if observation is not None:
+            stored = api.observe(run_id, observation, request_id + "-note")
+            caller_record = {"observation_id": stored["observation"]["observation_id"], "trust": "untrusted",
+                             **({"record_ref": stored["record_ref"]} if "record_ref" in stored else {})}
+        stage = "submit"
+        submitted = api.submit(run_id, request_id + "-submit")
+        stage = "verify"
+        verified = api.verify(run_id, request_id + "-verify", compare_baseline=compare_baseline,
+                              expected_candidate_hash=submitted["candidate"]["candidate_hash"])
+        stage = "wait"
+        return {**waiting(api, run_id, verified["job_id"], wait_seconds, view=view, attention_limit=attention_limit),
+                "request_ids": {"submit": request_id + "-submit", "verify": request_id + "-verify"},
+                "submitted_candidate_hash": submitted["candidate"]["candidate_hash"],
+                **({"caller_record": caller_record} if caller_record is not None else {})}
+    except (HarnessError, OSError, ValueError, sqlite3.Error) as error:
+        error.checkpoint_progress = {"stage": stage, "run_id": run_id,
+            "caller_record": caller_record,
+            "submitted_candidate_hash": submitted["candidate"]["candidate_hash"] if submitted else None,
+            "job_id": verified["job_id"] if verified else None,
+            "recovery": "inspect_or_replay_the_same_saved_request_not_a_new_intent",
+            "meaning": "acknowledged_stages_null_does_not_prove_absence_of_side_effects"}
+        raise
 
 
 def invoke(api, request, *, allowed_workspace=None):
@@ -130,23 +182,33 @@ def _invoke_core(api, request):
             fields(arguments, {"sandbox"})
             return response(**doctor(api.store, **arguments))
         if operation in {"checkpoint", "wait"}:
-            allowed = {"run_id", "wait_seconds", "compare_baseline"} if operation == "checkpoint" else {"run_id", "job_id", "wait_seconds"}
+            allowed = ({"run_id", "wait_seconds", "compare_baseline", "payload", "note"} if operation == "checkpoint"
+                       else {"run_id", "job_id", "wait_seconds"}) | {"view", "attention_limit"}
             fields(arguments, allowed, {"run_id"} if operation == "checkpoint" else {"run_id", "job_id"})
             wait_seconds = arguments.get("wait_seconds", 0 if operation == "checkpoint" else 30)
             require(type(wait_seconds) in (int, float) and 0 <= wait_seconds <= 3600, "WAIT_INVALID", "wait_seconds must be 0..3600")
+            from .errors import integer
+            view = arguments.get("view", "summary")
+            require(view in {"summary", "attention", "brief"}, "INVALID_VIEW", "Checkpoint view is summary, attention or brief")
+            attention_limit = integer(arguments.get("attention_limit", 20), 1, 100, "attention_limit")
             run_id = arguments["run_id"]
             if operation == "wait":
-                return waiting(api, run_id, arguments["job_id"], wait_seconds)
+                return waiting(api, run_id, arguments["job_id"], wait_seconds, view=view, attention_limit=attention_limit)
             require(len(request_id) <= 120 and type(arguments.get("compare_baseline", False)) is bool,
                     "INVALID_PARAMETERS", "Invalid checkpoint ID or compare_baseline")
+            note = arguments.get("note", "")
+            require(isinstance(note, str) and len(note) <= 16000, "INVALID_OBSERVATION", "Checkpoint note must be bounded text")
+            observation = None
+            if "payload" in arguments:
+                from .delivery import payload
+                observation = {"note": note, "payload": payload(arguments["payload"])}
+            elif note:
+                observation = {"note": note}
+            _checkpoint_intent(api, run_id, request_id, observation, arguments.get("compare_baseline", False))
             # Independent durable replay keys retain the original snapshot if the
             # process dies after submit but before verify. No automatic retry.
-            submitted = api.submit(run_id, request_id + "-submit")
-            verified = api.verify(run_id, request_id + "-verify", compare_baseline=arguments.get("compare_baseline", False),
-                                  expected_candidate_hash=submitted["candidate"]["candidate_hash"])
-            return {**waiting(api, run_id, verified["job_id"], wait_seconds),
-                    "request_ids": {"submit": request_id + "-submit", "verify": request_id + "-verify"},
-                    "submitted_candidate_hash": submitted["candidate"]["candidate_hash"]}
+            return _checkpoint_steps(api, run_id, request_id, observation, arguments.get("compare_baseline", False),
+                                     wait_seconds, view, attention_limit)
         method = getattr(api, METHODS[operation])
         if operation == "start":
             for old, new in (("domain", "domain_id"), ("required_check", "required_checks"), ("deferred_check", "deferred_checks")):

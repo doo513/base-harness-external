@@ -22,11 +22,48 @@ import time
 MAX_INPUT = 256 * 1024
 MAX_OUTPUT = 8 * 1024 * 1024
 API_VERSION = "external-harness-v2"
+_UNSET = object()
 MUTATIONS = {"start", "observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "cleanup", "finish", "checkpoint", "knowledge-publish"}
 # Generated Core syntax, not another set of Domain/policy rules.
 CATALOG = json.loads(Path(__file__).with_name("operation_catalog.json").read_text(encoding="utf-8"))
 OPTIONS = CATALOG["options"]
 REQUIRED = {key: set(value) for key, value in CATALOG["required"].items()}
+
+# Executed by the operator-selected Python, before importing any Harness code.
+# This is runtime identification, not a claim that installed packages are trusted.
+_PYTHON_IDENTITY_CODE = """
+import hashlib, json, pathlib, sys
+def _runtime_hash(path):
+    with open(path, 'rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+_venv_config = pathlib.Path(sys.prefix) / 'pyvenv.cfg'
+_runtime_identity = {
+    'implementation': sys.implementation.name,
+    'version': list(sys.version_info[:3]),
+    'cache_tag': sys.implementation.cache_tag,
+    'executable_sha256': _runtime_hash(sys.executable),
+    'prefix': str(pathlib.Path(sys.prefix).resolve()),
+    'base_prefix': str(pathlib.Path(sys.base_prefix).resolve()),
+    'venv_config_sha256': _runtime_hash(_venv_config) if _venv_config.is_file() else None,
+}
+"""
+_CHECKED_BOOTSTRAP = _PYTHON_IDENTITY_CODE + """
+_source = sys.argv.pop(1)
+_expected = json.loads(sys.argv.pop(1))
+if _runtime_identity != _expected:
+    print(json.dumps({'api_version':'external-harness-v2','ok':False,'source':'runtime-bootstrap',
+        'error':{'code':'PYTHON_RUNTIME_CHANGED','message':'Configured Python identity changed; no Core operation was invoked.'}}))
+    raise SystemExit(2)
+sys.path.insert(0, _source)
+"""
+_PINNED_BOOTSTRAP = _CHECKED_BOOTSTRAP + """
+from harness_external.__main__ import main
+raise SystemExit(main())
+"""
+_EXPLORER_BOOTSTRAP = _CHECKED_BOOTSTRAP + """
+from change_lens.__main__ import main
+raise SystemExit(main())
+"""
 
 
 class ClientError(Exception):
@@ -189,9 +226,50 @@ def default_config_path():
     return root / "base-harness-external" / "client.json"
 
 
+def validate_python_runtime(value):
+    require(isinstance(value, dict) and set(value) == {"schema_version", "executable", "identity"}
+            and value["schema_version"] == "caller-python-runtime-v1", "CONFIG_RUNTIME", "Invalid configured Python binding.")
+    absolute_path(value["executable"])
+    identity = value["identity"]
+    require(isinstance(identity, dict) and set(identity) == {"implementation", "version", "cache_tag", "executable_sha256", "prefix", "base_prefix", "venv_config_sha256"},
+            "CONFIG_RUNTIME", "Invalid Python identity fields.")
+    require(isinstance(identity["version"], list) and len(identity["version"]) == 3
+            and all(type(v) is int and 0 <= v <= 999 for v in identity["version"])
+            and all(isinstance(identity[k], str) and 0 < len(identity[k]) <= 4096 for k in ("implementation", "cache_tag", "prefix", "base_prefix")),
+            "CONFIG_RUNTIME", "Invalid Python version or implementation.")
+    require(isinstance(identity["executable_sha256"], str) and re.fullmatch(r"[a-f0-9]{64}", identity["executable_sha256"])
+            and (identity["venv_config_sha256"] is None or isinstance(identity["venv_config_sha256"], str)
+                 and re.fullmatch(r"[a-f0-9]{64}", identity["venv_config_sha256"])), "CONFIG_RUNTIME", "Invalid Python file digest.")
+    return copy.deepcopy(value)
+
+
+def pin_python(repo, selected=None):
+    default = Path(repo) / ".venv" / "bin" / "python"
+    # Selection happens once during explicit configuration, never after a lost
+    # runtime or request. Preserve a venv entry path instead of resolving it away.
+    executable = absolute_path(selected or (str(default) if default.is_file() else sys.executable))
+    require(executable.is_file() and os.access(executable, os.X_OK), "PYTHON_RUNTIME_UNAVAILABLE", "Selected Python executable is unavailable.")
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            process = subprocess.run([str(executable), "-I", "-c", _PYTHON_IDENTITY_CODE + "\nprint(json.dumps(_runtime_identity))"],
+                                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ClientError("PYTHON_RUNTIME_UNAVAILABLE", "Selected Python probe failed; no fallback was attempted.") from error
+        stdout.seek(0)
+        raw = stdout.read(16385)
+    require(process.returncode == 0 and len(raw) <= 16384, "PYTHON_RUNTIME_UNAVAILABLE", "Use a working Python 3.11+ executable.")
+    try:
+        identity = decode(raw.decode("utf-8"))
+    except (ValueError, UnicodeError) as error:
+        raise ClientError("PYTHON_RUNTIME_UNAVAILABLE", "Selected executable did not report a Python identity.") from error
+    result = validate_python_runtime({"schema_version": "caller-python-runtime-v1", "executable": str(executable), "identity": identity})
+    require(tuple(identity["version"]) >= (3, 11, 0), "PYTHON_RUNTIME_UNSUPPORTED", "Harness requires Python 3.11 or newer.")
+    return result
+
+
 def validate_config(config):
     required = {"schema_version", "harness_repo", "state_dir", "state_lifetime"}
-    require(isinstance(config, dict) and required <= config.keys() <= required | {"policy_root", "server_socket"},
+    require(isinstance(config, dict) and required <= config.keys() <= required | {"policy_root", "server_socket", "python_runtime"},
             "CONFIG_INVALID", "Config requires schema_version, harness_repo, state_dir and state_lifetime.")
     require(type(config["schema_version"]) is int and config["schema_version"] == 1, "CONFIG_VERSION", "Unsupported config schema.")
     repo, state = absolute_path(config["harness_repo"]), absolute_path(config["state_dir"])
@@ -212,14 +290,19 @@ def validate_config(config):
         root = absolute_path(config["policy_root"])
         require(bool(endpoint) or root.is_dir(), "POLICY_ROOT_MISSING", "Configured operator policy directory must exist.")
         policy["policy_root"] = str(root)
+    if "python_runtime" in config:
+        validate_python_runtime(config["python_runtime"])
     return {**config, "harness_repo": str(repo), "state_dir": str(state), **policy, **endpoint}
 
 
-def configure(path, repo, state, ephemeral=False, policy_root=None, server_socket=None):
+def configure(path, repo, state, ephemeral=False, policy_root=None, server_socket=None, python_executable=None):
     config = validate_config({"schema_version": 1, "harness_repo": repo, "state_dir": state,
                               "state_lifetime": "ephemeral" if ephemeral else "persistent",
                               **({"policy_root": policy_root} if policy_root is not None else {}),
                               **({"server_socket": server_socket} if server_socket is not None else {})})
+    require(not server_socket or python_executable is None, "CONFIG_RUNTIME", "The external server owns its interpreter; do not select a local Python for socket transport.")
+    if not server_socket:
+        config["python_runtime"] = pin_python(config["harness_repo"], python_executable)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
         require(path.parent.stat().st_uid == os.getuid(), "CONFIG_PERMISSIONS", "Config directory must be owned by the current user")
@@ -245,6 +328,9 @@ def describe(operation=None):
     if operation == "start":
         argv.extend(["--binding-output", "<new-binding.json>", "--format", "compact"])
     return {"ok": True, "operation": operation, "mutates": operation in MUTATIONS, "call_argv_template": argv,
+            "response_formats": ["raw", *(["compact"] if operation in {"start", "finish", "status", "resume"} else []),
+                                 *(["attention"] if operation in {"status", "resume", "checkpoint", "wait"} else []),
+                                 *(["brief"] if operation in {"checkpoint", "wait"} else [])],
             "input_schema": copy.deepcopy(CATALOG["operations"][operation]),
             "core_input_schema": copy.deepcopy(CATALOG["core_operations"][operation]),
             "source": "bundled_core_catalog", "catalog_hash": CATALOG["sha256"],
@@ -314,6 +400,40 @@ class Client:
             root = root / "tasks" / task_id
         return root / "runs.sqlite3"
 
+    def explore(self, arguments):
+        """Host-local advisory tool: no Core transport, Run write or gate result."""
+        require(isinstance(arguments, list) and len(arguments) <= 128 and all(isinstance(v, str) and len(v) <= 8192 and "\x00" not in v for v in arguments),
+                "EXPLORATION_ARGUMENTS", "Use bounded Change Lens CLI arguments.")
+        source = Path(self.config["harness_repo"]) / "src"
+        require((source / "change_lens/__main__.py").is_file(), "EXPLORATION_UNAVAILABLE",
+                "Install the optional explorer locally. An external server does not expose arbitrary workspace exploration.")
+        pinned = self.config.get("python_runtime")
+        if pinned is not None:
+            executable = Path(pinned["executable"])
+            require(executable.is_file() and os.access(executable, os.X_OK), "PYTHON_RUNTIME_UNAVAILABLE", "Pinned local Python is unavailable.")
+            launcher = [str(executable), "-I", "-c", _EXPLORER_BOOTSTRAP, str(source), canonical(pinned["identity"]).decode("utf-8")]
+        else:
+            # This process is the Host exploration runtime, not a fallback Core.
+            launcher = [sys.executable, "-I", "-c", "import sys; sys.path.insert(0,sys.argv.pop(1)); from change_lens.__main__ import main; raise SystemExit(main())", str(source)]
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            try:
+                process = subprocess.run([*launcher, *(arguments or ["--help"])], stdin=subprocess.DEVNULL,
+                                         stdout=stdout, stderr=stderr, timeout=self.timeout or 120)
+            except subprocess.TimeoutExpired as error:
+                raise ClientError("EXPLORATION_TIMEOUT", "Local exploration timed out; no Harness verification was started.") from error
+            stdout.seek(0)
+            stderr.seek(0)
+            out, err = stdout.read(MAX_OUTPUT + 1), stderr.read(16385)
+        require(len(out) <= MAX_OUTPUT and len(err) <= 16384, "EXPLORATION_OUTPUT_TOO_LARGE", "Use the bounded context view or a smaller file limit.")
+        raw = out if process.returncode == 0 or out else err
+        try:
+            body = decode(raw.decode("utf-8"))
+        except (ValueError, UnicodeError):
+            body = {"text": raw.decode("utf-8", errors="replace")}
+        return {"ok": process.returncode == 0, "tool": "change_lens", "gate_eligible": False,
+                "data": body, "exit_code": process.returncode,
+                "meaning": "host_exploration_not_verifier_evidence"}
+
     def execute(self, operation, arguments, request_id=None):
         if self.trace_file is None:
             return self._execute(operation, arguments, request_id)
@@ -357,14 +477,26 @@ class Client:
                     "Configured state is missing; check storage/configuration. Do not silently start a replacement Run.")
         # No shell, no model calls, no worker loop, no automatic retry/cancellation.
         with tempfile.TemporaryDirectory(prefix="harness-client-json-") as transport, tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-            argv = ["bash", str(Path(self.config["harness_repo"]) / "scripts" / "harness-tool"),
-                    "--state-dir", self.config["state_dir"],
+            pinned = self.config.get("python_runtime")
+            if pinned is not None:
+                executable = Path(pinned["executable"])
+                require(executable.is_file() and os.access(executable, os.X_OK), "PYTHON_RUNTIME_UNAVAILABLE", "Pinned Python disappeared; no Core request or fallback was sent.")
+                launcher = [str(executable), "-I", "-c", _PINNED_BOOTSTRAP, str(Path(self.config["harness_repo"]) / "src"), canonical(pinned["identity"]).decode("utf-8")]
+            else:
+                legacy_python = Path(self.config["harness_repo"]) / ".venv" / "bin" / "python"
+                require(legacy_python.is_file() and os.access(legacy_python, os.X_OK), "PYTHON_RUNTIME_NOT_CONFIGURED",
+                        "Legacy config requires its checkout .venv. Configure an explicit Python; no PATH fallback was attempted.")
+                launcher = ["bash", str(Path(self.config["harness_repo"]) / "scripts" / "harness-tool")]
+            argv = [*launcher, "--state-dir", self.config["state_dir"],
                     *(["--policy-root", self.config["policy_root"]] if self.config.get("policy_root") else []),
                     *cli_arguments(operation, arguments, transport)]
             if request_id is not None:
                 argv.append("--request-id=" + request_id)
             try:
-                completed = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=self.timeout)
+                environment = dict(os.environ)
+                if pinned is None:
+                    environment["BASE_HARNESS_PYTHON"] = str(legacy_python)
+                completed = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=self.timeout, env=environment)
             except subprocess.TimeoutExpired as error:
                 raise ClientError("CALL_OUTCOME_UNKNOWN", "CLI response timed out. A mutation may have committed and a verification worker may still run. Query status or replay the IDENTICAL request ID and payload; do not issue a new request automatically.") from error
             stdout.seek(0)
@@ -381,6 +513,8 @@ class Client:
                 raise ClientError("TRANSPORT_RESPONSE", "Harness did not return valid JSON. Check launcher/runtime; do not assume a mutating request failed to commit.") from error
         require(isinstance(response, dict) and response.get("api_version") == API_VERSION and type(response.get("ok")) is bool,
                 "API_MISMATCH", "Expected the external-harness-v2 JSON API; check the configured checkout.")
+        if pinned is not None and response.get("source") == "runtime-bootstrap" and response_error_code(response) == "PYTHON_RUNTIME_CHANGED":
+            raise ClientError("PYTHON_RUNTIME_CHANGED", "Configured Python changed; no Core operation was invoked. Restore it or explicitly configure a new runtime.")
         require(completed.returncode in (0, 2), "TRANSPORT_EXIT", "Unexpected CLI exit; mutation outcome may be unknown.")
         return response
 
@@ -622,17 +756,34 @@ class Client:
             value["input_bindings"] = copy.deepcopy(input_bindings)
         return {"ok": True, "request": value}
 
-    def checkpoint(self, binding, action_id, *, compare_baseline=False, wait_seconds=0):
+    def checkpoint(self, binding, action_id, *, compare_baseline=False, wait_seconds=0, view=None,
+                   attention_limit=None, payload=_UNSET, note=_UNSET, binding_path=None, output=None):
         require(isinstance(binding, dict), "BINDING_INVALID", "Checkpoint requires an explicit Run binding.")
         require(type(compare_baseline) is bool, "ARGUMENTS_INVALID", "compare_baseline must be boolean.")
         validate_wait(wait_seconds)
-        request = self.make_request("checkpoint", {"compare_baseline": compare_baseline, "wait_seconds": wait_seconds},
-                                    action_id=action_id, binding=binding)["request"]
+        arguments = {"compare_baseline": compare_baseline, "wait_seconds": wait_seconds}
+        if view is not None:
+            arguments["view"] = view
+        if attention_limit is not None:
+            arguments["attention_limit"] = attention_limit
+        if payload is not _UNSET:
+            arguments["payload"] = copy.deepcopy(payload)
+        if note is not _UNSET:
+            arguments["note"] = note
+        if binding_path is not None or output is not None:
+            return self.call_operation("checkpoint", arguments, binding=binding, action_id=action_id,
+                                       binding_path=binding_path, output=output)
+        request = self.make_request("checkpoint", arguments, action_id=action_id, binding=binding)["request"]
         return self.call(request)
 
-    def wait(self, binding, job_id, *, wait_seconds=30, validated=False):
+    def wait(self, binding, job_id, *, wait_seconds=30, validated=False, view=None, attention_limit=None):
         validate_wait(wait_seconds)
-        request = self.make_request("wait", {"job_id": job_id, "wait_seconds": wait_seconds}, binding=binding)["request"]
+        arguments = {"job_id": job_id, "wait_seconds": wait_seconds}
+        if view is not None:
+            arguments["view"] = view
+        if attention_limit is not None:
+            arguments["attention_limit"] = attention_limit
+        request = self.make_request("wait", arguments, binding=binding)["request"]
         return self.call(request)
 
     def context(self, binding, *, after=None, page=None, limit=20, complete=False, max_pages=64):
@@ -1002,13 +1153,14 @@ def main(argv=None):
         schema.add_argument("--domain", help="query the configured Harness for Domain-owned parameter schemas")
         schema.add_argument("--adapter", help="limit Domain discovery to one registered adapter")
         schema.add_argument("--runtime", action="store_true", help="query the configured Core's actual operation schema")
-        schema.add_argument("--helper", choices=("find", "bind", "context", "checkpoint", "wait"), help="show exact helper arguments")
+        schema.add_argument("--helper", choices=("find", "bind", "context", "checkpoint", "wait", "explore"), help="show exact helper arguments")
         setup = commands.add_parser("configure", help="create a NEW config; never overwrite")
         setup.add_argument("--harness-repo", required=True)
         setup.add_argument("--state-dir", required=True)
         setup.add_argument("--ephemeral", action="store_true", help="explicitly disposable tests only")
         setup.add_argument("--policy-root", help="operator-configured acceptance registry, not an editable task proposal")
         setup.add_argument("--server-socket", help="explicit external Harness socket; never falls back to spawning local Core")
+        setup.add_argument("--python-executable", help="absolute Python executable to pin for local calls; default selects checkout venv or this configuration process")
         call = commands.add_parser("call", help="one request, no automatic action loop")
         source = call.add_mutually_exclusive_group(required=True)
         source.add_argument("--request", help="replay a saved JSON request: path, '-' stdin, or json:{...}")
@@ -1029,7 +1181,7 @@ def main(argv=None):
         call.add_argument("--output", type=Path, help="save exact request; defaults beside --binding/--binding-output for mutations")
         call.add_argument("--binding-output", type=Path, help="start only: save binding from the same Core receipt, without another resume")
         call.add_argument("--resolve-detail", action="store_true", help="decode only the selected records detail, starting at byte zero")
-        call.add_argument("--format", choices=("raw", "attention", "compact"), default="raw", help="attention for bound reads; compact start/finish or status/resume")
+        call.add_argument("--format", choices=("raw", "attention", "compact", "brief"), default="raw", help="brief for checkpoint/wait; attention for bound reads; compact start/finish or status/resume")
         call.add_argument("--attention-limit", type=int, default=20)
         find = commands.add_parser("find", help="list matching Runs without choosing/resuming one")
         find.add_argument("--workspace", required=True)
@@ -1055,10 +1207,18 @@ def main(argv=None):
         checkpoint.add_argument("--action-id", required=True)
         checkpoint.add_argument("--compare-baseline", action="store_true")
         checkpoint.add_argument("--wait-seconds", type=float, default=30)
+        checkpoint.add_argument("--view", choices=("brief", "attention", "summary"), default="brief")
+        checkpoint.add_argument("--attention-limit", type=int, default=20)
+        checkpoint.add_argument("--payload", help="optional fields/extensions/parents JSON; omitted means no caller note")
+        checkpoint.add_argument("--note", help="optional caller note, never verification evidence")
+        checkpoint.add_argument("--output", type=Path, help="saved exact request; defaults beside the binding")
+        checkpoint.add_argument("--response-output", type=Path, help="optional receipt with exact caller record reference")
         wait = commands.add_parser("wait", help="poll one existing job; timeout means pending, never failed")
         wait.add_argument("--binding", type=Path, required=True)
         wait.add_argument("--job-id", required=True)
         wait.add_argument("--wait-seconds", type=float, default=30)
+        wait.add_argument("--view", choices=("brief", "attention", "summary"), default="brief")
+        wait.add_argument("--attention-limit", type=int, default=20)
         context = commands.add_parser("context", help="first restore without a cursor; then request explicit deltas")
         context.add_argument("--binding", type=Path, required=True)
         context.add_argument("--after")
@@ -1066,6 +1226,8 @@ def main(argv=None):
         context.add_argument("--limit", type=int, default=20)
         context.add_argument("--complete", action="store_true", help="validate and coalesce all pages with short, lossless text references")
         context.add_argument("--max-pages", type=int, default=64)
+        explore = commands.add_parser("explore", help="local Change Lens discovery only; no Core call or verification")
+        explore.add_argument("arguments", nargs=argparse.REMAINDER, help="inspect|impact|context PATH; for example context PATH --changed src/a.py --limit 8 --format json")
         commands.add_parser("preflight", help="measure actual strict Sandbox availability; no task run is created")
         args = parser.parse_args(argv)
         if args.command == "describe" and args.helper:
@@ -1077,7 +1239,7 @@ def main(argv=None):
             require(not args.adapter, "CLI_ARGUMENTS", "--adapter requires --domain")
             result = describe(args.operation)
         elif args.command == "configure":
-            result = configure(args.config, args.harness_repo, args.state_dir, args.ephemeral, args.policy_root, args.server_socket)
+            result = configure(args.config, args.harness_repo, args.state_dir, args.ephemeral, args.policy_root, args.server_socket, args.python_executable)
         else:
             require(args.config.is_file(), "CONFIG_MISSING",
                     "Selected config does not exist: " + str(args.config) +
@@ -1116,10 +1278,17 @@ def main(argv=None):
                 require(args.format != "attention" or operation in {"status", "resume", "checkpoint", "wait"} and binding is not None,
                         "CLI_ARGUMENTS", "Attention requires an explicit bound read/checkpoint/wait")
                 require(args.format != "compact" or operation in {"start", "finish", "status", "resume"}, "CLI_ARGUMENTS", "Compact supports start/finish/status/resume")
+                require(args.format != "brief" or operation in {"checkpoint", "wait"} and binding is not None,
+                        "CLI_ARGUMENTS", "Brief requires a bound checkpoint/wait")
+                if args.format == "brief" and saved is not None:
+                    require(arguments.get("view") == "brief", "CLI_ARGUMENTS", "Replay the saved request as-is; request a brief wait separately if its original view was different.")
+                if args.format == "brief" and saved is None:
+                    require(arguments.get("view", "brief") == "brief", "CLI_ARGUMENTS", "--format brief conflicts with the explicit view")
+                    arguments.update(view="brief", attention_limit=args.attention_limit)
                 if args.format == "compact" and operation in {"status", "resume"}:
                     require(arguments.get("view", "compact") == "compact", "CLI_ARGUMENTS", "--format compact conflicts with the explicit view")
                     arguments["view"] = "compact"
-                if args.format == "attention" and operation in {"status", "resume"} and saved is None:
+                if args.format == "attention" and operation in {"status", "resume", "checkpoint", "wait"} and saved is None:
                     require(arguments.get("view", "attention") == "attention", "CLI_ARGUMENTS", "--format attention conflicts with the explicit view")
                     require("attention_limit" not in arguments or arguments["attention_limit"] == args.attention_limit,
                             "CLI_ARGUMENTS", "Conflicting attention limits")
@@ -1162,12 +1331,21 @@ def main(argv=None):
                     result = {"ok": True, "request_file": str(args.output), "request_id": result["request"].get("request_id")}
             elif args.command == "checkpoint":
                 result = client.checkpoint(read_json(str(args.binding)), args.action_id,
-                                           compare_baseline=args.compare_baseline, wait_seconds=args.wait_seconds)
+                                           compare_baseline=args.compare_baseline, wait_seconds=args.wait_seconds,
+                                           view=args.view, attention_limit=args.attention_limit,
+                                           payload=read_json(args.payload) if args.payload is not None else _UNSET,
+                                           note=args.note if args.note is not None else _UNSET,
+                                           binding_path=args.binding, output=args.output)
+                if args.response_output is not None:
+                    result = save_response(args.response_output, result)
             elif args.command == "wait":
-                result = client.wait(read_json(str(args.binding)), args.job_id, wait_seconds=args.wait_seconds)
+                result = client.wait(read_json(str(args.binding)), args.job_id, wait_seconds=args.wait_seconds,
+                                     view=args.view, attention_limit=args.attention_limit)
             elif args.command == "context":
                 result = client.context(read_json(str(args.binding)), after=args.after, page=args.page, limit=args.limit,
                                         complete=args.complete, max_pages=args.max_pages)
+            elif args.command == "explore":
+                result = client.explore(args.arguments)
             else:
                 result = client.call({"operation": "doctor", "arguments": {"sandbox": True}})
         result = with_cost(result, client, args.trace_file, started, args.command)

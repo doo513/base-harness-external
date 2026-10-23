@@ -81,6 +81,7 @@ def attention(api, run_id, *, job_id=None, limit=20, analysis_selection=None):
         relevance = "current" if current_job else "diagnostic" if job and job.get("purpose") == "diagnostic" else "historical" if job else "not_run"
         if result["selected_job"]:
             result["selected_job"].update(is_current_verification=current_job, relevance=relevance)
+            result["selected_job"]["contract_hash"] = job.get("contract_hash")
         for item in result["attention"]:
             item["scope"] = "current_declaration" if item["kind"] == "verification_gap" else relevance
             if item["kind"] == "check" and item.get("observation_id"):

@@ -11,7 +11,7 @@ from typing import Protocol
 
 from harness.common import canonical_bytes, canonical_hash
 from .errors import fields, integer, relative_path, require
-from .registry import code_identity, effective_config
+from .registry import effective_config
 
 
 class CheckPreparationPort(Protocol):
@@ -33,14 +33,14 @@ class AdapterCheckPreparation:
             source = inspect.getsourcefile(target)
             require(hasattr(target, "__code__") and source and Path(source).is_file(),
                     "DOMAIN_IDENTITY_UNAVAILABLE", "Preparation methods must expose implementation identity")
-            methods[name] = canonical_hash(code_identity(target.__code__))
             path = Path(source).resolve()
             if path not in source_hashes:
                 source_hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
             sources[name] = source_hashes[path]
+            methods[name] = canonical_hash({"symbol": target.__qualname__, "source": source_hashes[path]})
         # Registry instances contain runtime objects. Used adapter implementations
         # are pinned separately; alias dispatch is part of this input bridge.
-        return {"schema_version": "check-preparation-identity-v1", "methods": methods, "sources": sources,
+        return {"schema_version": "check-preparation-identity-v2", "methods": methods, "sources": sources,
                 "configuration": effective_config(self, exclude={"adapters"}),
                 "parameter_aliases": self.adapters.parameter_aliases() if self.adapters is not None else {}}
 
