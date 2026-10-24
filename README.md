@@ -18,15 +18,29 @@ fields/extensions and hash-bound parent references in the existing Run store.
 its source and destination inside the transaction. This is data delivery, not a
 new reasoning policy or evidence source. See [field delivery and recovery](skills/harness-workflow/references/protocol.md#field-input-and-record-delivery).
 
-New Skill-helper starts automatically create one database per independent task,
-under `state_dir/tasks/<task_id>/`. Reuse its binding across sessions; a different
-task uses a different start action even in the same project. Existing envelopes
-without task routing retain the legacy root DB; no old records are migrated.
+New caller configurations select project-local storage: one authoritative task
+database under `<project>/.harness/tasks/<task_id>/`, alongside that task's snapshots
+and detailed records. The v3 binding carries both task ID and project location.
+Reuse it across Host sessions; a different task uses a different start action.
+`.harness/` is excluded from submission and Change Lens discovery and contains its
+own Git exclusion. It is still same-user advisory storage, not protected certification.
+Legacy configurations, v1/v2 bindings and saved requests keep their original
+external stores (`state_dir/tasks/<task_id>/` or the root DB). No records are moved,
+copied to shared storage or silently selected from a different location.
 Optional caller-selected reusable notes are published to `state_dir/knowledge/`
 after closeout. `knowledge-find` returns short references and `knowledge-read`
 loads only a selected MD document. These are historical advice, never a new
 task's evidence, approval or completion policy. Publication failure does not undo
 Core closeout. See [task storage and knowledge](skills/harness-workflow/references/task-storage.md).
+
+For project-local Runs, application `finish` also generates
+`state_dir/run-ledger/<run_id>.md` and a short Markdown index from the closed DB
+record. The project DB remains the sole authority for execution state and detailed
+verification. These documents retain hashes/references, measured scope, caller
+claims and uncertainty separately; they contain neither a second database nor a
+raw transcript. Editing Markdown cannot change a gate. `report-list`/`report-read`
+read historical projections; `report-publish` repairs a failed publication without
+reopening or re-verifying the Run. Legacy external stores are not auto-published.
 
 [Configured acceptance policies](POLICIES.md) separate operator-provided mandatory
 checks and pinned test/fixture bundles from model exploratory probes. Optional
@@ -83,9 +97,12 @@ preflight and verification use that endpoint. See [installation](INSTALL.md).
 The default independent state directory is `$XDG_STATE_HOME/base-harness-external`
 (falling back to `~/.local/state/base-harness-external`) on Linux, or
 `%LOCALAPPDATA%/base-harness-external` on Windows. Override with `--state-dir`.
-State and workspace must be disjoint. `runs.sqlite3` stores Runs, jobs, contracts,
-untrusted notes and verification records; `runs/<run_id>/<candidate_id>/payload`
-stores snapshots. No Host session database or authentication is used.
+This is the shared knowledge/operational directory and historical-store root,
+not a second project Run database. It stays outside the project. A project-local
+store is admitted only through explicit application routing; arbitrary state/workspace
+overlap is rejected. `runs.sqlite3` stores Runs, jobs, contracts, untrusted notes and
+verification records; `runs/<run_id>/<candidate_id>/payload` stores snapshots beneath
+the selected task directory. No Host session database or authentication is used.
 
 ### First actual run
 

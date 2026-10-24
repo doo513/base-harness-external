@@ -10,7 +10,33 @@
 네이티브 Windows Harness 실행을 검증했다는 뜻은 아닙니다. Windows에 있는 에이전트도
 WSL의 도우미를 호출할 수 있으며, 모델을 WSL에 설치할 필요는 없습니다.
 
-저장소를 원하는 영구 위치에 체크아웃하고, 그 안에서 다음을 실행하세요.
+WSL/Linux를 실행 기준으로 사용합니다. 개발 작업장은 예를 들어
+`/home/<사용자>/projects/<프로젝트>`에 두고 Windows에서는
+`\\wsl$\<배포판>\home\<사용자>\projects\<프로젝트>`로 같은 파일을 엽니다.
+Windows용 복사본을 별도로 동기화하지 않습니다. 검색·테스트·Harness 호출은 WSL에서
+수행하며 Harness에는 Linux 절대 경로를 전달합니다. 사용자명은 설정/홈에서 결정합니다.
+
+소스 체크아웃을 Downloads에 유지하더라도 실행 코드는 Linux 파일시스템에 배포하세요.
+아래 설치기는 기본적으로 `$XDG_DATA_HOME/base-harness-external` 또는
+`~/.local/share/base-harness-external`에 소스·Python별 고정 실행본을 만듭니다.
+기존 가상환경을 복사하지 않고 새 경로에 표준 라이브러리 전용 venv를 생성합니다.
+네트워크, 패키지 다운로드, 기존 설정 덮어쓰기, 작업 DB 이동은 하지 않습니다.
+
+```sh
+python3 scripts/install-runtime.py \
+  --config "$HOME/.config/base-harness-external/client-linux-project.json" \
+  --state-dir "$HOME/.local/state/base-harness-external"
+```
+
+결과의 `runtime`, `python`, `config_path`를 사용하세요. 새 설정의 기본은 프로젝트 내부 DB이며,
+위 `state_dir`에는 공용 MD·운영 잠금·이전 저장소 호환 데이터만 둡니다. 기존 설정이나
+기존 Run은 이동/덮어쓰지 않습니다. 실행본만 설치하려면 `--config`, `--state-dir`를 생략합니다.
+기존 Run의 Python/검증기 식별값이 다르면 기존 설정·실행본으로
+계속 작업하거나, 명시적인 연결 Run을 시작해야 합니다. 실행 중인 버전을 덮어쓰거나
+실패한 Run을 몰래 새로 시작하지 않습니다. Bun과 선택적 pytest 환경은 별도로 준비합니다.
+Linux 실행 결과는 Windows 네이티브 실행 검증이 아닙니다.
+
+이미 준비한 실행본을 직접 연결할 때는 다음을 사용하세요.
 
 ```sh
 python3 skills/harness-workflow/scripts/harness_client.py configure \
@@ -50,7 +76,9 @@ workspace root를 분리해야 합니다.
 
 소켓은 103바이트 이내의 Linux 파일시스템 경로여야 합니다. 부모 디렉터리는 서버
 사용자 소유여야 하며, 동일 UID 방식은 0700, 별도 client UID 방식은 다른 사용자 접근을
-막고 에이전트 그룹에 탐색 권한을 준 디렉터리여야 합니다. 상태·소켓은 허용 작업공간 밖에 있어야 합니다.
+막고 에이전트 그룹에 탐색 권한을 준 디렉터리여야 합니다. 공용 MD/운영 디렉터리와 소켓은
+허용 작업공간 밖에 둡니다. 실제 작업 DB만 프로젝트의 예약된 `.harness/` 아래에 둡니다.
+사용자 홈 전체가 아니라 `projects` 또는 개별 프로젝트만 허용하세요.
 기존 소켓을 자동 삭제하거나 덮어쓰지 않습니다. 정책이 있다면 `serve` 앞에
 `--policy-root /path/to/policies`를 추가하세요.
 
@@ -73,10 +101,27 @@ workspace root를 분리해야 합니다.
 `policy_root`로 연결하세요. 에이전트의 검사 제안과 달리 이 경로의 검사·코드·픽스처는
 Run 시작 시 고정됩니다. 등록은 로컬 운영 설정이지 인증된 사용자 승인이나 OS 보호가 아닙니다.
 
-상태 디렉터리는 **모든 작업장 밖의 영구 위치**여야 합니다. 컨테이너라면 지속되는 볼륨에
-두세요. 경로만으로 저장 수명을 완전히 판별할 수 없으므로 환경 전환 뒤에도 같은 저장소가
-마운트되는지 확인해야 합니다. `/tmp` 같은 알려진 임시 위치는 기본 설정에서 거부합니다.
-`configure --ephemeral`은 폐기 가능한 테스트 전용입니다.
+저장 경계는 다음과 같습니다.
+
+```text
+/home/<사용자>/projects/<프로젝트>/
+├─ 소스·산출물
+└─ .harness/tasks/<task_id>/
+   ├─ runs.sqlite3             실행 상태·계약·상세 검증의 유일한 원본
+   └─ runs/<run_id>/           제출 스냅샷과 검증 자원
+
+<state_dir>/
+├─ run-ledger/<run_id>.md      종결 시 DB에서 생성한 Run 원장 문서
+├─ run-ledger/INDEX.md         짧은 인덱스
+└─ knowledge/                 선택적으로 발행한 재사용 교훈
+```
+
+MD는 기준 상태가 아니라 DB의 파생 기록입니다. MD를 편집해도 판정은 바뀌지 않습니다.
+발행 실패는 종결 실패가 아니며 `report-publish`로 복구합니다. 전체 대화나 상세 측정을
+공용 공간에 복제하지 않습니다. `.harness/`는 제출·Change Lens·일반 Git 추적에서 제외합니다.
+기존 설정/바인딩은 명시적으로 이전 외부 DB를 계속 가리키며 자동 이동·추측 전환은 없습니다.
+프로젝트와 공용 디렉터리 모두 영구 위치를 사용하세요. `configure --ephemeral`은 폐기 가능한
+테스트 전용이며, 같은 사용자 권한의 폴더 분리와 해시는 보호된 인증이 아닙니다.
 
 ## 2. 사용하는 에이전트에 Skill 설치
 

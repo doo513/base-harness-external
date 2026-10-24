@@ -7,7 +7,7 @@ from pathlib import Path
 import stat
 import tokenize
 
-EXCLUDED = frozenset({".git", ".hg", ".svn", ".venv", "venv", "env", "__pycache__", ".pytest_cache",
+EXCLUDED = frozenset({".git", ".hg", ".svn", ".harness", ".venv", "venv", "env", "__pycache__", ".pytest_cache",
                       ".mypy_cache", ".ruff_cache", ".tox", "node_modules", "build", "dist", ".eggs"})
 
 

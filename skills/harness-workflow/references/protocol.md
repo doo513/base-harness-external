@@ -16,7 +16,9 @@ Missing/changed bindings report `PYTHON_RUNTIME_UNAVAILABLE`/`PYTHON_RUNTIME_CHA
 Legacy configs without this field require the checkout venv; they no longer pick
 an unrelated PATH Python. Socket servers own their runtime; Host Python does not
 replace it. Existing config/binding files are not silently migrated or overwritten.
-Production uses a durable state directory outside every workspace. `--ephemeral`
+Production uses a durable shared knowledge/operational directory outside workspaces,
+and new configurations store detailed task state inside each project's `.harness/`.
+Both project and shared storage must be durable. `--ephemeral`
 is an explicit disposable-test setting, not a recovery strategy. Setup is documented
 in the repository's `INSTALL.md`; the helper's `configure --help` is self-contained.
 The helper sends one `invoke --request` envelope to the existing CLI. Optional
@@ -28,12 +30,21 @@ selects an operator-configured acceptance registry. It is configuration, not a
 field the caller can replace in a task request. Configured Domain defaults cannot
 be overridden by selecting a weaker policy.
 
-New helper-built starts use separate task stores under that root. Saved v2
-bindings carry the task selector; v1 envelopes remain on the original root DB.
+New configurations use project-local stores and v3 bindings carrying `task_id`
+plus `project_workspace`. Old configs without `task_storage` retain external task
+stores and v2 bindings; v1 envelopes remain on the original root DB.
 The application routes both CLI and socket envelopes before invoking the same
 Core. See [task stores and reusable notes](task-storage.md) for discovery,
 continuations and optional post-closeout publication. Omitted routing fields
-never silently choose a task or move old data.
+never silently choose a task or move old data. The optional envelope field
+`project_workspace` requires task_id, must match the Run context, and derives only
+the fixed `.harness/tasks/<task_id>/` path. It is not an arbitrary database path.
+Raw CLI callers can pass `--task-id ... --project-workspace ...` before the operation.
+For project-local Runs, successful `finish` also attempts the derived shared MD
+publication and returns `run_report` independently of closeout. The source DB is
+the only runtime authority. `report-publish` recovers a failed document/index;
+global `report-list` and `report-read` retrieve historical documents, never current
+verification authority. See [Run ledgers](task-storage.md#derived-run-ledger).
 
 ## Low-overhead workflow
 

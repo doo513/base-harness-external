@@ -84,7 +84,14 @@ def invoke(api, request, *, allowed_workspace=None):
     from .task_storage import TaskStores
     from .service import response
     from .application_schema import OPTIONS as APP_OPTIONS
-    fields(request, {"operation", "arguments", "request_id", "context", "task_id", "knowledge", "input_bindings"}, {"operation", "arguments"})
+    fields(request, {"operation", "arguments", "request_id", "context", "task_id", "project_workspace", "knowledge", "input_bindings"}, {"operation", "arguments"})
+    require("project_workspace" not in request or "task_id" in request,
+            "PROJECT_WORKSPACE", "A project route requires an explicit task ID")
+    if "project_workspace" in request:
+        require(isinstance(request["project_workspace"], str) and Path(request["project_workspace"]).is_absolute(),
+                "PROJECT_WORKSPACE", "Project workspace must be absolute")
+        require(allowed_workspace is None or allowed_workspace(Path(request["project_workspace"])),
+                "WORKSPACE_NOT_ALLOWED", "Project is outside the configured roots")
     operation = request["operation"]
     require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"},
             "OPERATION_UNSUPPORTED", "Unknown operation")
@@ -105,11 +112,22 @@ def invoke(api, request, *, allowed_workspace=None):
         return response(**queries.list_runs(api, allowed_workspace=allowed_workspace, **request["arguments"]))
     if operation.startswith("knowledge-"):
         return _knowledge(api, request, allowed_workspace)
+    if operation.startswith("report-"):
+        return _report(api, request, allowed_workspace)
     inner = {k: v for k, v in request.items() if k != "knowledge"}
     if "task_id" in request:
-        result = TaskStores(api).invoke(inner, _invoke_core, allowed_workspace=allowed_workspace)
+        result = TaskStores(api, request.get("project_workspace")).invoke(inner, _invoke_core, allowed_workspace=allowed_workspace)
     else:
         result = _invoke_core(api, inner)
+    if operation == "finish" and "project_workspace" in request:
+        publication={**{k:v for k,v in inner.items() if k!="input_bindings"},"operation":"report-publish",
+                     "arguments":{"run_id":request["arguments"]["run_id"]},
+                     "request_id":"finish-report-"+canonical_hash({"request_id":request["request_id"]})[:48]}
+        try:
+            result["run_report"]=_report(api,publication,allowed_workspace)
+        except (HarnessError,OSError,ValueError,sqlite3.Error) as error:
+            result["run_report"]={"status":"failed","run_closed":True,"retry_operation":"report-publish",
+                "error":error.as_dict() if isinstance(error,HarnessError) else {"code":"RUN_REPORT_IO","message":str(error)[:1000]}}
     if operation == "finish" and "knowledge" in request:
         publication = {**{k: v for k, v in inner.items() if k != "input_bindings"}, "operation": "knowledge-publish",
                        "arguments": {"run_id": request["arguments"]["run_id"], "data": request["knowledge"]},
@@ -123,6 +141,30 @@ def invoke(api, request, *, allowed_workspace=None):
                 "error": error.as_dict() if isinstance(error, HarnessError) else {"code": "KNOWLEDGE_IO", "message": str(error)[:1000]},
                 "retry_operation": "knowledge-publish"}
     return result
+
+
+def _report(api, request, allowed_workspace):
+    from .run_reports import RunReports
+    from .task_storage import TaskStores
+    from .service import response
+    library=RunReports(api.store.root)
+    operation,arguments=request["operation"],request["arguments"]
+    if operation in {"report-list","report-read"}:
+        require(set(request)<={"operation","arguments"},"REQUEST_INVALID","Run document lookup is a global read")
+        if operation=="report-list":
+            fields(arguments,{"workspace","domain","offset","limit"})
+            return response(**library.list(**arguments,allowed_workspace=allowed_workspace))
+        fields(arguments,{"entry_id"},{"entry_id"})
+        return response(**library.read(**arguments,allowed_workspace=allowed_workspace))
+    fields(arguments,{"run_id"},{"run_id"})
+    request_id=request.get("request_id")
+    require(isinstance(request_id,str) and 0<len(request_id)<=128,"REQUEST_ID_REQUIRED","Publishing requires a stable request ID")
+    selected=TaskStores(api,request.get("project_workspace")).selected(request["task_id"]) if "task_id" in request else api
+    _invoke_core(selected,{"operation":"resume","arguments":{"run_id":arguments["run_id"],"view":"compact"},"context":request.get("context")})
+    require(allowed_workspace is None or allowed_workspace(Path(request["context"]["workspace"])),"WORKSPACE_NOT_ALLOWED","Run document source is outside the configured roots")
+    value=library.publish(selected,arguments["run_id"],request_id,task_id=request.get("task_id"))
+    return response(**value,**({"task_id":request["task_id"]} if "task_id" in request else {}),
+                    **({"project_workspace":request["project_workspace"]} if "project_workspace" in request else {}))
 
 
 def _knowledge(api, request, allowed_workspace):
@@ -141,7 +183,7 @@ def _knowledge(api, request, allowed_workspace):
     fields(arguments, {"run_id", "data"}, {"run_id", "data"})
     request_id = request.get("request_id")
     require(isinstance(request_id, str) and 0 < len(request_id) <= 128, "REQUEST_ID_REQUIRED", "Publishing needs a stable request ID")
-    selected = TaskStores(api).selected(request["task_id"]) if "task_id" in request else api
+    selected = TaskStores(api, request.get("project_workspace")).selected(request["task_id"]) if "task_id" in request else api
     _invoke_core(selected, {"operation": "resume", "arguments": {"run_id": arguments["run_id"], "view": "compact"},
                            "context": request.get("context")})
     # Validate the same Core context guard even for terminal Runs, then enforce
@@ -150,7 +192,8 @@ def _knowledge(api, request, allowed_workspace):
     require(allowed_workspace is None or allowed_workspace(Path(context["workspace"])),
             "WORKSPACE_NOT_ALLOWED", "Source workspace is outside the configured roots")
     result = library.publish(selected, arguments["run_id"], arguments["data"], request_id, task_id=request.get("task_id"))
-    return response(**result, **({"task_id": request["task_id"]} if "task_id" in request else {}))
+    return response(**result, **({"task_id": request["task_id"]} if "task_id" in request else {}),
+                    **({"project_workspace": request["project_workspace"]} if "project_workspace" in request else {}))
 
 
 def _invoke_core(api, request):

@@ -37,8 +37,17 @@ def response(**data) -> dict:
 
 
 class Harness:
-    def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None, adapters=None):
+    def __init__(self, state_dir: str | Path | None = None, *, domains=None, policy_root=None, adapters=None,
+                 project_workspace=None, coordination_root=None):
         self.store = Store(state_dir)
+        from . import storage_layout
+        self.project_workspace = storage_layout.project_path(project_workspace) if project_workspace is not None else None
+        self.coordination_root = Path(coordination_root).resolve() if coordination_root is not None else None
+        if self.project_workspace is not None:
+            storage_layout.validate_store(self.project_workspace, self.store.root)
+            require(self.coordination_root is not None and not self.coordination_root.is_relative_to(self.project_workspace)
+                    and not self.project_workspace.is_relative_to(self.coordination_root),
+                    "STATE_WORKSPACE_OVERLAP", "Worker coordination must remain outside project state")
         self.adapters = adapters if adapters is not None else builtin_adapter_registry()
         self.domains = domains or builtin_registry(check_preparation=AdapterCheckPreparation(self.adapters))
         self.policies = acceptance.PolicyRegistry(policy_root)
@@ -253,8 +262,10 @@ class Harness:
         no_links(source)
         require(source.is_dir(), "WORKSPACE_NOT_FOUND", "Workspace must exist")
         source = source.resolve()
-        require(not self.store.root.is_relative_to(source) and not source.is_relative_to(self.store.root),
+        require(self.project_workspace == source or not self.store.root.is_relative_to(source) and not source.is_relative_to(self.store.root),
                 "STATE_WORKSPACE_OVERLAP", "Run state and workspace must be disjoint directories")
+        require(self.project_workspace is None or self.project_workspace == source,
+                "RUN_CONTEXT_MISMATCH", "Project task store belongs to a different workspace")
         request = {"operation": "start", "domain_id": domain_id, "goal": goal,
                    "workspace": str(source), "parameters": parameters, "budget": budget}
         if sources is not None:
@@ -327,6 +338,10 @@ class Harness:
                 contract["rules"]["all_checks_required"] = False
                 contract["contract_hash"] = canonical_hash({k: v for k, v in contract.items() if k != "contract_hash"})
             require(contract["original_goal"] == goal and contract["domain_id"] == domain_id, "DOMAIN_RESULT_BINDING", "Domain changed intent identity")
+            if self.project_workspace is not None:
+                from .storage_layout import validate_inputs
+                validate_inputs(contract)
+                validate_inputs({"inputs": [item["path"] for item in workspace_declaration["unchanged_files"]]})
             observation_links.validate(contract.get("observation_links"), [check.get("check_id") for check in contract["checks"]])
             adapter_implementations = self.adapters.pin_implementations(contract["checks"])
             canonical_preparation = self._domain_preparation_view(preparation)
@@ -564,6 +579,9 @@ class Harness:
                 prepared = module.prepare(run["goal"], parameters, run["contract"]["verifier"], exploratory=run["policy"]["mode"] == "exploratory", intent=copy.deepcopy(run["intent"]))
             require(prepared["contract"]["original_goal"] == run["goal"] and prepared["contract"]["domain_id"] == run["domain_module"]["id"],
                     "DOMAIN_RESULT_BINDING", "Domain revision changed the original intent identity")
+            if self.project_workspace is not None:
+                from .storage_layout import validate_inputs
+                validate_inputs(prepared["contract"])
             summary = proposal.get("goal_summary", previous["goal_summary"])
             require(isinstance(summary, str) and 0 < len(summary) <= 16000, "INVALID_INTERPRETATION", "Bounded goal summary required")
             assumptions = proposal.get("assumptions", previous["assumptions"])
@@ -894,7 +912,10 @@ class Harness:
         # Durable queue entry exists before spawning. Replayed requests never spawn twice.
         from .worker import spawn_worker
         try:
-            spawn_worker(self.store.root, job_id)
+            if self.coordination_root is None:
+                spawn_worker(self.store.root, job_id)
+            else:
+                spawn_worker(self.store.root, job_id, coordination_root=self.coordination_root)
         except (OSError, HarnessError, ValueError):
             with self.store.transaction() as connection:
                 job = self.store.job(connection, job_id)

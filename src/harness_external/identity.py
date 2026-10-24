@@ -29,7 +29,7 @@ EXECUTION_FILES = (
     "harness_external/intent_sources.py",
     "harness_external/operation_schema.py", "harness_external/workspace_constraints.py",
     "harness_external/paired_inputs.py",
-    "harness_external/task_storage.py", "harness_external/artifact_io.py",
+    "harness_external/task_storage.py", "harness_external/storage_layout.py", "harness_external/artifact_io.py",
     "harness_external/application_schema.py",
     "harness_external/delivery.py",
 )

@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", help="independent persistent store; must be outside the workspace")
     parser.add_argument("--policy-root", help="operator-configured acceptance policy registry, outside the workspace")
     parser.add_argument("--task-id", help="explicit task store selector; omission preserves the legacy store")
+    parser.add_argument("--project-workspace", help="explicit project-local task store route; requires --task-id")
     commands = parser.add_subparsers(dest="command", required=True)
     describe = commands.add_parser("describe", help="read Domain and registered adapter input schemas without starting a Run")
     describe.add_argument("--domain-id", default="develop")
@@ -95,6 +96,16 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("--limit", type=int, default=10)
     read = commands.add_parser("knowledge-read", help="read one selected advisory document")
     read.add_argument("--entry-id", required=True)
+    publish_run = commands.add_parser("report-publish", help="recover a closed Run Markdown projection from its authoritative DB")
+    publish_run.add_argument("--run-id", required=True)
+    publish_run.add_argument("--request-id", required=True)
+    list_reports = commands.add_parser("report-list", help="list historical Run document references, not current execution state")
+    list_reports.add_argument("--workspace")
+    list_reports.add_argument("--domain")
+    list_reports.add_argument("--offset", type=int, default=0)
+    list_reports.add_argument("--limit", type=int, default=20)
+    read_report = commands.add_parser("report-read", help="read a selected derived Run document")
+    read_report.add_argument("--entry-id", required=True)
     for name in ("observe", "revise", "check", "retire-check", "assess", "submit", "verify", "compare", "cancel", "status", "resume", "records", "cleanup", "finish", "context"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--run-id", required=True)
@@ -147,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
             raise HarnessError("JSON_STDIN_REUSED", "Only one JSON input may consume stdin per invocation")
         from .service import Harness
         api = Harness(args.state_dir, policy_root=args.policy_root)
+        if args.project_workspace and not args.task_id:
+            raise HarnessError("TASK_ARGUMENT", "--project-workspace requires --task-id")
         if args.task_id and args.command == "serve":
             raise HarnessError("TASK_ARGUMENT", "The server routes tasks per request, not by changing its configured root")
         from .application_schema import OPTIONS as APP_OPTIONS
@@ -162,10 +175,12 @@ def main(argv: list[str] | None = None) -> int:
             envelope = {"operation": args.command, "arguments": arguments}
             if args.task_id:
                 envelope["task_id"] = args.task_id
+            if args.project_workspace:
+                envelope["project_workspace"] = args.project_workspace
             if getattr(args, "request_id", None):
                 envelope["request_id"] = args.request_id
             if "run_id" in arguments:
-                selected = TaskStores(api).selected(args.task_id) if args.task_id else api
+                selected = TaskStores(api, args.project_workspace).selected(args.task_id) if args.task_id else api
                 with selected.store.transaction(write=False) as connection:
                     current = selected.store.run(connection, args.run_id)
                     envelope["context"] = {"workspace": current["workspace"], "domain": current["contract"]["domain_id"]}
@@ -189,6 +204,10 @@ def main(argv: list[str] | None = None) -> int:
                 if request.get("task_id", args.task_id) != args.task_id:
                     raise HarnessError("TASK_ARGUMENT", "CLI and request task selectors differ")
                 request["task_id"] = args.task_id
+            if args.project_workspace:
+                if request.get("project_workspace", args.project_workspace) != args.project_workspace:
+                    raise HarnessError("TASK_ARGUMENT", "CLI and request project routes differ")
+                request["project_workspace"] = args.project_workspace
             result = invoke(api, request)
         elif args.command == "context":
             result = api.context(args.run_id, after=args.after, page=args.page, limit=args.limit)

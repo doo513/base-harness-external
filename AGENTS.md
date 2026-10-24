@@ -9,8 +9,10 @@
 - Policy provenance is initial configuration, not authenticated human identity. Logical task roles/states and assessments remain caller claims.
 - Model notes and test expectations are untrusted inputs. Do not present them as independent evidence.
 - All results are local-advisory, unsigned, and ready=false. Do not add Ready claims without a protected verifier and independent consumer.
-- Keep Run state outside and independent of the caller's workspace/session.
-- Do not edit or publish workspace files; verify pinned snapshots.
+- Keep Run state independent of the Host session. New project-local task stores live only in the reserved `.harness/` subtree; historical external stores remain explicit and are never silently migrated or selected.
+- Harness may manage its reserved project control files, never product source files. Exclude control state from submitted inputs and discovery; verify pinned snapshots.
+- Shared storage receives selected reusable Markdown advice and operational connection/lock data, not copies of project task databases or full transcripts.
+- Project DBs are authoritative for live Run state and verification detail. Shared `run-ledger/<run_id>.md` files are derived closed-Run documents only; never consume them to grant execution, satisfy gates or replace DB state. Publication failure must not undo closeout.
 - Test commands may execute only through the existing strict Sandbox adapter. Never add an unsandboxed fallback.
 - Preserve request idempotency, deadlines, budgets, ownership and late-result rejection.
 - Revalidate active checks through the Domain port when interpretation scope changes. Retired checks retain history; reactivation must advance their revision.

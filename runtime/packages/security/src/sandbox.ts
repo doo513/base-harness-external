@@ -298,7 +298,11 @@ readonly_tree() {
   mount --rbind "$source" "$target"
   mount --make-rslave "$target"
   findmnt -Rrn -o TARGET "$target" | sort -r | while IFS= read -r mounted; do
-    mount -o remount,ro,bind "$mounted"
+    # findmnt --raw emits unsafe bytes as \xHH, including spaces and UTF-8.
+    # Decode exactly once, never with eval. The sentinel preserves trailing LF.
+    decoded=$(/usr/bin/printf '%b.' "$mounted")
+    decoded=${"${decoded%.}"}
+    mount -o remount,ro,bind -- "$decoded"
   done
 }
 for source in /bin /usr /lib /lib64; do
@@ -654,7 +658,7 @@ async function inputManifest(base: string, binding?: ExecutionInputBinding) {
 
 async function wslRun(request: SandboxRequest, policy: SandboxPolicy, root: string, inputBytes: number) {
   const prefix = ["wsl.exe", "-d", policy.wslDistro, "--exec"]
-  const probe = await checked([...prefix, "/bin/sh", "-lc", "command -v unshare prlimit timeout setsid setpriv findmnt mount chroot ip >/dev/null && uname -r"])
+  const probe = await checked([...prefix, "/bin/sh", "-lc", "command -v unshare prlimit timeout setsid setpriv findmnt mount chroot ip /usr/bin/printf >/dev/null && uname -r"])
   const home = await checked([...prefix, "/bin/sh", "-lc", 'printf %s "$HOME"'])
   const source = await checked([...prefix, "/usr/bin/wslpath", "-a", root])
   const id = safeId()

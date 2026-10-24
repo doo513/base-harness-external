@@ -12,6 +12,7 @@ from .artifact_io import locked, read_json, write_json
 from .errors import HarnessError, fields, integer, require
 from .snapshots import no_links
 from .store import identifier
+from . import storage_layout
 
 
 def task_id_for(request_id, workspace, domain):
@@ -23,9 +24,16 @@ def task_id_for(request_id, workspace, domain):
 
 class TaskStores:
     MAX_TASKS = 512
-    def __init__(self, api):
+    def __init__(self, api, project_workspace=None):
         self.api = api
-        self.root = api.store.root
+        self.project = storage_layout.project_path(project_workspace) if project_workspace is not None else None
+        self.root = storage_layout.control_path(self.project) if self.project is not None else api.store.root
+        if self.project is not None:
+            require(not api.store.root.is_relative_to(self.project) and not self.project.is_relative_to(api.store.root),
+                    "STATE_WORKSPACE_OVERLAP", "Shared knowledge and runtime coordination must remain outside the project")
+
+    def routing(self):
+        return {"project_workspace": str(self.project)} if self.project is not None else {}
 
     def directory(self, task_id):
         target = self.root / "tasks" / identifier(task_id, "task")
@@ -38,11 +46,13 @@ class TaskStores:
         body = read_json(target, 16384)
         fields(body, {"schema_version", "task_id", "workspace", "domain", "start_request_id", "created_at", "database_created", "manifest_hash"},
                {"schema_version", "task_id", "workspace", "domain", "start_request_id", "created_at", "database_created", "manifest_hash"})
-        require(body["schema_version"] == "task-store-v1" and body["task_id"] == task_id
+        require(body["schema_version"] == ("task-store-v2" if self.project is not None else "task-store-v1") and body["task_id"] == task_id
                 and body["manifest_hash"] == canonical_hash({k: v for k, v in body.items() if k != "manifest_hash"})
                 and isinstance(body["workspace"], str) and Path(body["workspace"]).is_absolute()
                 and isinstance(body["domain"], str) and body["database_created"] is True,
                 "TASK_STORE_CORRUPT", "Task connection metadata is invalid")
+        require(self.project is None or body["workspace"] == str(self.project),
+                "TASK_STORE_IDENTITY", "Project route and task manifest differ")
         return body
 
     def selected(self, task_id):
@@ -60,7 +70,9 @@ class TaskStores:
                     "TASK_STORE_CORRUPT", "Task database is incomplete; do not initialize or repair a replacement")
         except sqlite3.Error as error:
             raise HarnessError("TASK_STORE_CORRUPT", "Task database is unreadable; preserve it for recovery") from error
-        selected = Harness(directory, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root)
+        selected = Harness(directory, domains=self.api.domains, adapters=self.api.adapters, policy_root=self.api.policies.root,
+                           project_workspace=str(self.project) if self.project is not None else None,
+                           coordination_root=self.api.store.root if self.project is not None else None)
         expected = (task_id, manifest["workspace"], manifest["domain"], manifest["start_request_id"], manifest["manifest_hash"])
         with selected.store.transaction(write=False) as connection:
             row = connection.execute("SELECT task_id,workspace,domain,start_request_id,manifest_hash FROM task_identity WHERE singleton=1").fetchone()
@@ -87,11 +99,14 @@ class TaskStores:
 
     def invoke(self, request, invoke_core, *, allowed_workspace=None):
         task_id = identifier(request["task_id"], "task")
-        inner = {k: v for k, v in request.items() if k != "task_id"}
+        inner = {k: v for k, v in request.items() if k not in {"task_id", "project_workspace"}}
+        expected_workspace = request["arguments"].get("workspace") if request["operation"] == "start" else request.get("context", {}).get("workspace")
+        require(self.project is None or request["operation"] == "list-runs" or expected_workspace == str(self.project),
+                "RUN_CONTEXT_MISMATCH", "Project store and request workspace differ")
         if request["operation"] != "start":
             manifest = self.manifest(task_id)
             self._allowed(manifest, allowed_workspace)
-            return {**invoke_core(self.selected(task_id), inner), "task_id": task_id}
+            return {**invoke_core(self.selected(task_id), inner), "task_id": task_id, **self.routing()}
         arguments = request["arguments"]
         workspace = arguments.get("workspace")
         domain = arguments.get("domain", arguments.get("domain_id"))
@@ -99,7 +114,7 @@ class TaskStores:
         source = Path(workspace).absolute()
         no_links(source)
         require(source.is_dir(), "WORKSPACE_REQUIRED", "Task workspace must exist")
-        require(not self.root.is_relative_to(source) and not source.is_relative_to(self.root),
+        require(self.project is not None or not self.root.is_relative_to(source) and not source.is_relative_to(self.root),
                 "STATE_WORKSPACE_OVERLAP", "Task storage and workspace must remain disjoint")
         self._allowed({"workspace": str(source)}, allowed_workspace)
         target = self.directory(task_id)
@@ -107,6 +122,8 @@ class TaskStores:
         # retention limit and publishing a new directory. Release it before the
         # potentially slow Core start; that part remains serialized per task.
         with locked(self.root, "task-catalog"):
+            if self.project is not None:
+                storage_layout.prepare_control(self.project)
             with locked(self.root, task_id):
                 manifest_path = target / "task.json"
                 if manifest_path.exists():
@@ -122,7 +139,7 @@ class TaskStores:
                     folder = self.root / "tasks"
                     existing = sum(1 for path in folder.iterdir() if path.name.startswith("task_")) if folder.exists() else 0
                     require(existing < self.MAX_TASKS, "TASK_LIMIT", "Task store limit reached; archive tasks before creating another")
-                    manifest = {"schema_version": "task-store-v1", "task_id": task_id, "workspace": str(source),
+                    manifest = {"schema_version": "task-store-v2" if self.project is not None else "task-store-v1", "task_id": task_id, "workspace": str(source),
                                 "domain": domain, "start_request_id": request["request_id"], "created_at": time.time(),
                                 "database_created": True}
                     # Publish connection metadata and an initialized DB together.
@@ -148,13 +165,29 @@ class TaskStores:
         with locked(self.root, task_id):
             selected = self.selected(task_id)
             result = invoke_core(selected, inner)
-            return {**result, "task_id": task_id}
+            return {**result, "task_id": task_id, **self.routing()}
 
     def list(self, *, workspace=None, domain=None, offset=0, limit=20, allowed_workspace=None):
         offset, limit = integer(offset, 0, 2**31 - 1, "offset"), integer(limit, 1, 100, "limit")
         require(workspace is None or isinstance(workspace, str) and Path(workspace).is_absolute(),
                 "TASK_FILTER", "Workspace filter must be absolute")
         require(domain is None or isinstance(domain, str), "TASK_FILTER", "Domain filter must be a string")
+        if self.project is None and workspace is not None:
+            self._allowed({"workspace": workspace}, allowed_workspace)
+            project = TaskStores(self.api, workspace)
+            local = project._inventory(workspace=workspace, domain=domain, allowed_workspace=allowed_workspace)
+            old = self._inventory(workspace=workspace, domain=domain, allowed_workspace=allowed_workspace)
+            items, corrupt = local[0] + old[0], local[1] + old[1]
+        else:
+            items, corrupt = self._inventory(workspace=workspace, domain=domain, allowed_workspace=allowed_workspace)
+        page = items[offset:offset + limit]
+        return {"items": page, "total": len(items), "next_offset": offset + len(page) if offset + len(page) < len(items) else None,
+                "corrupt": corrupt[:20], "corrupt_count": len(corrupt),
+                "project_discovery_requires_workspace": workspace is None,
+                "corrupt_scope": "hidden_by_workspace_filter" if allowed_workspace is not None else "all_visible_tasks",
+                "meaning": "connection_metadata_not_run_state"}
+
+    def _inventory(self, *, workspace=None, domain=None, allowed_workspace=None):
         folder = self.root / "tasks"
         no_links(folder)
         items, corrupt = [], []
@@ -173,9 +206,5 @@ class TaskStores:
                 continue
             if domain is not None and body["domain"] != domain:
                 continue
-            items.append({key: copy.deepcopy(body[key]) for key in ("task_id", "workspace", "domain", "created_at")})
-        page = items[offset:offset + limit]
-        return {"items": page, "total": len(items), "next_offset": offset + len(page) if offset + len(page) < len(items) else None,
-                "corrupt": corrupt[:20], "corrupt_count": len(corrupt),
-                "corrupt_scope": "hidden_by_workspace_filter" if allowed_workspace is not None else "all_visible_tasks",
-                "meaning": "connection_metadata_not_run_state"}
+            items.append({**{key: copy.deepcopy(body[key]) for key in ("task_id", "workspace", "domain", "created_at")}, **self.routing()})
+        return items, corrupt

@@ -20,6 +20,9 @@ spec.loader.exec_module(helper)
 
 
 class TaskCallerTests(unittest.TestCase):
+    storage = "external"
+    binding_version = "harness-caller-binding-v2"
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -27,7 +30,7 @@ class TaskCallerTests(unittest.TestCase):
         self.work = self.root / "작업 space"
         self.work.mkdir()
         (self.work / "app.py").write_text("print('ready')\n", encoding="utf-8")
-        self.config = helper.configure(self.root / "client.json", str(ROOT), str(self.root / "state"), ephemeral=True)["config"]
+        self.config = helper.configure(self.root / "client.json", str(ROOT), str(self.root / "state"), ephemeral=True, task_storage=self.storage)["config"]
 
     def args(self):
         return {"domain": "develop", "goal": "Keep the program", "workspace": str(self.work),
@@ -44,7 +47,7 @@ class TaskCallerTests(unittest.TestCase):
     def test_cli_new_task_and_replay_survive_client_replacement(self):
         client = helper.Client(self.config)
         first, binding, path = self.start(client)
-        self.assertEqual(binding["schema_version"], "harness-caller-binding-v2")
+        self.assertEqual(binding["schema_version"], self.binding_version)
         self.assertEqual(binding["task_id"], first["task_id"])
         self.assertFalse((self.root / "state/runs.sqlite3").exists())
         fresh = helper.Client(self.config)
@@ -55,7 +58,7 @@ class TaskCallerTests(unittest.TestCase):
         self.assertNotEqual(first["task_id"], second["task_id"])
         metadata = fresh.call_operation("list-tasks", {"workspace": str(self.work)})
         self.assertEqual(metadata["total"], 2)
-        selected = fresh.find(str(self.work), "develop", task_id=first["task_id"])
+        selected = fresh.find(str(self.work), "develop", task_id=first["task_id"], project_workspace=first.get("project_workspace"))
         self.assertEqual(len(selected["matches"]), 1)
 
     def test_start_response_loss_preserves_exact_task_identity(self):
@@ -73,7 +76,7 @@ class TaskCallerTests(unittest.TestCase):
         envelope = helper.read_json(str(target))
         response = fresh.call(envelope)
         fresh.bind_started(response, binding_path)
-        page = fresh.call_operation("list-runs", {}, task_id=envelope["task_id"])
+        page = fresh.call_operation("list-runs", {}, task_id=envelope["task_id"], project_workspace=envelope.get("project_workspace"))
         self.assertEqual(page["total"], 1)
 
     def test_finish_knowledge_and_selected_reads_work_over_actual_cli(self):
@@ -127,7 +130,12 @@ class TaskCallerTests(unittest.TestCase):
         denied = client.call_operation("knowledge-read", {"entry_id": external["knowledge_publication"]["entry_id"]})
         self.assertFalse(denied["ok"])
         self.assertEqual(denied["error"]["code"], "WORKSPACE_NOT_ALLOWED")
-        self.assertEqual(client.call_operation("list-tasks", {})["total"], 1)
+        self.assertEqual(client.call_operation("list-tasks", {"workspace":str(self.work)})["total"], 1)
+        if self.storage=="project":
+            self.assertEqual(client.call_operation("report-list",{})["total"],1)
+            denied_report=client.call_operation("report-read",{"entry_id":other["run_id"]})
+            self.assertFalse(denied_report["ok"])
+            self.assertEqual(denied_report["error"]["code"],"WORKSPACE_NOT_ALLOWED")
 
     @unittest.skipUnless(os.environ.get("BASE_HARNESS_EXTERNAL_LIVE") == "1" and os.name == "posix", "real strict Sandbox over socket")
     def test_live_socket_verification_and_publication_bind_actual_measurement(self):
@@ -141,9 +149,9 @@ class TaskCallerTests(unittest.TestCase):
         self.assertTrue(verified["ok"], verified)
         while verified.get("wait_status") == "pending":
             verified = client.wait(binding, verified["job"]["job_id"], wait_seconds=30)
-        self.assertEqual(verified["job"]["result"]["status"], "passed")
         refs = client.call_operation("records", {"kind": "measurements", "job_id": verified["job"]["job_id"]},
                                       binding=binding)["items"]
+        self.assertEqual(verified["job"]["result"]["status"], "passed", [item.get("report", {}).get("sandbox") for item in refs])
         data = {"title": "Python process observed", "when": "Running this submitted program",
                 "lesson": "The configured command completed.", "limitations": ["Command exit does not prove complete behavior."],
                 "cited_observation_ids": [item["observation_id"] for item in refs]}
@@ -154,6 +162,35 @@ class TaskCallerTests(unittest.TestCase):
         note = client.call_operation("knowledge-read", {"entry_id": result["knowledge_publication"]["entry_id"]})
         self.assertIn(refs[0]["observation_id"], note["markdown"])
         self.assertFalse(note["gate_eligible"])
+
+
+class ProjectTaskCallerTests(TaskCallerTests):
+    storage = "project"
+    binding_version = "harness-caller-binding-v3"
+
+    def test_actual_cli_generates_and_discovers_a_run_document(self):
+        client=helper.Client(self.config)
+        started,binding,path=self.start(client)
+        result=client.call_operation("finish",{"outcome":"partial"},binding=binding,binding_path=path,action_id="close")
+        self.assertTrue(result["ok"],result)
+        self.assertEqual(result["run_report"]["status"],"published")
+        fresh=helper.Client(self.config)
+        listed=fresh.call_operation("report-list",{"workspace":str(self.work)})
+        self.assertEqual(listed["total"],1)
+        document=fresh.call_operation("report-read",{"entry_id":started["run_id"]})
+        self.assertEqual(document["entry"]["display_status"],"closed_unverified")
+        self.assertFalse(document["gate_eligible"])
+
+    def test_start_saves_request_and_binding_in_new_project_control_directory(self):
+        client=helper.Client(self.config)
+        binding=self.work/".harness/client/binding.json"
+        self.assertFalse(binding.parent.exists())
+        started=client.call_operation("start",self.args(),action_id="local-binding",binding_output=binding)
+        self.assertTrue(started["ok"],started)
+        saved=helper.read_json(str(binding))
+        self.assertEqual(saved["project_workspace"],str(self.work))
+        self.assertTrue(Path(started["caller_request"]["request_file"]).is_relative_to(binding.parent))
+        self.assertEqual(client.validate_binding(saved)["run"]["run_id"],started["run_id"])
 
 
 if __name__ == "__main__":

@@ -6,10 +6,14 @@ OPTIONS = {
     "knowledge-publish": {"run_id": "str", "data": "json"},
     "knowledge-find": {"query": "str", "domain": "str", "offset": "int", "limit": "int"},
     "knowledge-read": {"entry_id": "str"},
+    "report-publish": {"run_id": "str"},
+    "report-list": {"workspace": "str", "domain": "str", "offset": "int", "limit": "int"},
+    "report-read": {"entry_id": "str"},
 }
 REQUIRED = {"list-tasks": set(), "knowledge-find": set(),
-            "knowledge-publish": {"run_id", "data"}, "knowledge-read": {"entry_id"}}
-READS = {"list-tasks", "knowledge-find", "knowledge-read"}
+            "knowledge-publish": {"run_id", "data"}, "knowledge-read": {"entry_id"},
+            "report-publish": {"run_id"}, "report-list": set(), "report-read": {"entry_id"}}
+READS = {"list-tasks", "knowledge-find", "knowledge-read", "report-list", "report-read"}
 
 
 def knowledge_schema():

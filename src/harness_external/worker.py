@@ -38,14 +38,16 @@ def trusted_bun():
     return str(standard.resolve()) if standard.is_file() else shutil.which("bun", path="/usr/local/bin:/usr/bin:/bin")
 
 
-def _worker_slot(state_dir: Path):
+def _worker_slot(state_dir: Path, coordination_root=None):
     """Reserve one process-wide verification slot before spawning a worker."""
     if os.name != "posix":
         return None
     import fcntl
     state_dir = Path(state_dir).resolve()
     state_root = state_dir.parent.parent if state_dir.parent.name == "tasks" and state_dir.name.startswith("task_") else state_dir
-    root = state_root / ".worker-slots"
+    root = (Path(coordination_root).resolve() if coordination_root is not None else state_root) / ".worker-slots"
+    from .snapshots import no_links
+    no_links(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     for index in range(MAX_CONCURRENT_WORKERS):
         descriptor = os.open(root / (str(index) + ".lock"), os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -69,11 +71,11 @@ def clean_environment() -> dict:
     return result
 
 
-def spawn_worker(state_dir: Path, job_id: str) -> int:
+def spawn_worker(state_dir: Path, job_id: str, *, coordination_root=None) -> int:
     source = str(Path(__file__).resolve().parents[1])
     code = f"import sys; sys.path.insert(0, {source!r}); from harness_external.worker import main; main()"
     options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    slot = _worker_slot(Path(state_dir))
+    slot = _worker_slot(Path(state_dir), coordination_root)
     try:
         child = subprocess.Popen([sys.executable, "-I", "-c", code, str(state_dir), job_id,
                                   str(slot) if slot is not None else ""], cwd=source,

@@ -30,6 +30,12 @@ exposes Domain/adapter selectors. Start using `call --operation start` with
 `--action-id`, `--binding-output` and `--format compact`. The helper saves the
 exact request and binds the returned task/Run without another resume call.
 Keep that binding; never silently choose the newest Run or another state store.
+New configurations keep task DB/snapshots in the project's reserved `.harness/`
+directory, never in submitted source inputs. Only selected reusable notes go to
+the shared knowledge library; closed Runs also generate a bounded MD ledger outside
+the project. The DB is authoritative, not that document. Old bindings retain their external stores; do not
+copy or move them as a shortcut. See [task storage](references/task-storage.md)
+when discovering a task or explicitly changing its runtime.
 
 ## Develop autonomously
 
@@ -94,6 +100,10 @@ snapshot, not later edits. Decide whether to fix, continue, finish partially or
 finish completed; an assessment is optional and remains a model claim.
 Use `call --operation finish` with an explicit outcome. Budget/runtime/policy
 limits cannot be bypassed by silently creating a replacement Run.
+Project-local closeout also returns `run_report`: a derived external MD ledger.
+If publication fails, recover with `report-publish`, not another verification.
+Use `report-list`/`report-read` for historical summaries; the project DB remains
+authoritative. See [storage and ledgers](references/task-storage.md).
 
 A selected reusable lesson may be published with optional `--knowledge` on
 finish. It creates advisory MD outside the task DB, not a transcript or a new

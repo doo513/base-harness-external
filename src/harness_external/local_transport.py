@@ -152,11 +152,15 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
     def authorize(self, envelope):
         from .application_schema import OPTIONS as APP_OPTIONS
         from .task_storage import TaskStores
-        fields(envelope, {"operation", "arguments", "request_id", "context", "task_id", "knowledge", "input_bindings"}, {"operation", "arguments"})
+        fields(envelope, {"operation", "arguments", "request_id", "context", "task_id", "project_workspace", "knowledge", "input_bindings"}, {"operation", "arguments"})
+        if "project_workspace" in envelope:
+            value = envelope["project_workspace"]
+            require(isinstance(value, str) and Path(value).is_absolute() and self.allowed(Path(value)),
+                    "WORKSPACE_NOT_ALLOWED", "Project store is outside the configured workspace roots")
         operation, arguments = envelope["operation"], envelope["arguments"]
         require(isinstance(operation, str) and operation in {*METHODS, *APP_OPTIONS, "doctor", "checkpoint", "wait"}, "OPERATION_UNSUPPORTED", "Unknown operation")
         require(isinstance(arguments, dict), "INVALID_PARAMETERS", "Arguments must be an object")
-        if operation in {"doctor", "list-runs", "describe", "list-tasks", "knowledge-find", "knowledge-read"}:
+        if operation in {"doctor", "list-runs", "describe", "list-tasks", "knowledge-find", "knowledge-read", "report-list", "report-read"}:
             # Global knowledge reads are filtered inside the application before
             # text is returned; scoped reads also validate their task manifest.
             return
@@ -167,7 +171,7 @@ class HarnessServer(socketserver.ThreadingMixIn, getattr(socketserver, "UnixStre
             no_links(target)
             target = target.resolve()
         else:
-            selected = TaskStores(self.api).selected(envelope["task_id"]) if "task_id" in envelope else self.api
+            selected = TaskStores(self.api, envelope.get("project_workspace")).selected(envelope["task_id"]) if "task_id" in envelope else self.api
             with selected.store.transaction(write=False) as connection:
                 target = Path(selected.store.current(connection, arguments.get("run_id"))["workspace"])
         require(self.allowed(target), "WORKSPACE_NOT_ALLOWED", "Workspace is outside this server's configured roots")

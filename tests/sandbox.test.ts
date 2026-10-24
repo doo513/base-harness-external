@@ -54,6 +54,28 @@ test("workspace validation rejects links that resolve outside the declared root"
 })
 
 test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")(
+  "namespace bootstrap supports project-local state paths with spaces and Unicode",
+  async () => {
+    const base = await mkdtemp(join(tmpdir(), "base-harness-project-state-"))
+    roots.push(base)
+    const workspace = join(base, "input")
+    await mkdir(workspace)
+    await writeFile(join(workspace, "value.txt"), "ready", "utf8")
+    const before = process.env.XDG_STATE_HOME
+    process.env.XDG_STATE_HOME = join(base, "작업 space", ".harness", "sandbox-state")
+    try {
+      const result = await new SandboxManager().run({ workspace, cwd: workspace, command: "cat value.txt",
+        config: { strictBackend: "namespace", timeoutMs: 10_000, maxInputBytes: 1024 * 1024 } })
+      expect(result.exitCode, result.stderr).toBe(0)
+      expect(result.stdout).toBe("ready")
+    } finally {
+      if (before === undefined) delete process.env.XDG_STATE_HOME
+      else process.env.XDG_STATE_HOME = before
+    }
+  },
+)
+
+test.skipIf(process.env.BASE_HARNESS_EXTERNAL_LIVE !== "1")(
   "namespace runner treats metacharacters in cwd as a directory name",
   async () => {
     const workspace = await mkdtemp(join(tmpdir(), "base-harness-sandbox-cwd-"))
